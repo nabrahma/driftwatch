@@ -1,0 +1,18 @@
+# Build output
+/bin/
+/dist/
+
+# Test and coverage output
+cover.out
+coverage.txt
+*.test
+bench.txt
+/test/e2e/_artifacts/
+*.pb.gz
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
