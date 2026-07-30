@@ -1,0 +1,106 @@
+# golangci-lint configuration for driftwatch.
+#
+# The enabled set is fixed by PRD §20 Phase 0. Adding or removing a linter
+# requires an ADR in docs/DECISIONS.md.
+#
+# Pinned tool version: v1.64.8 (see hack/install-tools.sh and CI).
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  disable-all: true
+  enable:
+    - bodyclose
+    - contextcheck
+    - errcheck
+    - errorlint
+    - gocritic
+    - gosimple
+    - govet
+    - ineffassign
+    - misspell
+    - nilerr
+    - prealloc
+    - revive
+    - staticcheck
+    - unconvert
+    - unused
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+
+  govet:
+    enable-all: true
+    disable:
+      # Struct layout is tuned deliberately in pkg/oracle where it matters;
+      # enforcing it repository-wide fights readability for no measured gain.
+      - fieldalignment
+
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - performance
+      - style
+    disabled-checks:
+      # Early-return rewrites and if-else-to-switch conversions are style
+      # preferences that conflict with the explicit, boring code §1.1.10 asks for.
+      - ifElseChain
+      - singleCaseSwitch
+
+  misspell:
+    locale: US
+
+  prealloc:
+    simple: true
+    range-loops: true
+    for-loops: true
+
+  revive:
+    # §1.2 requires a doc comment on every exported symbol, beginning with the
+    # symbol name. The exported rule is what enforces that.
+    enable-all-rules: false
+    rules:
+      - name: blank-imports
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: dot-imports
+      - name: empty-block
+      - name: error-naming
+      - name: error-return
+      - name: error-strings
+      - name: errorf
+      - name: exported
+      - name: increment-decrement
+      - name: indent-error-flow
+      - name: package-comments
+      - name: range
+      - name: receiver-naming
+      - name: redefines-builtin-id
+      - name: superfluous-else
+      - name: time-naming
+      - name: unexported-return
+      - name: unreachable-code
+      - name: unused-parameter
+      - name: var-declaration
+      - name: var-naming
+
+  staticcheck:
+    checks: ["all"]
+
+issues:
+  # Report everything; a linter finding that is not worth fixing is a linter
+  # that should not be enabled.
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude-use-default: false
+
+  exclude-rules:
+    # Test helpers legitimately shadow and re-declare for readability, and
+    # table-driven tests do not benefit from preallocation warnings.
+    - path: (^|/)(test/|.*_test\.go)
+      linters:
+        - prealloc
