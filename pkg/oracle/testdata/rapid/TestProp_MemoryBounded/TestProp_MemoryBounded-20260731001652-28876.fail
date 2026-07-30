@@ -1,0 +1,47 @@
+# 2026/07/31 00:16:52.692094 [TestProp_MemoryBounded] [rapid] draw shards: 1
+# 2026/07/31 00:16:52.692094 [TestProp_MemoryBounded] [rapid] draw maxTrackedKeys: 2
+# 2026/07/31 00:16:52.692094 [TestProp_MemoryBounded] [rapid] draw ringSize: 3
+# 2026/07/31 00:16:52.692094 [TestProp_MemoryBounded] [rapid] draw applies: 174
+# 2026/07/31 00:16:52.692094 [TestProp_MemoryBounded] [rapid] draw key: "a"
+# 2026/07/31 00:16:52.692094 [TestProp_MemoryBounded] [rapid] draw isDelete: true
+# 2026/07/31 00:16:52.692094 [TestProp_MemoryBounded] [rapid] draw key: ""
+# 2026/07/31 00:16:52.692094 [TestProp_MemoryBounded] [rapid] draw isDelete: false
+# 2026/07/31 00:16:52.692094 [TestProp_MemoryBounded] [rapid] draw members: 0
+# 2026/07/31 00:16:52.692094 [TestProp_MemoryBounded] [rapid] draw key: ""
+# 2026/07/31 00:16:52.692094 [TestProp_MemoryBounded] [rapid] draw isDelete: true
+# 2026/07/31 00:16:52.692094 [TestProp_MemoryBounded] [rapid] draw key: "e"
+# 2026/07/31 00:16:52.692094 [TestProp_MemoryBounded] [rapid] draw isDelete: true
+# 2026/07/31 00:16:52.692094 [TestProp_MemoryBounded] [rapid] draw key: "a"
+# 2026/07/31 00:16:52.692094 [TestProp_MemoryBounded] [rapid] draw isDelete: true
+# 
+v0.4.8#3332392211756105722
+0x0
+0x4
+0x0
+0xf6b0ba28ce9ee
+0x29136e36a7c7
+0x1
+0x17084f2082547d
+0x1d920d3e99a299
+0x2
+0xffd20237472ac
+0x12a8727dda44f9
+0xae
+0x0
+0x1
+0x1
+0x4
+0x0
+0x0
+0x1b19ec9728a673
+0x3
+0x0
+0x1
+0x0
+0x1
+0x1c2eb80c434236
+0x5
+0x1
+0x0
+0x1
+0x1

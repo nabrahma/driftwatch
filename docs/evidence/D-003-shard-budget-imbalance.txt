@@ -1,0 +1,24 @@
+Evidence for docs/DISCOVERIES.md D-003.
+
+Claim: enforcing a global key budget as per-shard budgets loses capacity
+to hash imbalance. The overflow column is the number of keys that hash to
+an over-subscribed shard and are evicted while other shards sit under
+their share, i.e. capacity paid for and not used.
+
+Keys are "block-<n>" for n in [0, keys), hashed with xxhash.Sum64String,
+which is exactly what pkg/oracle does.
+
+$ go test -run TestShardFill -v ./pkg/oracle/
+shards= 16 keys=  100000 fairShare=  6250 minLoad=  6120 maxLoad=  6383 overflow=  392 (0.39%)
+shards= 16 keys= 1000000 fairShare= 62500 minLoad= 62163 maxLoad= 62940 overflow= 1103 (0.11%)
+shards= 64 keys=  100000 fairShare=  1562 minLoad=  1491 maxLoad=  1654 overflow=  922 (0.92%)
+shards= 64 keys= 1000000 fairShare= 15625 minLoad= 15306 maxLoad= 15880 overflow= 3115 (0.31%)
+shards=256 keys=  100000 fairShare=   390 minLoad=   342 maxLoad=   456 overflow= 1911 (1.91%)
+shards=256 keys= 1000000 fairShare=  3906 minLoad=  3742 maxLoad=  4078 overflow= 6701 (0.67%)
+--- PASS: TestShardFill (0.18s)
+PASS
+
+Confirmed end to end: seeding an oracle configured with
+MaxTrackedKeys=1,000,000 and the default 64 shards with exactly 1,000,000
+distinct keys leaves 996,885 tracked - 3,115 evicted, matching the
+predicted overflow for that configuration exactly.

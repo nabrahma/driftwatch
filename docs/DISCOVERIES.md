@@ -30,6 +30,53 @@ written here in anticipation.
 
 ---
 
+## D-003 — Enforcing a global key budget per shard silently loses ~0.3% of the capacity you configured
+
+**Found:** Phase 1, while benchmarking the oracle at a million keys.
+
+**What happened:** The oracle bounds memory with `MaxTrackedKeys`, and enforces
+it as a per-shard budget so that eviction stays shard-local and no code path
+ever needs two shard locks. Seeding an oracle configured for exactly 1,000,000
+keys with exactly 1,000,000 distinct keys left **996,885** tracked. 3,115 keys
+had been evicted while the oracle was, globally, not full.
+
+The cause is balls-into-bins, not a bug in the eviction path. Hashing a million
+keys across 64 shards gives a fair share of 15,625, but the observed loads range
+from 15,306 to 15,880. Every key that lands on an over-subscribed shard is
+evicted while under-subscribed shards sit idle. The effect is worse with more
+shards and fewer keys, because the relative deviation grows as the bins get
+smaller — 0.31% at 64 shards and a million keys, 1.91% at 256 shards and a
+hundred thousand.
+
+**Why it matters:** Two reasons, and the second is the one that would have hurt.
+
+The obvious one is that an operator who sizes `MaxTrackedKeys` to their exact
+keyspace silently gets less coverage than they asked for. `coverage_ratio` would
+show it, but only if someone looked.
+
+The subtle one is what it does to a *test*. The natural benchmark asserts a
+million keys go in and a million keys are tracked, and that assertion fails —
+which reads as an eviction bug. Chasing a correctness bug that is really a
+statistical property of sharding is the expensive kind of wrong turn.
+
+**Fix:** No change to the eviction design; the alternative — a global atomic
+counter with cross-shard eviction — needs two shard locks at the exact moment
+the applier is saturated, and trades a bounded, measured 0.3% for a lock
+ordering that has to be got right forever.
+
+Instead the effect is documented where it is configured, on
+`Config.MaxTrackedKeys`, with the recommendation to allow a few percent of
+headroom. `TestOracle_PerShardBudgetsCostSomeCapacityToHashImbalance` pins the
+loss so that a change to the hash or the sharding shows up as a number rather
+than as a surprise.
+
+**Evidence:** `docs/evidence/D-003-shard-budget-imbalance.txt`
+
+**Regression test:**
+`pkg/oracle: TestOracle_PerShardBudgetsCostSomeCapacityToHashImbalance`
+
+---
+
 ## D-002 — A JSON sequence number above 2^53 is silently corrupted by any decoder that goes through float64
 
 **Found:** Phase 1, while implementing the json codec.
