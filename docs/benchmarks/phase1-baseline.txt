@@ -1,0 +1,101 @@
+driftwatch Phase 1 benchmark baseline
+=====================================
+
+Machine: AMD Ryzen 7 6800HS, windows/amd64, go1.26.4
+Captured: 2026-07-31
+
+Each package is benchmarked in its own process. The 1M-key oracle
+benchmarks are sensitive to leftover garbage from seeding, so they call
+runtime.GC() before resetting the timer; without it the first iterations
+run two to three times slower than the steady state and the reported
+average depends on how many iterations the framework chose.
+
+--- pkg/codec ---
+goos: windows
+goarch: amd64
+pkg: github.com/nabrahma/driftwatch/pkg/codec
+cpu: AMD Ryzen 7 6800HS with Radeon Graphics         
+BenchmarkCodecJSONDecode-16            	 1597074	       714.8 ns/op	 177.67 MB/s	      24 B/op	       2 allocs/op
+BenchmarkCodecJSONDecodeParallel-16    	12968768	        92.07 ns/op	      24 B/op	       2 allocs/op
+
+--- pkg/seqtrack ---
+goos: windows
+goarch: amd64
+pkg: github.com/nabrahma/driftwatch/pkg/seqtrack
+cpu: AMD Ryzen 7 6800HS with Radeon Graphics         
+BenchmarkSeqTrackObserve-16                  	42127730	        28.25 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSeqTrackObserveManyPublishers-16    	33941642	        36.90 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSeqTrackObserveWithGaps-16          	  973014	      1321 ns/op	      64 B/op	       1 allocs/op
+BenchmarkGapSetAdd-16                        	 1000000	      1240 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGapSetContains-16                   	33110480	        34.19 ns/op	       0 B/op	       0 allocs/op
+
+--- pkg/projection ---
+goos: windows
+goarch: amd64
+pkg: github.com/nabrahma/driftwatch/pkg/projection
+cpu: AMD Ryzen 7 6800HS with Radeon Graphics         
+BenchmarkProjectionApply-16             	 3418347	       345.6 ns/op	     256 B/op	       2 allocs/op
+BenchmarkProjectionApplyTemplated-16    	 1000000	      1161 ns/op	     521 B/op	       8 allocs/op
+BenchmarkProjectionApplyScalar-16       	30727944	        41.18 ns/op	      16 B/op	       1 allocs/op
+BenchmarkProjectionApplyCounter-16      	50833671	        23.12 ns/op	       0 B/op	       0 allocs/op
+BenchmarkProjectionApplyLargeSet/members=10-16         	 1458045	       821.1 ns/op	     504 B/op	       4 allocs/op
+BenchmarkProjectionApplyLargeSet/members=100-16        	  240060	      4991 ns/op	    3544 B/op	       4 allocs/op
+BenchmarkProjectionApplyLargeSet/members=1000-16       	   19130	     57148 ns/op	   54656 B/op	       6 allocs/op
+
+--- pkg/oracle ---
+goos: windows
+goarch: amd64
+pkg: github.com/nabrahma/driftwatch/pkg/oracle
+cpu: AMD Ryzen 7 6800HS with Radeon Graphics         
+BenchmarkOracleApply-16                   	 6498517	       186.4 ns/op	       1 B/op	       0 allocs/op
+BenchmarkOracleGet-16                     	 4672150	       268.5 ns/op	     256 B/op	       2 allocs/op
+BenchmarkOracleVersion-16                 	34322782	        35.45 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSettledKeys1M-16                 	      55	  21000276 ns/op	 3060343 B/op	     172 allocs/op
+BenchmarkMarkSuspectAll1M-16              	 1860496	       659.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkOracleMemory1M-16                	       1	1594017900 ns/op	       640.6 MiB/1Mkeys	790598880 B/op	 5018833 allocs/op
+BenchmarkOracleApplyLargeMemberSets/members=1-16         	 5445969	       238.5 ns/op	      17 B/op	       1 allocs/op
+BenchmarkOracleApplyLargeMemberSets/members=10-16        	 4911974	       363.0 ns/op	      17 B/op	       1 allocs/op
+BenchmarkOracleApplyLargeMemberSets/members=100-16       	 4150598	       269.0 ns/op	      17 B/op	       1 allocs/op
+
+
+Against the PRD §16.8 targets
+-----------------------------
+
+  Benchmark                  Target              Measured            Verdict
+  -------------------------  ------------------  ------------------  -------
+  BenchmarkCodecJSONDecode   >500k/sec/core      1.40M/sec/core      pass
+                             <3 allocs/op        2 allocs/op         pass
+  BenchmarkSeqTrackObserve   >5M/sec/core        35.4M/sec/core      pass
+                             0 allocs steady     0 allocs/op         pass
+  BenchmarkProjectionApply   >2M/sec/core        2.89M/sec/core      pass
+  BenchmarkOracleApply       >500k/sec/core      5.36M/sec/core      pass
+  BenchmarkOracleGet         >2M/sec/core        3.72M/sec/core      pass
+  BenchmarkSettledKeys1M     <50ms               21.0ms              pass
+  BenchmarkMarkSuspectAll1M  <1ms                0.00066ms           pass
+  BenchmarkOracleMemory1M    <512 MiB            640.6 MiB           OVER
+
+  BenchmarkGetMany500, BenchmarkFullSweep1M: pkg/target, Phase 2.
+
+The memory result is 25% over budget and is recorded as docs/KNOWN_GAPS.md
+G-001, with the remaining cost accounted for and the fix scoped. It started
+Phase 1 at 5.2 GiB: the history ring was preallocating sixteen ~300-byte slots
+for every key including the majority that have seen a single event, and cloning
+a map into the ring on every apply. Growing the ring lazily and storing the
+resulting value by reference brought it to 640 MiB and took BenchmarkOracleApply
+from 345ns with 2 allocations to 186ns with none.
+
+Notes on reading these
+----------------------
+
+BenchmarkProjectionApply and BenchmarkOracleApply both allocate on the set path
+because a member set is cloned per fold; the projection contract requires the
+previous value not to be modified, and the oracle stores what it is handed.
+
+BenchmarkSeqTrackObserveWithGaps is the unhealthy path, where every event
+reveals a hole and the gap set is permanently at its interval cap. At 1.3us it
+is roughly 45x the steady-state cost, which is the price of the cap enforcement
+scan. It is bounded and it only happens while events are being lost.
+
+BenchmarkProjectionApplyTemplated is the cost of a non-identity key template:
+text/template execution, about 3.4x the identity path. The identity template is
+the default and is answered by returning the field directly.

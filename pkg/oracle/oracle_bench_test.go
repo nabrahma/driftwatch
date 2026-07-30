@@ -124,6 +124,12 @@ func BenchmarkSettledKeys1M(b *testing.B) {
 	o := seedMillion(b, oracle.Config{SettlementWindow: time.Second})
 	now := epoch.Add(time.Hour)
 
+	// Collect before timing. Seeding a million keys leaves a large amount of
+	// garbage, and letting the collector work it off inside the measurement
+	// makes the first iterations two to three times slower than the steady
+	// state — which is not what this benchmark is measuring.
+	runtime.GC()
+
 	b.ReportAllocs()
 	b.ResetTimer()
 
@@ -146,6 +152,7 @@ func BenchmarkSettledKeys1M(b *testing.B) {
 // moment a publisher is flapping and the applier most needs to keep up.
 func BenchmarkMarkSuspectAll1M(b *testing.B) {
 	o := seedMillion(b, oracle.Config{})
+	runtime.GC()
 
 	b.ReportAllocs()
 	b.ResetTimer()

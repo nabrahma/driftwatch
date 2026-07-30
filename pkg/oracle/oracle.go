@@ -300,14 +300,21 @@ func effectiveTrust(e *entry, floor uint64) TrustState {
 func (o *Oracle) SettledKeys(now time.Time) func(yield func(string) bool) {
 	return func(yield func(string) bool) {
 		w := o.window()
+
+		// One buffer, reused across shards and grown to the largest shard seen.
+		// Letting append grow it from a small start costs a reallocation per
+		// doubling per shard, which at a million keys across 64 shards is
+		// several hundred allocations of steadily increasing size — the
+		// dominant cost of an otherwise pointer-copying loop.
 		buf := make([]string, 0, 1024)
 
 		for _, sh := range o.shards {
-			buf = buf[:0]
-
 			sh.mu.Lock()
 			sh.promote(now, o.cfg.MaxSettlementWindow)
-			buf = sh.settledKeys(buf, now, w)
+			if n := len(sh.entries); cap(buf) < n {
+				buf = make([]string, 0, n)
+			}
+			buf = sh.settledKeys(buf[:0], now, w)
 			sh.mu.Unlock()
 
 			for _, k := range buf {
