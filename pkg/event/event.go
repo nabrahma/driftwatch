@@ -262,7 +262,9 @@ type Value struct {
 // the target's side. Treating them as different would report drift on every key
 // that legitimately empties — the most common transition in a KV-cache
 // ownership index — which is enough false positives to make driftwatch
-// unusable. See docs/DISCOVERIES.md D-001.
+// unusable. PRD §9 M2 states the decision; docs/DISCOVERIES.md gets the entry
+// in Phase 2, when there is a real Redis session to point at rather than a
+// design note.
 //
 // The symmetry does not extend to scalars or counters: an empty string and the
 // integer zero are real Redis values, distinct from a missing key.
