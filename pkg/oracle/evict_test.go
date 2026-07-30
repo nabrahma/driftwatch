@@ -46,32 +46,44 @@ func TestOracle_EvictionNamesTheKeyItDropped(t *testing.T) {
 	assert.True(t, inserted)
 }
 
-func TestOracle_EvictionPrefersTheLeastRecentlyTouchedKey(t *testing.T) {
+func TestOracle_EvictionPrefersKeysPastTheCoalescingHorizon(t *testing.T) {
+	// The victim choice is approximate on purpose: within the coalesced settled
+	// set, and within any single time bucket, the pick is arbitrary. Asserting
+	// a total ordering over the three would be asserting something the
+	// implementation does not provide — an earlier version of this test did
+	// exactly that and passed only on the luck of Go's map iteration order.
+	//
+	// What is guaranteed, and what this checks, is the tier: a key old enough
+	// to have been folded into the settled set goes before one still sitting in
+	// a live bucket.
 	o, _ := newOracle(t, oracle.Config{
 		Shards: 1, MaxTrackedKeys: 3,
 		BucketWidth:         time.Second,
-		MaxSettlementWindow: 2 * time.Second,
+		MaxSettlementWindow: 10 * time.Second,
 	})
 
 	m, e := upsert("ancient", epoch, "a")
 	apply(o, m, e)
-	m, e = upsert("older", epoch.Add(30*time.Second), "a")
+	m, e = upsert("older", epoch.Add(55*time.Second), "a")
 	apply(o, m, e)
-	m, e = upsert("newer", epoch.Add(31*time.Second), "a")
+	m, e = upsert("newer", epoch.Add(56*time.Second), "a")
 	apply(o, m, e)
 
-	// Iterating forces the old buckets to coalesce, which is what marks
-	// "ancient" as the oldest available victim.
+	// Iterating at 60s coalesces every bucket older than 50s, which is
+	// "ancient" alone; the other two stay in live buckets.
 	settledKeys(o, epoch.Add(60*time.Second))
 
 	m, e = upsert("newest", epoch.Add(60*time.Second), "a")
 	res := apply(o, m, e)
 
-	// Recent keys are the ones a divergence is most likely to concern, so the
-	// oldest goes first. The choice is approximate by design, but it must not
-	// pick the newest.
-	assert.NotEqual(t, "newest", res.Evicted)
-	assert.NotEqual(t, "newer", res.Evicted)
+	assert.True(t, res.DidEvict)
+	assert.Equal(t, "ancient", res.Evicted,
+		"the only key past the coalescing horizon must be the one evicted")
+
+	for _, kept := range []string{"older", "newer", "newest"} {
+		_, ok := o.Get(kept)
+		assert.True(t, ok, "%s should have survived", kept)
+	}
 }
 
 func TestOracle_UpdatingAnExistingKeyAtCapacityEvictsNothing(t *testing.T) {
