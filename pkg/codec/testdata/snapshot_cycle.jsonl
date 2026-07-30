@@ -1,0 +1,4 @@
+{"publisher":"replica-2","epoch":1,"seq":9000,"op":"snapshotBegin"}
+{"publisher":"replica-2","epoch":1,"seq":9001,"op":"add","key":"a1","member":"replica-2"}
+{"publisher":"replica-2","epoch":1,"seq":9002,"op":"add","key":"a2","member":"replica-2"}
+{"publisher":"replica-2","epoch":1,"seq":9003,"op":"snapshotEnd"}

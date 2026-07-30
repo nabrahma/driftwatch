@@ -1,0 +1,18 @@
+Evidence for docs/DISCOVERIES.md D-002.
+
+Claim: reading a JSON sequence number through float64 loses precision above
+2^53 (9007199254740992), silently and with no error.
+
+encoding/json is safe when the destination is a typed uint64 field. It is not
+safe via map[string]any, which is the shape a codec with configurable field
+names naturally reaches for.
+
+$ go version
+go version go1.26.4 windows/amd64
+
+$ go run seq53.go
+payload                       : {"seq":9007199254740993}
+json.Unmarshal into uint64    : 9007199254740993   (correct)
+json.Unmarshal into any       : 9007199254740992   <- WRONG, off by one
+uint64(float64(9007199254740993)) : 9007199254740992   <- WRONG, off by one
+strconv.ParseUint from digits : 9007199254740993   (correct)

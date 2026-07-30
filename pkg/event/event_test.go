@@ -95,6 +95,8 @@ func TestParseOp_AcceptsWireNamesAndRejectsAnythingElse(t *testing.T) {
 		{name: "surrounding whitespace is ignored", in: "  remove\t", want: event.OpRemove},
 		{name: "snapshot markers use their underscore form", in: "snapshot_begin", want: event.OpSnapshotBegin},
 		{name: "the hyphenated snapshot form is also accepted", in: "snapshot-end", want: event.OpSnapshotEnd},
+		{name: "the camelCase snapshot form is also accepted, since it appears in the wild", in: "snapshotBegin", want: event.OpSnapshotBegin},
+		{name: "the concatenated uppercase snapshot form is also accepted", in: "SNAPSHOTEND", want: event.OpSnapshotEnd},
 		{name: "an unrecognized name is rejected", in: "frobnicate", wantErr: true},
 		{name: "the empty string is rejected", in: "", wantErr: true},
 		{name: "the literal word unknown is rejected", in: "unknown", wantErr: true},

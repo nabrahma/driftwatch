@@ -1,0 +1,14 @@
+Evidence for docs/DISCOVERIES.md D-001.
+
+Claim: Go's time.RFC3339 layout rejects the lowercase 't' date-time separator
+and the lowercase 'z' zulu marker, both of which RFC 3339 section 5.6
+explicitly permits. Reproduced on the version below.
+
+$ go version
+go version go1.26.4 windows/amd64
+
+$ go run rfc3339.go
+time.Parse(time.RFC3339, "2026-07-30T11:02:31Z"  ) -> ok
+time.Parse(time.RFC3339, "2026-07-30t11:02:31z"  ) -> ERROR: parsing time "2026-07-30t11:02:31z" as "2006-01-02T15:04:05Z07:00": cannot parse "t11:02:31z" as "T"
+time.Parse(time.RFC3339, "2026-07-30T11:02:31z"  ) -> ERROR: parsing time "2026-07-30T11:02:31z" as "2006-01-02T15:04:05Z07:00": cannot parse "z" as "Z07:00"
+time.Parse(time.RFC3339, "2026-07-30t11:02:31Z"  ) -> ERROR: parsing time "2026-07-30t11:02:31Z" as "2006-01-02T15:04:05Z07:00": cannot parse "t11:02:31Z" as "T"

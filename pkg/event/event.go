@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -85,21 +86,42 @@ func (o Op) TouchesKey() bool {
 	}
 }
 
-// ParseOp resolves a wire name to an Op. Matching ignores case and surrounding
-// whitespace, and accepts either "snapshot_begin" or "snapshot-begin", because
-// both spellings occur in the wild. It returns ErrUnknownOp for anything else,
-// including the literal string "unknown".
+// ParseOp resolves a wire name to an Op.
+//
+// Matching ignores case, surrounding whitespace, and any underscores or hyphens
+// separating words, so "snapshot_begin", "snapshot-begin", "snapshotBegin" and
+// "SNAPSHOTBEGIN" all resolve to OpSnapshotBegin. All four spellings occur in
+// the wild, and a codec that accepts only one of them fails at 3am against a
+// producer nobody can change.
+//
+// It returns ErrUnknownOp for anything else, including the literal "unknown":
+// an unrecognized operation is a version mismatch worth surfacing, not a value
+// to silently map onto the zero op.
 func ParseOp(s string) (Op, error) {
-	normalized := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(s)), "-", "_")
+	normalized := normalizeOpName(s)
 	for op, name := range opNames {
 		if op == int(OpUnknown) {
 			continue
 		}
-		if name == normalized {
+		if normalizeOpName(name) == normalized {
 			return Op(op), nil //nolint:gosec // op indexes a fixed table of Op values
 		}
 	}
 	return OpUnknown, fmt.Errorf("%w: %q", ErrUnknownOp, s)
+}
+
+// normalizeOpName lowercases and strips the word separators that distinguish
+// the spellings of the same operation.
+func normalizeOpName(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range strings.TrimSpace(s) {
+		if r == '_' || r == '-' {
+			continue
+		}
+		b.WriteRune(unicode.ToLower(r))
+	}
+	return b.String()
 }
 
 // Event is an immutable observed state change.
