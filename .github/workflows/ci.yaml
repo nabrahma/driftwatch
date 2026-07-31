@@ -84,3 +84,22 @@ jobs:
           name: coverage
           path: cover.out
           if-no-files-found: warn
+
+  # The `inject` command sits behind a `dev` build tag so the release binary
+  # cannot write to the event stream it audits (§11). Nothing else compiles it,
+  # so without this job it would rot unnoticed.
+  dev-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: build with the dev tag
+        run: go build -tags dev ./...
+
+      - name: vet with the dev tag
+        run: go vet -tags dev ./...

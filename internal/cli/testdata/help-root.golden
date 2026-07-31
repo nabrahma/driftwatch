@@ -1,0 +1,30 @@
+driftwatch derives what a store should contain from the event stream that feeds
+it, then compares that expectation against what the store actually holds. It
+never writes to the store it audits.
+
+It is built to distinguish three things existing monitoring cannot: the store is
+wrong, the store is merely behind, and driftwatch itself missed events. Only the
+first is worth waking someone for.
+
+Usage:
+  driftwatch [command]
+
+Available Commands:
+  completion  Generate the autocompletion script for the specified shell
+  diff        Run one full comparison and exit
+  explain     Explain what happened to one key
+  help        Help about any command
+  replay      Replay a captured event stream offline and compare
+  version     Print version, commit, build date and Go version
+  watch       Run a check in the foreground and serve /metrics
+
+Flags:
+  -f, --file string         path to a check specification ("-" for stdin)
+  -h, --help                help for driftwatch
+      --log-format string   log format: console or json (default "console")
+      --log-level string    log level: error, warn, info or debug (default "info")
+  -o, --output string       output format: text or json (default "text")
+      --redact-keys         hash key names in logs and output
+  -v, --verbosity int       log verbosity: 1 for debug, 2 for trace
+
+Use "driftwatch [command] --help" for more information about a command.

@@ -1,0 +1,14 @@
+driftwatch sweep report
+=======================
+
+started    <timestamp>
+duration   <duration>
+compared   0 keys
+
+no divergence found
+target
+  reachable        true
+  version          memory
+  role             master
+  keyspace         0
+  evicted keys     0

@@ -1,0 +1,36 @@
+Runs a check, waits for the key to be observed, and prints everything driftwatch
+knows about it: what the oracle expects, what the target holds, the events that
+produced the expectation, the publishers' sequence positions, and a diagnosis of
+what most likely happened.
+
+This is the command that makes driftwatch a debugging tool rather than an alarm.
+A gauge tells an operator that twelve keys diverged; this tells them which event
+the materializer did not apply.
+
+Usage:
+  driftwatch explain [flags]
+
+Examples:
+# explain one key
+  driftwatch explain -f examples/local.yaml --key block:9f3a
+
+  # a binary key
+  driftwatch explain -f examples/local.yaml --key-hex 626c6f636b3a00ff
+
+  # machine-readable
+  driftwatch explain -f examples/local.yaml --key block:9f3a -o json | jq .diagnosis
+
+Flags:
+      --from-running string   query a running watch process instead of starting a check (not yet implemented)
+  -h, --help                  help for explain
+      --key string            the key to explain
+      --key-hex string        the key to explain, hex-encoded, for keys that are not valid UTF-8
+      --wait duration         how long to wait for the key to be observed (default 30s)
+
+Global Flags:
+  -f, --file string         path to a check specification ("-" for stdin)
+      --log-format string   log format: console or json (default "console")
+      --log-level string    log level: error, warn, info or debug (default "info")
+  -o, --output string       output format: text or json (default "text")
+      --redact-keys         hash key names in logs and output
+  -v, --verbosity int       log verbosity: 1 for debug, 2 for trace
