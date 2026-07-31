@@ -1,0 +1,13 @@
+Evidence for docs/DISCOVERIES.md D-011.
+
+Claim: the ZMQ source re-resolves DNS on every reconnect, so a publisher
+that moves to a new IP is followed rather than retried forever at the old
+one.
+
+$ go test -v -run 'TestZMQ_ReResolvesDNSOnEveryReconnect|TestZMQ_AnUnresolvableEndpointRetries' ./pkg/source/
+=== RUN   TestZMQ_ReResolvesDNSOnEveryReconnect
+--- PASS: TestZMQ_ReResolvesDNSOnEveryReconnect (0.00s)
+=== RUN   TestZMQ_AnUnresolvableEndpointRetriesForeverRatherThanFailing
+--- PASS: TestZMQ_AnUnresolvableEndpointRetriesForeverRatherThanFailing (0.00s)
+PASS
+ok  	github.com/nabrahma/driftwatch/pkg/source	1.443s

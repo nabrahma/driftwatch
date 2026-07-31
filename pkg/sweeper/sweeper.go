@@ -195,6 +195,10 @@ type Stats struct {
 	// replaced the expectation they were raised against. Not a repair: the
 	// question is simply open again.
 	ConfirmedSuperseded int64
+	// SuspectNotConfirmed counts disagreements left unconfirmed because
+	// driftwatch does not trust its own view of the key. A rising count here is
+	// driftwatch declining to blame the store for its own lost events.
+	SuspectNotConfirmed int64
 	// LastDriftDuration is how long the most recently repaired episode lasted,
 	// measured from its first disagreeing read.
 	LastDriftDuration time.Duration
@@ -236,6 +240,7 @@ type counters struct {
 	driftResolved           atomic.Int64
 	confirmedDroppedEvicted atomic.Int64
 	confirmedSuperseded     atomic.Int64
+	suspectNotConfirmed     atomic.Int64
 	lastDriftDuration       atomic.Int64
 
 	extraScans         atomic.Int64
@@ -545,6 +550,21 @@ func (s *Sweeper) handleComparison(
 		return
 	}
 
+	// A key driftwatch does not trust itself about is reported but never
+	// confirmed. Confirming is a positive claim that the target is wrong, and
+	// driftwatch cannot make that claim about a key whose expectation it built
+	// from a stream it knows had holes in it (§5.2, §23 A7).
+	//
+	// The finding still goes in the report: an operator looking at a sweep
+	// should see the disagreement and see that it is not trusted. What it must
+	// not do is reach Confirmed(), which is what drives divergent_keys and the
+	// subscriber channel — that is the path that ends in somebody being paged.
+	if f.Trust == oracle.TrustSuspect {
+		s.c.suspectNotConfirmed.Add(1)
+		rep.Add(f)
+		return
+	}
+
 	if episode, ok := s.episode(key); ok {
 		// Already confirmed and still wrong. The episode keeps its original
 		// first-seen time, so the drift duration measures the whole episode
@@ -693,6 +713,7 @@ func (s *Sweeper) Stats() Stats {
 		DriftResolved:           s.c.driftResolved.Load(),
 		ConfirmedDroppedEvicted: s.c.confirmedDroppedEvicted.Load(),
 		ConfirmedSuperseded:     s.c.confirmedSuperseded.Load(),
+		SuspectNotConfirmed:     s.c.suspectNotConfirmed.Load(),
 		LastDriftDuration:       time.Duration(s.c.lastDriftDuration.Load()),
 
 		ExtraScans:         s.c.extraScans.Load(),

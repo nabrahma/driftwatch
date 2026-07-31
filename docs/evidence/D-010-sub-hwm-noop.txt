@@ -1,0 +1,59 @@
+Evidence for docs/DISCOVERIES.md D-010.
+
+Claim: in go-zeromq/zmq4, ZMQ_RCVHWM on a SUB socket is accepted and ignored.
+The pure-Go binding has no receive high-water mark at all.
+
+--- the SUB socket's SetOption ------------------------------------------------
+
+zmq4@v0.17.0/socket.go:373
+
+    func (sck *socket) SetOption(name string, value interface{}) error {
+        // FIXME(sbinet) different socket types support different options.
+        sck.props[name] = value
+        return nil
+    }
+
+The property is stored in a map and never read by the receive path. The call
+returns nil, so code that sets a receive HWM looks correct and does nothing.
+
+zmq4@v0.17.0/sub.go:86 confirms the SUB wrapper only acts on OptionSubscribe
+and OptionUnsubscribe; everything else falls through to the store-and-ignore
+above.
+
+--- the PUB socket, for contrast ----------------------------------------------
+
+zmq4@v0.17.0/pub.go:96
+
+    if name != OptionHWM {
+        ...
+    }
+
+zmq4@v0.17.0/pub.go:299
+
+    func (w *pubMWriter) write(ctx context.Context, msg Msg) error {
+        w.qmu.Lock()
+        defer w.qmu.Unlock()
+        if w.hwm != 0 && w.q.Len() >= w.hwm {
+            //TODO(inphi): per subscriber hwm
+            return nil
+        }
+        w.q.Push(msg)
+
+So HWM is implemented, on the publisher, and drops there. There is no
+subscriber-side equivalent.
+
+--- what the subscriber does instead ------------------------------------------
+
+zmq4@v0.17.0/msgio.go:44
+
+    func newQReader(ctx context.Context) *qreader {
+        const qrsize = 10
+        return &qreader{
+            ctx: ctx,
+            c:   make(chan Msg, qrsize),
+            ...
+        }
+    }
+
+A fixed ten-message channel, not configurable. Past it the connection read
+blocks, applying TCP backpressure to the publisher rather than discarding.

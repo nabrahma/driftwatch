@@ -30,6 +30,116 @@ written here in anticipation.
 
 ---
 
+## D-011 — Caching the first DNS resolution turns a pod reschedule into permanent silence
+
+**Found:** Phase 4, implementing the ZMQ source's reconnect loop.
+
+**What happened:** nothing, which is the point. §9 M4 lists this among its edge
+cases and it is worth writing down because the failure it describes is entirely
+invisible and the code that causes it looks like an optimization.
+
+The shape of it: a subscriber resolves `tcp://publisher.default.svc:5555` once
+at startup, keeps the address, and reconnects to it forever. The publisher pod
+is rescheduled, comes back on a different IP, and the DNS record updates. The
+subscriber goes on dialling an address nothing is listening on.
+
+What makes it nasty is how it presents. There is no error to alert on — the
+reconnect loop is working exactly as designed, retrying with backoff against an
+endpoint that refuses. `Connected` reports false, which is also what a
+subscriber waiting for a publisher that has not started yet reports. Events stop
+arriving, and driftwatch marks keys `Suspect` and stops asserting, so the
+observable symptom is a monitoring tool that has quietly stopped monitoring.
+Nothing distinguishes it from a quiet publisher except noticing that it has been
+quiet for a suspiciously long time.
+
+**Why it matters:** less for the bug than for how easy it is to write. Resolving
+once and reusing the result is the obvious thing to do — it is one syscall
+instead of many, the address does not normally change, and every reconnect after
+the first is measurably cheaper. In a static deployment it is correct. On
+Kubernetes, where a pod's IP is expected to change and the service record is the
+only stable name, it is a time bomb that goes off during the next node drain.
+
+**Fix:** `resolveAll` runs on every connection attempt, not once at
+construction, and there is no cached address anywhere in the source. Literal IPs
+and non-TCP transports pass straight through, so the extra lookup only happens
+where there is a name to look up. A host resolving to several addresses has all
+of them dialled, which is what a headless service needs.
+
+`TestZMQ_ReResolvesDNSOnEveryReconnect` drives a resolver that returns a
+different address on each call and asserts the second attempt dialled the second
+address. It is a test of an absence — that nothing cached — which is exactly the
+kind of property that rots silently without one.
+
+**Evidence:** `docs/evidence/D-011-dns-reresolution.txt`
+
+**Regression test:** `pkg/source: TestZMQ_ReResolvesDNSOnEveryReconnect`,
+`TestZMQ_AnUnresolvableEndpointRetriesForeverRatherThanFailing`
+
+---
+
+## D-010 — The pure-Go ZMQ binding accepts a subscriber high-water mark and ignores it
+
+**Found:** Phase 4, implementing §8.1's ingest-buffer sizing rule.
+
+**What happened:** §8.1 sets out a specific defence. ZMQ PUB sockets drop for
+slow subscribers silently, so driftwatch should set `ZMQ_RCVHWM` explicitly and
+size its own ingest buffer *larger* than it — that way, when loss happens, it
+happens in driftwatch's own countable buffer rather than invisibly in the
+socket. The reasoning is sound and I built to it.
+
+The mechanism it assumes does not exist in `go-zeromq/zmq4`. A SUB socket has no
+receive high-water mark. `SetOption` stores the property in a map and returns
+nil:
+
+```go
+// zmq4@v0.17.0/socket.go:373
+func (sck *socket) SetOption(name string, value interface{}) error {
+    // FIXME(sbinet) different socket types support different options.
+    sck.props[name] = value
+    return nil
+}
+```
+
+Nothing in the receive path reads it. HWM *is* implemented — on the PUB socket,
+where it drops at the publisher (`pub.go:299`) — so the option name is real, the
+call succeeds, and the code looks correct while doing nothing at all.
+
+What the subscriber does instead is worse than dropping. The reader is a fixed
+ten-message channel (`msgio.go:44`, `const qrsize = 10`), not configurable, and
+past it the connection read blocks. So a slow driftwatch does not lose frames;
+it applies TCP backpressure all the way to the publisher and slows down the
+system it is supposed to be observing without touching.
+
+**Why it matters:** the §8.1 mitigation is untestable as written against this
+binding, and worse, it silently appears to work. Setting the option returns no
+error. A reviewer reads the line, matches it against the PRD, and moves on. The
+failure only shows up in production, as either unbounded memory or — the part
+that would be genuinely hard to diagnose — a publisher mysteriously slowing down
+whenever the monitoring is running.
+
+It is also exactly the class of finding §8.1 asked for in advance: it chose the
+pure-Go binding over cgo and required any wire or behavioural gap to be recorded
+rather than assumed away.
+
+**Fix:** enforce the bound in driftwatch, where it can be counted. `RecvHWM`
+sizes the ingest channel; a frame that cannot be handed over is dropped,
+counted in `Stats.Dropped`, and raises a `GapHighWaterMark` signal so the
+pipeline marks the affected keys `Suspect`. The receive loop never blocks on a
+full pipeline, which is what keeps the backpressure off the publisher.
+
+`SetOption(OptionHWM, …)` is still called, with a comment saying it is a no-op
+on this binding and pointing here — if the upstream implements it, the intent is
+already expressed, and until then nobody has to rediscover why it is missing.
+
+§8.1's guarantee survives intact: loss is bounded, counted and visible. Only the
+layer enforcing it moved.
+
+**Evidence:** `docs/evidence/D-010-sub-hwm-noop.txt`
+
+**Regression test:** `pkg/source: TestZMQ_DropsAtTheHighWaterMarkRatherThanGrowing`
+
+---
+
 ## D-009 — A confirmed finding is a claim about one oracle version, and nothing was withdrawing it
 
 **Found:** Phase 3, the first run of the I11 property test.

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/nabrahma/driftwatch/pkg/differ"
+	"github.com/nabrahma/driftwatch/pkg/oracle"
 	"github.com/nabrahma/driftwatch/pkg/target"
 )
 
@@ -192,6 +193,14 @@ func (s *Sweeper) confirmOne(ctx context.Context, c *candidate, now time.Time) {
 	if !ok || entry.Version != c.version {
 		s.c.transientOracleAdvanced.Add(1)
 		s.markRequeued(key)
+		return
+	}
+
+	// The key may have become suspect while the candidate waited — a gap
+	// detected after the sweep raised it. The claim is no longer one driftwatch
+	// can make.
+	if entry.Trust == oracle.TrustSuspect {
+		s.c.suspectNotConfirmed.Add(1)
 		return
 	}
 
