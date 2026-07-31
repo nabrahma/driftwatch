@@ -61,10 +61,14 @@ type Phase string
 const (
 	PhasePending       Phase = "Pending"
 	PhaseBootstrapping Phase = "Bootstrapping"
-	PhaseWatching      Phase = "Watching"
-	PhaseDegraded      Phase = "Degraded"
-	PhasePaused        Phase = "Paused"
-	PhaseFailed        Phase = "Failed"
+	// PhaseAwaitingSnapshot is bootstrap Strict before any publisher has
+	// retransmitted. §10.1's phase list omits it and §15 row 46 names it
+	// explicitly; the more specific requirement wins. See ADR-0010.
+	PhaseAwaitingSnapshot Phase = "AwaitingSnapshot"
+	PhaseWatching         Phase = "Watching"
+	PhaseDegraded         Phase = "Degraded"
+	PhasePaused           Phase = "Paused"
+	PhaseFailed           Phase = "Failed"
 )
 
 // Deps are the injected dependencies a check cannot build for itself.
@@ -99,6 +103,10 @@ type Check struct {
 	// high-water mark: loss has to happen here, where it is counted, rather
 	// than inside the transport where it is invisible.
 	raw chan source.RawMessage
+
+	// reorder restores sequence order within a bounded window, which §9 M6
+	// requires whenever the projection is not commutative. See reorder.go.
+	reorder *reorderBuffer
 
 	// sampler bounds repetitive error logging. A malformed stream arrives at
 	// the full event rate, and a log line per event turns one publisher's bad
@@ -139,6 +147,22 @@ type Check struct {
 	// produce, so it must not be reported as Watching.
 	sourceFailed  atomic.Bool
 	sourceFailure string
+
+	// awaitingSnapshot is bootstrap Strict's state: nothing is asserted on
+	// until a publisher retransmits. snapshotsSeen counts completed cycles.
+	awaitingSnapshot atomic.Bool
+	snapshotsSeen    atomic.Uint64
+
+	// multiWriter records that two publishers have written the same key under a
+	// projection whose fold is order-dependent. See checkMultiWriter.
+	multiWriter    atomic.Bool
+	multiWriterKey atomic.Pointer[string]
+
+	// skewMu guards clockSkew, the last measured offset between each
+	// publisher's wall clock and driftwatch's. Bounded by the same publisher
+	// limit seqtrack uses, so a stream of one-off publisher ids cannot grow it.
+	skewMu    sync.Mutex
+	clockSkew map[string]time.Duration
 
 	// Counters read by Status. Atomic because Status is called from the CRD
 	// controller and the CLI's status line while the applier is running.
@@ -192,8 +216,9 @@ func New(spec Spec, deps Deps) (*Check, error) {
 		bootstrapped:  make(chan struct{}),
 		phase:         PhasePending,
 		sampler:       logging.NewSampler(clk, samplerBurst, samplerInterval, 64),
-		raw:           make(chan source.RawMessage, spec.Source.IngestBufferSize),
+		raw:           make(chan source.RawMessage, ingestBufferFor(&spec)),
 		confirmedCats: map[string]differ.Category{},
+		clockSkew:     map[string]time.Duration{},
 	}
 	if deps.Metrics != nil {
 		c.m = deps.Metrics.ForCheck(spec.ID())
@@ -208,6 +233,33 @@ func New(spec Spec, deps Deps) (*Check, error) {
 
 	c.logEffectiveConfig()
 	return c, nil
+}
+
+// inProcessIngestBuffer caps the ingest channel for sources that cannot drop.
+//
+// Generous for a transport whose producer blocks, and three orders of magnitude
+// smaller than the default below.
+const inProcessIngestBuffer = 4096
+
+// ingestBufferFor sizes the channel between the source and the applier.
+//
+// The buffer exists to absorb bursts a socket would otherwise discard: §10.2
+// requires it to exceed recvHWM precisely so loss happens here, where it is
+// counted, rather than inside the transport where it is invisible. That
+// argument only applies to a transport that can drop.
+//
+// A file source blocks its reader and a memory source is in-process, so neither
+// can lose a message no matter how far behind the applier falls — and sizing
+// their channel for a socket costs 12.8 MiB of empty channel per check. §15 row
+// 60 measured that: fifty idle checks held 640 MB, essentially all of it this
+// allocation. See docs/DISCOVERIES.md D-016.
+func ingestBufferFor(spec *Spec) int {
+	switch spec.Source.Type {
+	case "zmq", "nats":
+		return spec.Source.IngestBufferSize
+	default:
+		return min(spec.Source.IngestBufferSize, inProcessIngestBuffer)
+	}
 }
 
 // build constructs the pipeline in dependency order.
@@ -254,6 +306,14 @@ func (c *Check) build() error {
 		MaxSettlementWindow: c.spec.Policy.SettlementWindow.Max.Duration(),
 		Clock:               c.clk,
 	})
+
+	// A commutative projection reaches the same state whatever order it folds
+	// in, so buffering would be latency bought for nothing.
+	window := c.spec.Policy.ReorderWindow.Duration()
+	if c.proj.Commutative() {
+		window = 0
+	}
+	c.reorder = newReorderBuffer(window, defaultMaxHeldPerPublisher)
 
 	c.buildLag()
 	c.buildSweeper()
@@ -478,6 +538,16 @@ func (c *Check) guard(
 // correct without a global lock precisely because exactly one goroutine writes,
 // and that discipline is enforced here by there being one of these.
 func (c *Check) ingest(ctx context.Context) error {
+	// The reorder buffer needs someone to notice that a held event's wait has
+	// run out. A stream that goes quiet mid-sequence would otherwise leave that
+	// event unapplied indefinitely, and every sweep after it would compare an
+	// oracle missing an update driftwatch had actually received.
+	//
+	// It ticks here rather than in the sweeper because applying an event writes
+	// the oracle, and the applier is the only goroutine allowed to do that.
+	flush := c.clk.NewTicker(reorderFlushInterval)
+	defer flush.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -487,9 +557,29 @@ func (c *Check) ingest(ctx context.Context) error {
 				return nil
 			}
 			c.applyMessage(&msg)
+		case <-flush.C():
+			c.FlushReorder()
 		}
 	}
 }
+
+// reorderFlushInterval is how often the applier checks for held events whose
+// wait has expired. Well inside the reorder window, so the delay a held event
+// actually sees is the window rather than the window plus a tick.
+const reorderFlushInterval = 250 * time.Millisecond
+
+// Ingest applies one raw message on the caller's goroutine.
+//
+// Run's applier is the only caller in production. It is exported because a test
+// that drives the pipeline one message at a time is deterministic in a way a
+// goroutine and a channel are not — and because the alternative, a second copy
+// of the applier living in the test harness, is exactly how a key-template bug
+// survived four phases undetected (D-013). The fault matrix in §15 runs through
+// this, so every row exercises the real pipeline rather than a replica of it.
+//
+// It must not be called concurrently with Run: the oracle's single-writer
+// discipline is what makes version bumping correct without a global lock.
+func (c *Check) Ingest(msg source.RawMessage) { c.applyMessage(&msg) }
 
 func (c *Check) applyMessage(msg *source.RawMessage) {
 	c.bytesRead.Add(uint64(len(msg.Payload)))
@@ -513,7 +603,19 @@ func (c *Check) applyMessage(msg *source.RawMessage) {
 		return
 	}
 
-	verdict, _ := c.tracker.Observe(&e)
+	// Restore sequence order before anything downstream looks at the event.
+	// seqtrack, the projection and the oracle all assume they see a publisher's
+	// stream in order, and every one of them is wrong in a different way when
+	// they do not.
+	released := c.reorder.offer(&e, e.ObservedAt)
+	for i := range released {
+		c.applyOrdered(&released[i])
+	}
+}
+
+// applyOrdered runs one in-sequence event through the rest of the pipeline.
+func (c *Check) applyOrdered(e *event.Event) {
+	verdict, _ := c.tracker.Observe(e)
 	switch verdict {
 	case seqtrack.DropDuplicate:
 		c.drop(e.Publisher, metrics.DropDuplicate, "", nil)
@@ -522,13 +624,47 @@ func (c *Check) applyMessage(msg *source.RawMessage) {
 		c.drop(e.Publisher, metrics.DropStaleEpoch, "", nil)
 		return
 	case seqtrack.AcceptWithGap:
-		c.onGap(&e)
+		c.onGap(e)
 	case seqtrack.AcceptAfterRestart:
-		c.onRestart(&e)
+		c.onRestart(e)
 	case seqtrack.Accept, seqtrack.AcceptLateFill, seqtrack.AcceptFirstSeen:
 	}
 
-	c.fold(&e, verdict)
+	c.onSnapshotOp(e)
+	c.fold(e, verdict)
+}
+
+// onSnapshotOp restores trust when a publisher finishes retransmitting.
+//
+// This is the other half of §5.2, and the half that was missing: MarkSuspect
+// has no counterpart unless something clears it. A publisher that has just
+// resent its whole state has made whatever driftwatch missed irrelevant — the
+// oracle now holds what the publisher says is true, so continuing to refuse to
+// assert on those keys costs coverage for no reason.
+//
+// It is also what makes bootstrap Strict terminate, and what makes a declared
+// restart followed by a snapshot clean rather than suspect (§15 rows 20, 46).
+func (c *Check) onSnapshotOp(e *event.Event) {
+	switch e.Op {
+	case event.OpSnapshotBegin:
+		c.log.Info("publisher began a snapshot", "publisher", e.Publisher, "seq", e.Seq)
+
+	case event.OpSnapshotEnd:
+		pattern := c.suspectPattern(e.Publisher)
+		c.tracker.ClearGaps(e.Publisher)
+		c.orc.ClearSuspect(pattern)
+		c.snapshotsSeen.Add(1)
+
+		c.log.Info("publisher completed a snapshot; its keys are trustworthy again",
+			"publisher", e.Publisher, "scope", scopeOf(pattern))
+
+		if c.awaitingSnapshot.CompareAndSwap(true, false) {
+			c.setPhase(c.steadyPhase())
+		}
+
+	case event.OpUnknown, event.OpSet, event.OpDelete, event.OpAdd,
+		event.OpRemove, event.OpIncr, event.OpHeartbeat:
+	}
 }
 
 // fold applies one event through the projection into the oracle.
@@ -554,8 +690,21 @@ func (c *Check) fold(e *event.Event, verdict seqtrack.Verdict) {
 		return
 	}
 
+	c.checkMultiWriter(&prev, e)
+	c.recordSkew(e)
+
+	trust := c.tracker.Trust(e.Publisher)
+	if c.awaitingSnapshot.Load() {
+		// Bootstrap Strict, before any publisher has retransmitted. Marking the
+		// existing keys suspect at startup is not enough on its own: a key
+		// created by an event arriving now would be written at the current
+		// generation and come out trustworthy, so the mode would leak
+		// assertions about exactly the keyspace it was told not to assert on.
+		trust = event.TrustSuspect
+	}
+
 	started := c.clk.Now()
-	res := c.orc.Apply(mutation, e, verdict, c.tracker.Trust(e.Publisher))
+	res := c.orc.Apply(mutation, e, verdict, trust)
 	if c.m != nil {
 		c.m.ObserveApplyDuration(c.clk.Now().Sub(started))
 	}
@@ -569,6 +718,89 @@ func (c *Check) fold(e *event.Event, verdict seqtrack.Verdict) {
 		// understates the settlement window derived from it.
 		c.est.OfferKey(mutation.Key)
 		c.est.Observe(mutation.Key, res.Version, started)
+	}
+}
+
+// recordSkew measures how far a publisher's clock is from driftwatch's.
+//
+// Diagnostic only, and the comment is the point: nothing in the pipeline reads
+// this back. Settlement, ordering and gap detection all run on ObservedAt, the
+// local receive time, precisely so that a publisher with a wrong clock cannot
+// change what driftwatch decides (§5.3, fault F5). What skew is for is the
+// operator reading `explain` output full of publisher timestamps, who needs to
+// know those timestamps are five minutes off before drawing a conclusion from
+// them — and the §12 metric that was declared for it and, until §15 rows 23
+// and 24 asked, never written.
+func (c *Check) recordSkew(e *event.Event) {
+	if e.PublishedAt.IsZero() || e.ObservedAt.IsZero() {
+		return
+	}
+
+	c.skewMu.Lock()
+	defer c.skewMu.Unlock()
+
+	if _, known := c.clockSkew[e.Publisher]; !known &&
+		len(c.clockSkew) >= c.spec.Policy.MaxPublishers {
+		return
+	}
+	c.clockSkew[e.Publisher] = e.PublishedAt.Sub(e.ObservedAt)
+}
+
+// skewOf returns a publisher's last measured clock offset.
+func (c *Check) skewOf(publisher string) time.Duration {
+	c.skewMu.Lock()
+	defer c.skewMu.Unlock()
+	return c.clockSkew[publisher]
+}
+
+// checkMultiWriter notices two publishers writing the same key.
+//
+// §15 row 25's point is that "last write wins" is not globally meaningful when
+// the writes come from different publishers: sequence numbers only order events
+// within one publisher's stream, so there is no fact of the matter about which
+// of two concurrent writes came second. For a set projection this is harmless —
+// adds and removes of distinct members commute, so any interleaving reaches the
+// same place. For a scalar or a counter it is not, and driftwatch's expectation
+// is then one arbitrary choice among several equally valid ones.
+//
+// It cannot be fixed here, only declared. Reporting drift would be wrong, and
+// silently picking a winner would be worse, so the check records that its
+// answers for this keyspace are unreliable and names the key that showed it.
+//
+// The comparison is free: the oracle already stores each key's last publisher,
+// so this costs a string compare on a value that was fetched anyway.
+func (c *Check) checkMultiWriter(prev *oracle.Entry, e *event.Event) {
+	if prev.LastPublisher == "" || prev.LastPublisher == e.Publisher {
+		return
+	}
+
+	// A set folds per member: two publishers adding different members reach the
+	// same set whichever order they arrive in, so there is no ambiguity to
+	// declare. A scalar replaces the whole value and an absolute counter
+	// overwrites the running total, so those genuinely conflict — which is the
+	// distinction §15 row 25 draws, and why Commutative alone is the wrong
+	// test. keysetOwnership reports false because add and remove of the *same*
+	// member is order-dependent, which is a different question.
+	if c.proj.TargetShape() == projection.ShapeSet || c.proj.Commutative() {
+		return
+	}
+	if c.proj.KeyOwnership().Partitioned {
+		// Publishers own disjoint keyspaces, so two of them touching one key is
+		// a misconfiguration the operator has already been warned about rather
+		// than an inherent ambiguity.
+		return
+	}
+
+	key := e.Key
+	c.multiWriterKey.Store(&key)
+
+	if c.multiWriter.CompareAndSwap(false, true) {
+		c.log.Info("two publishers wrote the same key under a projection whose fold "+
+			"depends on order; driftwatch's expectation for this keyspace is one "+
+			"valid interleaving among several, and findings on it are unreliable",
+			"key", logging.Redact(key),
+			"publishers", []string{prev.LastPublisher, e.Publisher},
+			"projection", c.proj.Name())
 	}
 }
 
@@ -591,7 +823,7 @@ func (c *Check) onProjectionError(err error, key string) {
 
 func (c *Check) onDecodeError(err error) {
 	c.decodeErrors.Add(1)
-	c.drop("", metrics.DropDecodeError, "", nil)
+	c.drop("", decodeReason(err), "", nil)
 
 	// A message driftwatch could not decode is a message it did not see, and it
 	// has no publisher or sequence number to scope the loss with — the fields
@@ -676,6 +908,26 @@ func (c *Check) drop(publisher string, reason metrics.DropReason, msg string, er
 	}
 }
 
+// decodeReason maps a codec failure onto the §12 drop reason it belongs to.
+//
+// The three are not interchangeable, and reporting all of them as decode_error
+// — which is what happened until §15 rows 18 and 19 asked — sends an operator
+// to the wrong system. A malformed payload is a serializer or a wire-format
+// mismatch. An unknown op is a producer that started emitting an event type
+// nobody configured, with everything else about the message fine. An oversized
+// frame is a producer bug or an attack, and is the only one of the three that
+// says nothing at all about the format.
+func decodeReason(err error) metrics.DropReason {
+	switch {
+	case errors.Is(err, codec.ErrTooLarge):
+		return metrics.DropTooLarge
+	case errors.Is(err, codec.ErrUnknownOp):
+		return metrics.DropUnknownOp
+	default:
+		return metrics.DropDecodeError
+	}
+}
+
 // projectionReason maps a projection error onto the closed metric enum, so an
 // error string never becomes a label value.
 func projectionReason(err error) metrics.ProjectionErrorReason {
@@ -711,13 +963,29 @@ func (c *Check) watchGaps(ctx context.Context) error {
 				<-ctx.Done()
 				return ctx.Err()
 			}
-			c.gapSignals.Add(1)
-			c.orc.MarkSuspect("", string(sig.Reason))
-			c.log.Info("the source may have missed messages; every key is suspect "+
-				"until a later event refreshes it",
-				"reason", sig.Reason, "detail", sig.Detail)
+			c.SignalGap(sig)
 		}
 	}
+}
+
+// SignalGap records that the source may have missed messages.
+//
+// Run's gap watcher is the only caller in production. It is exported for the
+// same reason Ingest is: a scenario that needs a reconnect to have happened
+// should say so directly rather than build a socket and break it, and the
+// handler under test is then the one that really runs.
+//
+// Every key becomes suspect, because a PUB/SUB subscriber that reconnects
+// cannot find out what it missed — or even whether it missed anything. The
+// suspicion decays as later events refresh each key, and a snapshot clears it
+// outright.
+func (c *Check) SignalGap(sig source.GapSignal) {
+	c.gapSignals.Add(1)
+	c.orc.MarkSuspect("", string(sig.Reason))
+
+	c.log.Info("the source may have missed messages; every key is suspect "+
+		"until a later event refreshes it",
+		"reason", sig.Reason, "detail", sig.Detail)
 }
 
 // runSweeper bootstraps and then sweeps.
@@ -786,6 +1054,7 @@ func (c *Check) publishGauges() {
 		}
 		c.m.SetMissingEvents(ps.ID, ps.Gaps.Count())
 		c.m.SetGapsetTruncated(ps.ID, ps.Gaps.Truncated())
+		c.m.SetClockSkew(ps.ID, c.skewOf(ps.ID))
 	}
 
 	stats := c.swp.Stats()
@@ -829,8 +1098,18 @@ func (c *Check) bootstrap(ctx context.Context) error {
 			"note", "the oracle starts empty; pre-existing keys appear as extras")
 		return nil
 	default: // BootstrapStrict
+		// Strict has to do something rather than say something. Marking every
+		// key suspect up front is what makes the promise real: a suspect key
+		// produces no alertable finding, so nothing is asserted until a
+		// publisher's snapshotEnd clears it. Without this the mode was a log
+		// line that behaved exactly like Wait (§15 row 46).
+		c.awaitingSnapshot.Store(true)
+		c.orc.MarkSuspect("", "awaiting a snapshot cycle")
+		c.setPhase(PhaseAwaitingSnapshot,
+			"no key is asserted on until a publisher completes a snapshot cycle")
+
 		c.log.Info("bootstrap complete", "mode", BootstrapStrict,
-			"note", "no key is asserted on until its publisher completes a snapshot cycle")
+			"note", "awaiting a snapshot cycle before asserting on any key")
 		return nil
 	}
 }
@@ -938,6 +1217,26 @@ func (c *Check) SweepNow(ctx context.Context) (*differ.Report, error) {
 	return rep, err
 }
 
+// FlushReorder applies anything whose wait for a predecessor has run out.
+//
+// Run drives this on a ticker from the applier goroutine. It is exported for
+// the same reason Ingest is: a synchronous driver — the fault matrix, a replay
+// — needs to end the wait deliberately rather than hope a goroutine notices the
+// clock moved.
+//
+// It must be called from whichever goroutine calls Ingest, and from no other.
+// Applying an event writes the oracle, and the oracle's version bumping and
+// settlement index are correct without a global lock precisely because exactly
+// one goroutine writes them. Calling this from a sweep — which is what an
+// earlier version did, to make sure a sweep never compared against an oracle
+// with an update still sitting in the buffer — put a second writer on it.
+func (c *Check) FlushReorder() {
+	released := c.reorder.expire(c.clk.Now())
+	for i := range released {
+		c.applyOrdered(&released[i])
+	}
+}
+
 // ScanExtras runs one target-to-oracle pass, which is the second half of a
 // full comparison (§5.5).
 func (c *Check) ScanExtras(ctx context.Context) (*differ.Report, error) {
@@ -950,6 +1249,15 @@ func (c *Check) ScanExtras(ctx context.Context) (*differ.Report, error) {
 	}
 	return rep, nil
 }
+
+// PollLag runs one round of the convergence estimator: poll the outstanding
+// probes, rotate the sample, and recompute the settlement window.
+//
+// Run drives this on its own ticker. It is exported for the same reason Ingest
+// is — a test that advances a fake clock and then asks the estimator to look is
+// deterministic, where waiting for a goroutine to notice the clock moved is a
+// race dressed up as a test.
+func (c *Check) PollLag(ctx context.Context) { c.est.Tick(ctx, c.clk.Now()) }
 
 // ConfirmDue drains the confirmation queue for candidates whose window has
 // elapsed. Exposed so `driftwatch diff` can run a complete two-phase cycle in
@@ -986,6 +1294,13 @@ func (c *Check) recordSweepMetrics(rep *differ.Report, err error) {
 		return
 	}
 
+	// Recompute the state gauges here as well as on the refresh ticker. A sweep
+	// has just walked the oracle, so this is the cheapest moment to publish
+	// what it found — and without it a process that only ever sweeps out of
+	// band, which is what `driftwatch diff` and `watch --once` do, would export
+	// the gauges exactly once at startup and never again.
+	c.publishGauges()
+
 	result := metrics.SweepSuccess
 	switch {
 	case errors.Is(err, sweeper.ErrTargetUnavailable):
@@ -996,6 +1311,15 @@ func (c *Check) recordSweepMetrics(rep *differ.Report, err error) {
 		result = metrics.SweepError
 	}
 	c.m.Sweep(metrics.SweepOracleToTarget, result)
+
+	// The reachability gauge has to be set on the failure path too. It is fed
+	// from the report's health, and a sweep that could not reach the store
+	// produces no report — so without this it holds its last value at exactly
+	// the moment it is supposed to change, and the alert on target availability
+	// never fires.
+	if result == metrics.SweepTargetUnavailable {
+		c.m.SetTargetReachable(false)
+	}
 
 	if rep == nil {
 		return
@@ -1174,7 +1498,26 @@ type Status struct {
 	NeverSettled int `json:"neverSettledKeys"`
 	// OracleSaturated reports that the keyspace did not fit, so every finding
 	// is partial. It maps onto the CRD condition of the same name (§10.1).
-	OracleSaturated bool    `json:"oracleSaturated"`
+	OracleSaturated bool `json:"oracleSaturated"`
+	// SnapshotsSeen counts completed snapshot cycles, which is what clears
+	// suspicion after a gap and what bootstrap Strict waits for.
+	SnapshotsSeen uint64 `json:"snapshotsSeen"`
+	// AwaitingSnapshot reports that bootstrap Strict has not yet seen a
+	// publisher retransmit, so nothing is being asserted about any key. It is a
+	// fact about the check rather than about its run loop, which is why it is
+	// here as well as in Phase.
+	AwaitingSnapshot bool `json:"awaitingSnapshot"`
+	// ReorderHeld counts events waiting for a predecessor. A number that stays
+	// high means the stream is arriving badly out of order, or that a publisher
+	// stopped mid-sequence.
+	ReorderHeld int `json:"reorderHeld"`
+	// MultiWriterUnsafe reports that two publishers have written the same key
+	// under an order-dependent projection, so findings on that keyspace reflect
+	// one arbitrary interleaving (§15 row 25). It maps onto the CRD condition of
+	// the same name.
+	MultiWriterUnsafe bool `json:"multiWriterUnsafe"`
+	// MultiWriterKey names the most recent key that showed it.
+	MultiWriterKey  string  `json:"multiWriterKey,omitempty"`
 	OracleEvictions uint64  `json:"oracleEvictions"`
 	CoverageRatio   float64 `json:"coverageRatio"`
 
@@ -1238,6 +1581,10 @@ func (c *Check) Status() Status {
 		NeverSettled:            counts.NeverSettled,
 		OracleEvictions:         c.orc.Evictions(),
 		OracleSaturated:         c.saturated.Load(),
+		SnapshotsSeen:           c.snapshotsSeen.Load(),
+		AwaitingSnapshot:        c.awaitingSnapshot.Load(),
+		ReorderHeld:             c.reorder.heldCount(),
+		MultiWriterUnsafe:       c.multiWriter.Load(),
 		DivergenceByCategory:    map[string]int{},
 		EventsApplied:           c.eventsApplied.Load(),
 		EventsDropped:           c.eventsDropped.Load(),
@@ -1267,13 +1614,18 @@ func (c *Check) Status() Status {
 		st.TargetKeyspaceSize = rep.TargetHealth.KeyspaceSize
 	}
 
+	if key := c.multiWriterKey.Load(); key != nil {
+		st.MultiWriterKey = *key
+	}
+
 	for _, ps := range c.tracker.Publishers() {
 		p := PublisherStatus{
-			ID:              ps.ID,
-			Epoch:           ps.Epoch,
-			HighWaterMark:   ps.HWM,
-			Restarts:        ps.RestartCount,
-			LastSeenSeconds: now.Sub(ps.LastSeen).Seconds(),
+			ID:               ps.ID,
+			Epoch:            ps.Epoch,
+			HighWaterMark:    ps.HWM,
+			Restarts:         ps.RestartCount,
+			LastSeenSeconds:  now.Sub(ps.LastSeen).Seconds(),
+			ClockSkewSeconds: c.skewOf(ps.ID).Seconds(),
 		}
 		if ps.Gaps != nil {
 			p.MissingEvents = ps.Gaps.Count()
@@ -1323,6 +1675,10 @@ func (c *Check) setPhase(p Phase, message string) {
 // check that went back to reporting Watching would be telling an operator its
 // clean reports cover a keyspace they do not.
 func (c *Check) steadyPhase() (phase Phase, message string) {
+	if c.awaitingSnapshot.Load() {
+		return PhaseAwaitingSnapshot,
+			"no key is asserted on until a publisher completes a snapshot cycle"
+	}
 	if !c.saturated.Load() && !c.sourceFailed.Load() {
 		return PhaseWatching, "steady state"
 	}

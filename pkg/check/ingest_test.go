@@ -57,9 +57,13 @@ func publish(t *testing.T, c *check.Check, payloads ...string) {
 		require.True(t, src.PublishPayload([]byte(p)))
 	}
 
+	// Held events count as seen: an event that arrived ahead of its predecessor
+	// is in the reorder buffer rather than lost, and the test decides when to
+	// let its wait run out.
 	require.Eventually(t, func() bool {
 		s := c.Status()
-		return s.EventsApplied+s.EventsDropped >= before+uint64(len(payloads))
+		return s.EventsApplied+s.EventsDropped+uint64(s.ReorderHeld) >=
+			before+uint64(len(payloads))
 	}, 5*time.Second, time.Millisecond, "the applier never drained the source")
 }
 
@@ -94,7 +98,8 @@ func TestIngest_AnUndecodablePayloadMakesKeysSuspectAndThenLetsThemRecover(t *te
 }
 
 func TestIngest_ASequenceGapMakesTheAffectedKeysSuspect(t *testing.T) {
-	c := newCheck(t, inProcessSpec)
+	clk := clock.Fake(epoch())
+	c := newCheckWith(t, inProcessSpec, clk)
 	stop := running(t, c)
 	defer stop()
 
@@ -102,6 +107,12 @@ func TestIngest_ASequenceGapMakesTheAffectedKeysSuspect(t *testing.T) {
 		addEventJSON("replica-0", 1, "0", "replica-0"),
 		addEventJSON("replica-0", 40, "1", "replica-0"), // seq 2..39 never arrived
 	)
+
+	// The jump to seq 40 waits for seq 2 before it counts as a gap: a hole is
+	// only genuinely missing once nothing is going to fill it.
+	clk.Advance(5 * time.Second)
+	_, err := c.SweepNow(context.Background())
+	require.NoError(t, err)
 
 	assertTrust(t, c, "block:0", oracle.TrustSuspect)
 	assertTrust(t, c, "block:1", oracle.TrustSuspect)
@@ -117,7 +128,8 @@ func TestIngest_APartitionedProjectionScopesTheSuspicionToOnePublisher(t *testin
 	// keys the missing events touched, but if publishers own disjoint
 	// keyspaces it knows which ones they could not have touched — and
 	// suspecting those too would cost coverage for nothing.
-	c := newCheck(t, `
+	clk := clock.Fake(epoch())
+	c := newCheckWith(t, `
 source: {type: memory}
 projection:
   type: scalar
@@ -128,7 +140,7 @@ policy:
   settlementWindow: {mode: static, static: 1s, min: 1s, max: 60s}
   sweepInterval: 10s
   bootstrap: Wait
-`)
+`, clk)
 	stop := running(t, c)
 	defer stop()
 
@@ -137,6 +149,13 @@ policy:
 		setEvent("replica-1", 1, "b", "v1"),
 		setEvent("replica-0", 90, "c", "v1"), // replica-0 lost 2..89
 	)
+
+	// seq 90 waits for seq 2 before the gap is declared: a hole is only
+	// genuinely a gap once nothing is going to fill it. Advancing past the
+	// reorder window and sweeping is what ends that wait.
+	clk.Advance(5 * time.Second)
+	_, err := c.SweepNow(context.Background())
+	require.NoError(t, err)
 
 	assertTrust(t, c, "replica-0:a", oracle.TrustSuspect)
 	assertTrust(t, c, "replica-1:b", oracle.TrustComplete,

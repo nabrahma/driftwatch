@@ -128,6 +128,10 @@ type OwnershipSpec struct {
 type TargetSpec struct {
 	Type  string     `yaml:"type"`
 	Redis *RedisSpec `yaml:"redis,omitempty"`
+	// Settings passes target-specific options straight through, which is how
+	// the in-process memory target is told to fail or to be slow. Only the
+	// memory target reads them; the Redis target is configured by RedisSpec.
+	Settings map[string]string `yaml:"settings,omitempty"`
 }
 
 // RedisSpec configures the Redis target.
@@ -174,6 +178,12 @@ type PolicySpec struct {
 	TTLTolerance Duration `yaml:"ttlTolerance"`
 
 	RequirePrimary bool `yaml:"requirePrimary"`
+
+	// ReorderWindow is how long an event waits for its predecessor before
+	// driftwatch concludes the predecessor is genuinely lost (§9 M6). Zero or
+	// negative disables the buffer, which means a reordered stream folds in
+	// arrival order and a non-commutative projection ends up wrong.
+	ReorderWindow Duration `yaml:"reorderWindow"`
 
 	MaxTrackedKeys        int  `yaml:"maxTrackedKeys"`
 	RingSize              int  `yaml:"ringSize"`
@@ -438,6 +448,7 @@ const (
 	DefaultMinWindow         = time.Second
 	DefaultMaxWindow         = 120 * time.Second
 	DefaultTTLTolerance      = 5 * time.Second
+	DefaultReorderWindow     = 2 * time.Second
 	DefaultDialTimeout       = 5 * time.Second
 	DefaultReadTimeout       = 3 * time.Second
 	DefaultConnectTimeout    = 5 * time.Second
@@ -590,6 +601,9 @@ func (s *Spec) defaultPolicy() {
 	}
 	if p.TTLTolerance <= 0 {
 		p.TTLTolerance = Duration(DefaultTTLTolerance)
+	}
+	if p.ReorderWindow == 0 {
+		p.ReorderWindow = Duration(DefaultReorderWindow)
 	}
 	if p.MaxTrackedKeys <= 0 {
 		p.MaxTrackedKeys = DefaultMaxTrackedKeys
@@ -765,6 +779,10 @@ func (s *Spec) ProjectionConfig() map[string]string {
 func (s *Spec) TargetSettings() map[string]string {
 	out := map[string]string{}
 
+	for k, v := range s.Target.Settings {
+		out[k] = v
+	}
+
 	if s.Target.Type != "redis" || s.Target.Redis == nil {
 		return out
 	}
@@ -892,6 +910,41 @@ func (s *Spec) Validate() error {
 	s.validateProjection(v)
 	s.validateTarget(v)
 	s.validatePolicy(v)
+
+	if len(v.errs) == 0 {
+		return nil
+	}
+	return &ValidationError{Errors: v.errs}
+}
+
+// ValidateUpdate checks a spec against the one it replaces.
+//
+// §10.2 makes projection.type and target.type immutable, and the reason is not
+// tidiness. The oracle holds values in the projection's shape and the sweeper
+// reads the store in it; changing either under a running check leaves every
+// tracked key holding a value the new projection cannot fold and the new target
+// cannot read. Every key would report a shape mismatch, which reads exactly
+// like the store having been rewritten by something.
+//
+// The webhook in Phase 7 is a thin adapter over this. The rule lives here so it
+// is enforced by the same code whether the spec arrives through kubectl or
+// through -f, and so it is testable without a cluster (§15 row 59).
+func (s *Spec) ValidateUpdate(previous *Spec) error {
+	if previous == nil {
+		return nil
+	}
+
+	v := &validator{}
+	if previous.Projection.Type != "" && previous.Projection.Type != s.Projection.Type {
+		v.fail("projection.type",
+			"field is immutable; delete and recreate the DriftCheck (was %q, now %q)",
+			previous.Projection.Type, s.Projection.Type)
+	}
+	if previous.Target.Type != "" && previous.Target.Type != s.Target.Type {
+		v.fail("target.type",
+			"field is immutable; delete and recreate the DriftCheck (was %q, now %q)",
+			previous.Target.Type, s.Target.Type)
+	}
 
 	if len(v.errs) == 0 {
 		return nil
@@ -1251,6 +1304,17 @@ func (s *Spec) validatePolicy(v *validator) {
 // mapsSnapshotOps reports whether the codec can recognize a snapshot cycle,
 // either through the canonical op names or through an explicit mapping.
 func (s *Spec) mapsSnapshotOps() bool {
+	// With no opMapping the codec uses driftwatch's own vocabulary, which
+	// includes both snapshot markers — so there is nothing to configure and
+	// §10.2's requirement is already met. The rule exists for a producer whose
+	// operation names are foreign: if the operator had to teach driftwatch what
+	// "BLOCK_STORED" means, they have to teach it the snapshot markers too, or
+	// Strict would wait for a cycle it cannot recognize and never assert
+	// anything at all.
+	if len(s.Codec.OpMapping) == 0 {
+		return true
+	}
+
 	begin, end := false, false
 
 	for _, to := range s.Codec.OpMapping {

@@ -311,8 +311,10 @@ policy:
 			wantMsg:   "between 1 and 1024",
 		},
 		{
-			name:      "strict bootstrap without snapshot ops",
-			yaml:      "source: {type: memory}\npolicy: {bootstrap: Strict}",
+			name: "strict bootstrap with a foreign vocabulary that omits the markers",
+			yaml: `source: {type: memory}
+codec: {opMapping: {BLOCK_STORED: add}}
+policy: {bootstrap: Strict}`,
 			wantField: "policy.bootstrap",
 			wantMsg:   "requires codec.opMapping to define snapshotBegin and snapshotEnd",
 		},
