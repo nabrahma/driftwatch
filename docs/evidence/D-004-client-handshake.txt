@@ -1,0 +1,25 @@
+Evidence for docs/DISCOVERIES.md D-004.
+
+Claim: a read-only allowlist containing exactly the twelve commands named
+in PRD section 5.8 I13 refuses go-redis's own connection handshake, so
+driftwatch cannot read anything at all - and the error says a WRITE was
+attempted.
+
+$ go run . 127.0.0.1:16379 127.0.0.1:17379
+=== Redis 6 ===
+  driftwatch calls: GET k
+  result          : REFUSED by the I13 allowlist: HELLO
+  commands sent   : [GET HELLO]
+  refused         : [HELLO]
+  -> driftwatch never asked for any of the refused commands;
+     go-redis issues them to establish the connection.
+
+=== Redis 7 ===
+  driftwatch calls: GET k
+  result          : REFUSED by the I13 allowlist: HELLO
+  commands sent   : [GET HELLO]
+  refused         : [HELLO]
+  -> driftwatch never asked for any of the refused commands;
+     go-redis issues them to establish the connection.
+
+go-redis version: v9.17.0

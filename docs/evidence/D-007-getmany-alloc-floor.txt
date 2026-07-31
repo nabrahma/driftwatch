@@ -1,0 +1,18 @@
+Evidence for docs/DISCOVERIES.md D-007.
+
+Claim: PRD section 16.8 budgets fewer than 5 allocations per key for
+BenchmarkGetMany500. A bare go-redis pipeline of 500 GETs, with no
+driftwatch code involved at all, is already three times that.
+
+$ go test -run TestFloor -v .
+    main_test.go:45: bare go-redis pipeline of 500 GETs : 8016 allocs total, 16.03 per key
+    main_test.go:62: plus the string-to-bytes copy    : 8516 allocs total, 17.03 per key
+    main_test.go:69: MGET of the same 500 keys         : 4019 allocs total, 8.04 per key
+--- PASS: TestFloor (0.33s)
+PASS
+
+go-redis v9.17.0, miniredis v2.38.0, go1.26.4 windows/amd64.
+
+driftwatch's own GetMany measures 19.04 allocs/key against that 18.03
+floor, i.e. 1.01 per key of its own, per
+pkg/target: TestGetMany500AllocationBudget.

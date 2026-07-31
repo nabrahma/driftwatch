@@ -1,0 +1,31 @@
+Evidence for docs/DISCOVERIES.md D-005.
+
+Claim: INFO accepts several section arguments on Redis 7 and at most one
+on Redis 6. The bare form works on both and returns every field Health
+needs.
+
+$ go run . 127.0.0.1:16379 127.0.0.1:17379
+=== Redis 6 (6.2.23) ===
+  INFO stats memory replication server -> ERROR: ERR syntax error
+  INFO stats                           -> ok (967 bytes)
+  INFO                                 -> ok (4175 bytes)
+  fields Health needs, from bare INFO:
+    redis_version:   6.2.23
+    evicted_keys:    0
+    expired_keys:    0
+    used_memory:     1261160
+    maxmemory:       0
+    role:            master
+
+=== Redis 7 (7.2.15) ===
+  INFO stats memory replication server -> ok (3977 bytes)
+  INFO stats                           -> ok (1595 bytes)
+  INFO                                 -> ok (5348 bytes)
+  fields Health needs, from bare INFO:
+    redis_version:   7.2.15
+    evicted_keys:    0
+    expired_keys:    0
+    used_memory:     1440424
+    maxmemory:       0
+    role:            master
+
