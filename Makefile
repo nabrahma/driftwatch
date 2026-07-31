@@ -67,6 +67,15 @@ vet: ## Run go vet
 test: ## Run the unit suite with the race detector and coverage
 	CGO_ENABLED=1 go test -race -covermode=atomic -coverprofile=cover.out ./...
 
+.PHONY: test-fault
+test-fault: ## Run the fault scenario matrix (PRD section 15), all 60 rows
+	@bash hack/verify-fault-matrix.sh
+	go test -count=1 -v ./test/faults/
+
+.PHONY: test-fault-repeat
+test-fault-repeat: ## Run the fault matrix 20 times and report any flake
+	@bash hack/repeat-tests.sh 20 ./test/faults/
+
 .PHONY: test-integration
 test-integration: ## Run the integration suite against real Redis 6 and 7 (needs Docker)
 	@docker version --format '{{.Server.Version}}' >/dev/null 2>&1 || \

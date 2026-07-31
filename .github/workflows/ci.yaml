@@ -59,6 +59,34 @@ jobs:
       - name: verify fault matrix coverage
         run: ./hack/verify-fault-matrix.sh
 
+      - name: no skipped tests in the fault matrix
+        run: |
+          if grep -rn 't\.Skip' test/faults/; then
+            echo '::error::a skipped fault-matrix test is a row that looks covered and is not'
+            exit 1
+          fi
+          echo 'no skipped tests in test/faults'
+
+  # The fault matrix is the specification of correctness under failure, and it
+  # is only worth having if its answers are the same every time. Running it
+  # apart from the unit suite keeps the timing visible: §20 Phase 6 budgets 120
+  # seconds for all sixty rows.
+  faults:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: fault matrix
+        run: make test-fault
+
+      - name: fault matrix, five consecutive runs
+        run: ./hack/repeat-tests.sh 5 ./test/faults/
+
   unit:
     runs-on: ubuntu-latest
     steps:
