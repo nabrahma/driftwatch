@@ -286,7 +286,36 @@ func (o *Oracle) Get(key string) (Entry, bool) {
 	if !ok {
 		return Entry{}, false
 	}
-	return ent.snapshot(effectiveTrust(ent, floor)), true
+
+	out := ent.snapshot(effectiveTrust(ent, floor))
+	out.Expired = expired(ent, o.cfg.Clock.Now())
+	if out.Expired {
+		// The oracle no longer expects this key to exist, so it reports what it
+		// expects rather than what it last saw. Everything else is preserved:
+		// the version still fences, the trust state still applies, and the
+		// history is still there for `explain` to show why the key went.
+		out.Value = event.Value{}
+	}
+	return out, true
+}
+
+// expired reports whether an entry's own TTL has elapsed.
+//
+// Lazily, at read time, which is both cheaper and closer to what Redis does
+// than sweeping for expired keys would be — and it is what makes
+// expiryPolicy: Model mean anything. That policy is defined as "the oracle
+// expires the key itself, so a missing key in the target is expected", and
+// until §15 row 32 asked, the oracle recorded the TTL from the event and then
+// never acted on it. Every expired key was reported as drift under the one
+// policy that exists to stop that.
+//
+// A nil TTL means the events said nothing about expiry, which is the common
+// case and costs one comparison.
+func expired(e *entry, now time.Time) bool {
+	if e.ttl == nil || *e.ttl <= 0 || e.lastEventAt.IsZero() {
+		return false
+	}
+	return now.After(e.lastEventAt.Add(*e.ttl))
 }
 
 // Version returns just the version, cheaply. Used for fencing (§5.5): read it

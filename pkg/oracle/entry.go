@@ -66,6 +66,11 @@ type Entry struct {
 	LastPublisher string
 
 	TTL *time.Duration
+	// Expired reports that the entry's own TTL has elapsed, so Value has been
+	// reported as absent rather than as whatever the last event left. The
+	// distinction matters to `explain`, which still wants to say what the key
+	// held and when it went.
+	Expired bool
 
 	// Truncated records that a bound was hit while computing this value, so the
 	// expectation is approximate. A divergence on a truncated key says more
