@@ -46,6 +46,11 @@ func (c *counter) Commutative() bool { return c.incrOnly }
 // KeyOwnership reports the configured partitioning, if any.
 func (c *counter) KeyOwnership() OwnershipModel { return c.ownership }
 
+// TargetKey returns the store key this event affects.
+func (c *counter) TargetKey(e *event.Event) (string, error) {
+	return c.keyTmpl.expand(dataFor(e))
+}
+
 // TargetShape reports that values map onto Redis integer strings.
 func (c *counter) TargetShape() Shape { return ShapeCounter }
 

@@ -135,8 +135,20 @@ type Projection interface {
 	// Name returns the registry name.
 	Name() string
 
+	// TargetKey returns the store key this event affects, resolved through the
+	// projection's key template.
+	//
+	// It exists because Apply needs the key's previous value and the caller
+	// cannot know which key that is: the store key is the template's output,
+	// not the event's raw Key field. Without this the composition root looks up
+	// the raw key, always misses, and every event folds onto an empty previous
+	// value — which produces a plausible-looking oracle that is quietly wrong
+	// for every projection with a keyTemplate configured.
+	TargetKey(e *event.Event) (string, error)
+
 	// Apply computes the new state for the key the event touches. prev is the
-	// current value, with Kind ValueAbsent if the key does not exist.
+	// current value, with Kind ValueAbsent if the key does not exist, and must
+	// be the value stored under TargetKey(e).
 	// Returning ActionNone means the event does not affect target state.
 	Apply(prev event.Value, e *event.Event) (Mutation, error)
 

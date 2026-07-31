@@ -74,6 +74,11 @@ func (k *keysetOwnership) Commutative() bool { return false }
 // KeyOwnership reports the configured partitioning, if any.
 func (k *keysetOwnership) KeyOwnership() OwnershipModel { return k.ownership }
 
+// TargetKey returns the store key this event affects.
+func (k *keysetOwnership) TargetKey(e *event.Event) (string, error) {
+	return k.keyTmpl.expand(dataFor(e))
+}
+
 // TargetShape reports that values map onto Redis sets.
 func (k *keysetOwnership) TargetShape() Shape { return ShapeSet }
 

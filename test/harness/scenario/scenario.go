@@ -335,7 +335,14 @@ func (s *Session) ingest(msg source.RawMessage) {
 		s.orc.MarkSuspect(s.suspectPattern(e.Publisher), "sequence gap on "+e.Publisher)
 	}
 
-	prev, _ := s.orc.Get(e.Key)
+	// The oracle is keyed by the projection's output, not by the event's raw
+	// Key: a configured keyTemplate rewrites one into the other, and looking up
+	// the wrong one folds every event onto an empty previous value.
+	key, err := s.proj.TargetKey(&e)
+	if err != nil {
+		return
+	}
+	prev, _ := s.orc.Get(key)
 	mutation, err := s.proj.Apply(prev.Value, &e)
 	if err != nil {
 		return

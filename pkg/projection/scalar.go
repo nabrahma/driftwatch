@@ -33,6 +33,11 @@ func (s *scalar) Commutative() bool { return false }
 // KeyOwnership reports the configured partitioning, if any.
 func (s *scalar) KeyOwnership() OwnershipModel { return s.ownership }
 
+// TargetKey returns the store key this event affects.
+func (s *scalar) TargetKey(e *event.Event) (string, error) {
+	return s.keyTmpl.expand(dataFor(e))
+}
+
 // TargetShape reports that values map onto Redis strings.
 func (s *scalar) TargetShape() Shape { return ShapeScalar }
 
