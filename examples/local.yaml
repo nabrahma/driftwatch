@@ -1,0 +1,31 @@
+# Minimal local configuration (PRD §25.2).
+#
+# This is the same schema as `DriftCheck.spec`, so the file that runs under
+# `driftwatch watch -f examples/local.yaml` is the file that goes into the
+# cluster unchanged.
+#
+#   docker run -d -p 6379:6379 redis
+#   driftwatch watch -f examples/local.yaml
+#
+# The source is `memory`, so no events arrive on their own: this configuration
+# demonstrates the target half of the pipeline against a real Redis. Point
+# `source` at a zmq or nats endpoint to audit a live stream, or use
+# `driftwatch replay -f examples/local.yaml --events events.jsonl` to drive it
+# from a capture.
+
+source:
+  type: memory
+codec:
+  type: json
+projection:
+  type: keysetOwnership
+  keyTemplate: "block:{{.Key}}"
+target:
+  type: redis
+  redis:
+    addr: localhost:6379
+    keyPattern: "block:*"
+policy:
+  settlementWindow: {mode: static, static: 2s}
+  sweepInterval: 10s
+  bootstrap: Wait
