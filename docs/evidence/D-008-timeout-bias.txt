@@ -1,0 +1,28 @@
+Evidence for docs/DISCOVERIES.md D-008.
+
+Claim: discarding timed-out convergence probes shrinks the settlement
+window W, and shrinks it most in exactly the situations W exists to
+absorb.
+
+$ go run .
+MaxPollDelay=2s  safetyFactor=3  10000 probes per scenario
+
+W kept      = p99(all observations, a timeout recorded at MaxPollDelay) x 3
+W discarded = p99(converged observations only) x 3
+
+MODEL A - uniform degradation: the whole materializer slows together
+  scenario                  timeout%     W kept    W discarded W too small by
+  ------------------------ --------- ---------- -------------- --------------
+  healthy                       0.0%      478ms          478ms           1.0x
+  loaded                        0.1%     2.859s         2.807s           1.0x
+  struggling                    5.6%         6s           5.4s           1.1x
+  badly degraded               22.8%         6s         5.815s           1.0x
+
+MODEL B - partial outage: most keys healthy, a subset wedged
+          (one shard down, one replica disconnected, one partition unreachable)
+  scenario                  timeout%     W kept    W discarded W too small by
+  ------------------------ --------- ---------- -------------- --------------
+  0.5% of keys wedged           0.4%      513ms          480ms           1.1x
+  1% of keys wedged             1.1%         6s          477ms          12.6x
+  2% of keys wedged             2.3%         6s          469ms          12.8x
+  5% of keys wedged             5.5%         6s          480ms          12.5x

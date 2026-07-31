@@ -30,6 +30,89 @@ written here in anticipation.
 
 ---
 
+## D-008 — Discarding timed-out probes shrinks the settlement window 12x, and only during an outage
+
+**Found:** Phase 3, implementing the convergence estimator (M11).
+
+**What happened:** the settlement window W is the p99 of measured
+event-to-target convergence, times a safety factor. Probes that never converge
+within `MaxPollDelay` have to be accounted for somehow, and discarding them is
+the obvious choice: nothing was measured, the key may have been deleted, the
+read may have been unlucky. Recording a number that was never observed feels
+like fabricating data.
+
+I measured what each choice does to W. 10,000 probes, `MaxPollDelay` 2s, safety
+factor 3.
+
+Under **uniform degradation** — the whole materializer slowing together, which
+is how one naturally models "it got slow" — discarding barely matters:
+
+```text
+scenario           timeout%   W kept   W discarded   too small by
+healthy                0.0%    478ms         478ms           1.0x
+loaded                 0.1%   2.859s        2.807s           1.0x
+struggling             5.6%       6s          5.4s           1.1x
+badly degraded        22.8%       6s        5.815s           1.0x
+```
+
+At 23% timeouts the two answers are within 3% of each other. On this evidence
+the decision does not matter and discarding is fine.
+
+It is the wrong model. Materializers do not degrade uniformly; a shard goes
+down, a replica disconnects, a consumer group stalls on one partition. Most
+keys stay fast and a minority stop converging entirely:
+
+```text
+scenario                timeout%   W kept   W discarded   too small by
+0.5% of keys wedged         0.4%    513ms         480ms           1.1x
+1%   of keys wedged         1.1%       6s         477ms          12.6x
+2%   of keys wedged         2.3%       6s         469ms          12.8x
+5%   of keys wedged         5.5%       6s         480ms          12.5x
+```
+
+**W discarded does not move at all.** 0.5% wedged or 5% wedged, it sits at
+~480ms, because the surviving observations are the healthy keys and the healthy
+keys did not change. The estimator reports the system is fine while a twentieth
+of the keyspace is not converging.
+
+The two tables differ because of where the 99th percentile falls. Timeouts only
+reach the p99 rank once they exceed 1% of observations — hence nothing at 0.5%
+and a cliff immediately after. Under uniform degradation the keys just below the
+timeout threshold are nearly as slow as the ones just above, so removing the top
+1% costs almost nothing. Under a partial outage the distribution is bimodal:
+removing the timeouts removes the entire failure mode, and what is left is a
+clean measurement of the half of the system that was never broken.
+
+**Why it matters:** the error points the wrong way and is self-reinforcing. W
+exists to absorb materializer slowness. Discarding timeouts makes W insensitive
+to the one failure it exists to absorb, and the worse the outage gets, the more
+of the tail is discarded. W is then ~12x smaller than the measurement supports,
+and every key slow enough to exceed it is reported as drift — during an
+incident, when the operator is already reading the output and deciding what to
+trust. §23 A7's whole argument is that a tool which cries wolf under load gets
+ignored, and this is the mechanism that would have made it do so.
+
+The reason this is worth an entry is the first table. A reasonable engineer
+models "slow" as everything slowing together, measures a 1.0x difference,
+concludes the decision is unimportant, and discards — and is wrong for a reason
+the measurement they took cannot show them.
+
+**Fix:** a timed-out probe is recorded as an observation of `MaxPollDelay`
+rather than discarded (`window.recordTimeout`). It is a floor, not a
+measurement: the probe took *at least* that long, so W derived from it is
+conservative in the safe direction. `Stats.TimedOut` reports the count
+separately so a p99 that is really a wall of timeouts is legible rather than
+hidden, and `Stats.Clamped` reports when the measured p99 wants more than
+`MaxWindow` allows — past that point driftwatch is knowingly running with a
+window it has measured to be too small.
+
+**Evidence:** `docs/evidence/D-008-timeout-bias.txt`
+
+**Regression test:** `pkg/lag: TestEstimator_TimedOutProbesAreRecordedNotDiscarded`,
+`TestProp_TimedOutObservationsNeverLowerThePercentile`
+
+---
+
 ## D-007 — The `<5 allocs/key` budget for batched reads is below the client's own floor
 
 **Found:** Phase 2, writing `BenchmarkGetMany500`.
