@@ -32,6 +32,17 @@ func TestMain(m *testing.M) {
 		// in syscall.syscalln, so the name worth matching is several frames
 		// down and the top-of-stack matcher never fires.
 		goleak.IgnoreAnyFunction("github.com/Microsoft/go-winio.ioCompletionProcessor"),
+
+		// go-redis starts a process-wide time cache and a connection-pool reaper
+		// at package init and never stops them. They are reachable from any
+		// package that links the client, which now includes this one.
+		//
+		// PRD §16.5 anticipates exactly this and permits an ignore for a
+		// third-party goroutine with a reason. Neither of these is driftwatch's,
+		// and one of driftwatch's own would be a bug to fix rather than an entry
+		// to add here.
+		goleak.IgnoreAnyFunction("github.com/redis/go-redis/v9/internal/pool.startGlobalTimeCache.func1"),
+		goleak.IgnoreAnyFunction("github.com/redis/go-redis/v9/internal/pool.(*ConnPool).reaper"),
 	)
 }
 

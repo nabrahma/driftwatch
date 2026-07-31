@@ -67,6 +67,13 @@ vet: ## Run go vet
 test: ## Run the unit suite with the race detector and coverage
 	CGO_ENABLED=1 go test -race -covermode=atomic -coverprofile=cover.out ./...
 
+.PHONY: test-integration
+test-integration: ## Run the integration suite against real Redis 6 and 7 (needs Docker)
+	@docker version --format '{{.Server.Version}}' >/dev/null 2>&1 || \
+		{ echo "Docker is not reachable; the integration suite needs a running daemon"; exit 1; }
+	@echo "Docker $$(docker version --format '{{.Server.Version}}')"
+	CGO_ENABLED=1 go test -tags=integration -race -timeout=25m ./pkg/target/...
+
 .PHONY: install-tools
 install-tools: ## Install the pinned development tools into $(go env GOPATH)/bin
 	GOLANGCI_VERSION=$(GOLANGCI_VERSION) ./hack/install-tools.sh

@@ -21,7 +21,13 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m)
+	goleak.VerifyTestMain(m,
+		// go-redis starts a process-wide time cache and pool reaper at package
+		// init and never stops them. Third-party and permitted by §16.5; none
+		// of driftwatch's own goroutines are ignored anywhere.
+		goleak.IgnoreAnyFunction("github.com/redis/go-redis/v9/internal/pool.startGlobalTimeCache.func1"),
+		goleak.IgnoreAnyFunction("github.com/redis/go-redis/v9/internal/pool.(*ConnPool).reaper"),
+	)
 }
 
 // TestPipeline_100kEventsEndToEnd is the Phase 1 demo from PRD §20.
@@ -49,7 +55,7 @@ func TestPipeline_100kEventsEndToEnd(t *testing.T) {
 		dropRate = 500
 	)
 
-	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	start := epoch()
 	clk := clock.Fake(start)
 
 	dec, err := codec.New("json", nil)
