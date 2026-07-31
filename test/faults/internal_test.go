@@ -38,15 +38,68 @@ const faultWindow = 5 * time.Second
 
 func faultEpoch() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) }
 
-// faultRows maps each §15.3 row Phase 3 owns to the test that covers it.
+// faultRows maps every row of §15 to the test that covers it.
 //
 // The values are the test functions themselves rather than their names, so
 // deleting or renaming a test breaks the build here. A table of strings would
 // let a row quietly become uncovered while still claiming to be covered, which
 // is worse than having no table at all.
 //
-// Later phases extend the range as they take ownership of the remaining rows.
+// The name is checked too, in TestFaultMatrix_Coverage: without that, a
+// copy-paste slip could point two rows at one test and the table would still
+// look complete.
 var faultRows = map[int]func(*testing.T){
+	// §15.1 — event-stream faults.
+	1:  TestFault01_SingleEventDroppedFromTheMaterializer,
+	2:  TestFault02_SingleEventDroppedFromDriftwatch,
+	3:  TestFault03_BurstOfAHundredDroppedFromTheMaterializer,
+	4:  TestFault04_BurstOfAHundredDroppedFromDriftwatch,
+	5:  TestFault05_SustainedDropRateStaysBoundedAndMonotonic,
+	6:  TestFault06_AdjacentPairReorderedOnTheMaterializer,
+	7:  TestFault07_AdjacentPairReorderedOnDriftwatch,
+	8:  TestFault08_WindowShuffleOverTenThousandEvents,
+	9:  TestFault09_ImmediateDuplicateIsAbsorbed,
+	10: TestFault10_DelayedDuplicateDoesNotResetSettlement,
+	11: TestFault11_UniformDelayBeyondTheStaticWindow,
+	12: TestFault12_OnePublisherDelayedAffectsOnlyItsOwnKeys,
+	13: TestFault13_PartitionOfDriftwatchsSource,
+	14: TestFault14_PartitionOfTheMaterializersSource,
+	15: TestFault15_OnePercentCorruptPayloads,
+	16: TestFault16_FiftyPercentCorruptPayloads,
+	17: TestFault17_TruncatedPayload,
+	18: TestFault18_OversizedPayloadIsRefusedWithoutAllocating,
+	19: TestFault19_UnknownOpCode,
+	20: TestFault20_ExplicitRestartWithAnEpochBump,
+	21: TestFault21_ImplicitRestart,
+	22: TestFault22_StaleEventFromAPreviousEpoch,
+	23: TestFault23_PublisherClockFiveMinutesAhead,
+	24: TestFault24_PublisherClockFiveMinutesBehind,
+	25: TestFault25_TwoPublishersWritingTheSameKey,
+	26: TestFault26_HeartbeatOnlyStream,
+	27: TestFault27_FifteenHundredPublishers,
+
+	// §15.2 — target-store faults.
+	28: TestFault28_FlushdbMidRun,
+	29: TestFault29_EvictionUnderMaxmemory,
+	30: TestFault30_TTLExpiryUnderStrictPolicy,
+	31: TestFault31_TTLExpiryUnderIgnorePolicy,
+	32: TestFault32_TTLExpiryUnderModelPolicy,
+	33: TestFault33_OutOfBandWrite,
+	34: TestFault34_OutOfBandDelete,
+	35: TestFault35_WrongTypeIsDriftRatherThanAnError,
+	36: TestFault36_TargetUnreachable,
+	37: TestFault37_TargetHighLatency,
+	38: TestFault38_TargetRestartWithoutPersistence,
+	39: TestFault39_FailoverToALaggingReplica,
+	40: TestFault40_ScanCursorResetByAConcurrentFlush,
+	41: TestFault41_KeyAddedMidScanIsNotAnExtra,
+	42: TestFault42_KeyRemovedMidScanIsNotAnExtra,
+	43: TestFault43_EmptyTargetAndAFullOracle,
+	44: TestFault44_FullTargetEmptyOracleUnderAdopt,
+	45: TestFault45_FullTargetEmptyOracleUnderWait,
+	46: TestFault46_FullTargetEmptyOracleUnderStrict,
+
+	// §15.3 — driftwatch's own faults.
 	47: TestFault47_DroppedEventsMakeKeysSuspectRatherThanWrong,
 	48: TestFault48_OracleSaturationDegradesCoverageRatherThanReporting,
 	49: TestFault49_ConfirmQueueFullDropsCandidatesAndKeepsFindings,
@@ -55,6 +108,12 @@ var faultRows = map[int]func(*testing.T){
 	52: TestFault52_AdaptiveWindowClampsAtItsMaximumAndSaysSo,
 	53: TestFault53_NoObservationsMeansTheFloorAndNoBusyLoop,
 	54: TestFault54_ContextCancellationAbortsASweepPromptly,
+	55: TestFault55_PanicInTheApplierIsContained,
+	56: TestFault56_ProjectionRejectsEveryEvent,
+	57: TestFault57_CloseCalledTwice,
+	58: TestFault58_CloseDuringBootstrap,
+	59: TestFault59_ImmutableFieldsCannotChange,
+	60: TestFault60_FiftyConcurrentChecksInOneManager,
 }
 
 // funcName returns a test function's unqualified name, so the table can be
@@ -464,10 +523,12 @@ func TestFaultMatrix_Coverage(t *testing.T) {
 	// followed. A row with no test is a row where the implementation can do
 	// whatever it likes, and the gap is invisible unless it is asserted.
 	//
-	// Phase 3 owns rows 47 to 54. Later phases extend this range as they take
-	// ownership of the rest; a row added here without a test fails immediately,
-	// which is the point.
-	const firstRow, lastRow = 47, 54
+	// Phase 3 owned rows 47 to 54 and Phase 6 the rest, so the range is now the
+	// whole matrix. hack/verify-fault-matrix.sh checks the same property from
+	// outside the compiler by reflecting over test names; this table checks it
+	// from inside, where deleting or renaming a test is a build failure rather
+	// than a grep that quietly stops matching.
+	const firstRow, lastRow = 1, 60
 
 	for n := firstRow; n <= lastRow; n++ {
 		fn, ok := faultRows[n]
@@ -475,11 +536,12 @@ func TestFaultMatrix_Coverage(t *testing.T) {
 			continue
 		}
 
-		// The name has to carry the row number too. Without it a copy-paste
-		// slip could point two rows at the same test and the table would still
-		// look complete.
+		// The name has to carry the row number too, zero-padded to two digits.
+		// Without it a copy-paste slip could point two rows at the same test and
+		// the table would still look complete; the padding is what makes a
+		// sorted list of test names read in matrix order.
 		name := funcName(fn)
-		assert.True(t, strings.HasPrefix(name, fmt.Sprintf("TestFault%d_", n)),
+		assert.True(t, strings.HasPrefix(name, fmt.Sprintf("TestFault%02d_", n)),
 			"row %d is covered by %s, whose name claims a different row", n, name)
 		t.Logf("row %2d covered by %s", n, name)
 	}
