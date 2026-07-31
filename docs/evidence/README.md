@@ -21,5 +21,10 @@ README has no row here, the claim comes out.
 | `D-011-dns-reresolution.txt` | Caching the first DNS resolution breaks reconnection after a reschedule | `pkg/source` |
 | `D-012-publisher-label-budget.txt` | §12's publisher label default and its cardinality budget are incompatible | `pkg/metrics` |
 | `D-013-projection-key-template.txt` | A key template made the applier fetch the wrong previous value | `pkg/check` |
+| `D-014-commutative-unconsumed.txt` | `Commutative()` was declared by every projection and read by nothing | `pkg/check` |
+| `D-015-declared-and-unwritten-metrics.txt` | Three §12 metrics were exported and never written | `pkg/check` |
+| `D-016-idle-check-memory.txt` | Fifty idle checks held 640 MB of empty channel | `pkg/check` |
+| `fault-matrix-60-rows.txt` | Every row of the §15 fault matrix has a passing named test | `test/faults` |
+| `fault-matrix-20-runs-no-flake.txt` | All 60 rows of §15, 20 consecutive runs, no flakes | `test/faults` |
 | `explain-dropped-event.txt` | `driftwatch explain` names the event the materializer did not apply | `internal/cli` |
 | `phase5-redis-demo.txt` | `driftwatch watch -f examples/local.yaml` against a real Redis | `internal/cli` |

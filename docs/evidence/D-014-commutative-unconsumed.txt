@@ -1,0 +1,62 @@
+D-014 — every projection declares Commutative() and nothing ever read it, so a
+        reordered stream folded the oracle into a state the store could never
+        reach.
+
+PRD §9 M6 defines the method and states the obligation:
+
+    // Commutative reports whether event order affects the final state. If
+    // false, the oracle must order by seq before applying.
+    Commutative() bool
+
+All three projections report false. Nothing ordered by seq.
+
+    $ grep -rn "Commutative()" pkg/ --include=*.go | grep -v _test
+    pkg/projection/projection.go:  Commutative() bool
+    pkg/projection/counter.go:     func (c *counter) Commutative() bool
+    pkg/projection/keyset.go:      func (k *keysetOwnership) Commutative() bool
+    pkg/projection/scalar.go:      func (s *scalar) Commutative() bool
+
+    (declared four times, called zero times)
+
+Found by §15 row 7, which requires that reordering driftwatch's stream produce
+zero findings — "reordering loses no information, only ordering".
+
+The failing assertion, before the fix:
+
+    --- FAIL: TestFault07_AdjacentPairReorderedOnDriftwatch
+        Error:    Should be true
+        Messages: the fold reaches the same place whichever order it saw
+
+The mechanism: a publisher emits `add block:a replica-0` at seq 2 and
+`remove block:a replica-0` at seq 3. The materializer applies them in order and
+ends with the key gone. driftwatch receives them swapped, applies `remove`
+against a key that does not exist yet (a no-op), then `add`, and ends holding
+{replica-0}.
+
+Neither side is broken. The store is correct, driftwatch's expectation is not,
+and driftwatch would report the difference as drift — a false positive it
+manufactured entirely on its own, on a transport doing something PUB/SUB does
+routinely.
+
+Fix: pkg/check/reorder.go. A per-publisher buffer holds an event that arrives
+ahead of its predecessor, releasing on whichever comes first — the predecessor
+arriving, a two-second window expiring, or the buffer filling at 1024 events.
+Enabled whenever the projection reports non-commutative, which is the condition
+§9 M6 already named.
+
+After the fix, the same test:
+
+    --- PASS: TestFault07_AdjacentPairReorderedOnDriftwatch (0.00s)
+
+And row 8, which is the stronger statement — 10,000 events shuffled within a
+sliding window of eight, with the oracle compared against pkg/projection's
+independent reference fold over the events in their true order:
+
+    --- PASS: TestFault08_WindowShuffleOverTenThousandEvents (0.05s)
+        10000 events shuffled within a window of 8: 400 keys compared,
+        0 findings, oracle matches the reference fold on all 400 keys
+
+One limit worth stating: the first event a publisher sends establishes the
+baseline, so a pair swapped at the very start of a stream is indistinguishable
+from a stream that began at the higher sequence number. driftwatch has nothing
+to detect that against and does not pretend to.

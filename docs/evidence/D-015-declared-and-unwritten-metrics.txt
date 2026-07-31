@@ -1,0 +1,54 @@
+D-015 — three §12 metrics were declared, documented and exported, and never
+        written by anything.
+
+docs/METRICS.md listed all three. hack/verify-metrics-docs.sh passed, because it
+checks that the documentation matches the declarations — not that anything ever
+sets them. The name test passed for the same reason. A metric that is registered
+but never written exports nothing at all, so on a dashboard it is indis-
+tinguishable from a metric that is correctly reporting zero.
+
+Each was found by the row of §15 that asked for it:
+
+  driftwatch_publisher_clock_skew_seconds   §15 rows 23, 24
+      Nothing measured skew anywhere in the pipeline. pkg/explain computed it
+      per key from the event history for its CLOCK_SKEW_HIGH diagnosis, and
+      that value never reached the metric or the status block. An operator
+      watching for a publisher whose clock had drifted would have seen a flat
+      line whatever happened.
+
+  driftwatch_events_dropped_total{reason="unknown_op"}    §15 row 19
+  driftwatch_events_dropped_total{reason="too_large"}     §15 row 18
+      pkg/codec distinguishes ErrMalformed, ErrUnknownOp and ErrTooLarge, with
+      a comment in codec.go saying why the three are separate. pkg/check
+      reported every one of them as decode_error.
+
+      The distinction is the whole point: "I could not parse this" sends an
+      operator to look at the serializer, "I parsed it and do not know that
+      operation" sends them to the producer that added an event type nobody
+      configured, and "this frame was too big" sends them to neither.
+
+The failing assertions, before the fix:
+
+    --- FAIL: TestFault19_UnknownOpCode
+        Error:    Not equal: expected 1, actual 0
+        Messages: the payload parsed; it was the operation that was not recognized
+        Error:    Should be zero, but was 1
+        Messages: and it must not be reported as a parse failure, which would
+                  send the operator to look at the wrong system
+
+    --- FAIL: TestFault23_PublisherClockFiveMinutesAhead
+        Error:    Max difference between 300 and 0 allowed is 1, but difference was 300
+        Messages: the skew is measured and reported
+
+A fourth, of the same shape, from §15 row 36:
+
+  driftwatch_target_reachable
+      Set from the sweep report's health, and a sweep that cannot reach the
+      store produces no report — so the gauge held its last value at exactly
+      the moment it was supposed to change. It read 1 throughout an outage,
+      which is the one reading that matters.
+
+    --- FAIL: TestFault36_TargetUnreachable
+        Error:    Should be zero, but was 1
+
+All four now have a row of §15 asserting the value, not merely the name.

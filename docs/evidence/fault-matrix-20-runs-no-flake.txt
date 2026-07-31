@@ -1,0 +1,29 @@
+repeat-tests: 20 consecutive runs of ./test/faults/
+go: go version go1.26.4 windows/amd64
+started: 2026-07-31T22:10:23Z
+
+run  1/20  ok      6983ms
+run  2/20  ok      6922ms
+run  3/20  ok      7065ms
+run  4/20  ok      8227ms
+run  5/20  ok      8194ms
+run  6/20  ok      6760ms
+run  7/20  ok      6991ms
+run  8/20  ok      6906ms
+run  9/20  ok      6915ms
+run 10/20  ok      6887ms
+run 11/20  ok      6935ms
+run 12/20  ok      6757ms
+run 13/20  ok      6826ms
+run 14/20  ok      6721ms
+run 15/20  ok      6908ms
+run 16/20  ok      6912ms
+run 17/20  ok      6996ms
+run 18/20  ok      6963ms
+run 19/20  ok      6823ms
+run 20/20  ok      6866ms
+
+finished: 2026-07-31T22:12:45Z
+wall time: 142s
+slowest run: 8227ms
+result: 20/20 runs passed, no flakes

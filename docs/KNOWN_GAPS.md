@@ -57,3 +57,40 @@ does not help the workload measured here, where each key sees a single event.
 
 **Not a gap:** the bound itself holds. Invariant I8 is proven by
 `TestProp_MemoryBounded`, and the oracle never exceeds `MaxTrackedKeys`.
+
+---
+
+## G-002 — Reordering at the very start of a publisher's stream cannot be detected
+
+**Kind:** Real blind spot, inherent rather than unimplemented.
+
+The reorder buffer added in Phase 6 (see D-014) restores sequence order within a
+bounded window, so an adjacent pair delivered out of order folds into the same
+oracle state a correctly-ordered stream would. It works by knowing which
+sequence number it expects next.
+
+It has nothing to expect from the first event a publisher sends. A stream whose
+first two events arrive as seq 2 then seq 1 is indistinguishable, at the moment
+seq 2 arrives, from a stream that legitimately begins at seq 2 — which is the
+normal case, because driftwatch attaches to a publisher that has been running
+for hours and adopts whatever sequence it first sees as a baseline (§5.2).
+
+**What it costs.** For a non-commutative projection, if the very first two
+events driftwatch sees from a publisher are reordered *and* they touch the same
+key *and* their order matters — `add m` then `remove m`, not `add m1` then
+`add m2` — the oracle can hold a value the store does not. That key stays wrong
+until a later event overwrites it.
+
+**What an operator should watch.** Nothing specific: the window is one pair of
+events at attach time, per publisher, per restart. If it matters, bootstrap
+`Strict` closes it completely — driftwatch asserts nothing until a publisher
+retransmits its state, which supersedes anything mis-folded at attach.
+
+**How it would be closed.** It cannot be, from the subscriber side, without the
+publisher declaring where its stream starts. An explicit `snapshotBegin` at
+startup does exactly that, which is what bootstrap `Strict` requires and why
+that mode exists.
+
+**Asserted, not assumed:** `test/faults: TestFault07_AdjacentPairReorderedOnDriftwatch`
+seeds a stream before reordering the pair, with a comment saying why. The
+limitation is in the test rather than hidden by it.

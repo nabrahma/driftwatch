@@ -681,3 +681,84 @@ expander `Apply` uses.
 - `pkg/check` and the scenario harness both resolve the store key before the
   lookup; the harness had the same latent bug, invisible only because none of its
   projections were configured with a key template.
+
+---
+
+## ADR-0010 — Phase 6 additions: a reorder buffer, an AwaitingSnapshot phase, and one extra test file
+
+**Status:** Accepted
+**Date:** 2026-08-01
+**Phase:** 6
+**PRD reference:** §7, §9 M6, §10.1, §15
+
+### Context
+
+Writing the sixty rows of §15 turned up four places where the PRD's own
+statements were not consistent with each other or with the code. Each needed a
+decision rather than a test that quietly asserted less.
+
+**1. `Commutative()` was declared and never consumed.** §9 M6 gives every
+projection a `Commutative` method and says that when it reports false "the
+oracle must order by seq before applying". Nothing did. §15 row 7 requires that
+reordering driftwatch's stream produces zero findings, and without ordering it
+produces a permanently wrong oracle.
+
+**2. §15 row 46 names a phase §10.1 does not list.** The phase enumeration is
+`Pending | Bootstrapping | Watching | Degraded | Paused | Failed`; row 46
+expects `Phase: AwaitingSnapshot`.
+
+**3. §10.2 blocks bootstrap `Strict` on the canonical codec.** The rule is that
+`Strict` requires `codec.opMapping` to define `snapshotBegin` and
+`snapshotEnd`. But every registered codec already recognises driftwatch's own
+operation names, so with no `opMapping` at all a snapshot cycle is recognised
+perfectly well — and the rule made row 46 unconfigurable.
+
+**4. §7 lists fourteen files for `test/faults/` and the matrix has sixty rows.**
+Three of them — two publishers on one key, a heartbeat-only stream, fifteen
+hundred publishers — are about the publisher population rather than about a
+fault applied to a stream.
+
+### Decision
+
+**1. A bounded reorder buffer in the ingest path** (`pkg/check/reorder.go`), on
+by default for any non-commutative projection, with a two-second window
+configurable as `policy.reorderWindow`. An event that arrives ahead of its
+predecessor waits, and stops waiting on whichever comes first: the predecessor
+arriving, the window expiring, or the per-publisher buffer filling. When the
+wait times out the hole is a real gap and seqtrack records it as one.
+
+The alternative — leaving it out and testing row 7 with a pair that happens to
+commute — would have left the tool wrong on any transport that reorders, which
+is all of them.
+
+**2. `PhaseAwaitingSnapshot` is added**, deviating from §10.1's list. §15 row 46
+is the more specific requirement and the more useful behaviour: a check that
+reported `Watching` while deliberately asserting nothing would read as a clean
+bill of health. `Status.AwaitingSnapshot` carries the same fact independently of
+the run loop, which is what the CRD condition in Phase 7 will map onto.
+
+**3. §10.2's `Strict` rule now applies only when an `opMapping` is configured.**
+The rule's purpose is "you must be able to recognise a snapshot cycle". With no
+mapping the canonical names are in force and that is already true; with a
+mapping, the operator has taught driftwatch a foreign vocabulary and has to
+teach it the snapshot markers too, or `Strict` would wait forever for a cycle it
+cannot see. The error is unchanged for that case.
+
+**4. `test/faults/publisher_test.go` is added**, holding rows 25 to 27. Filing
+them under `restart_test.go` or `clockskew_test.go` would put them where nobody
+would look. §7's file list predates the matrix having sixty rows.
+
+### Consequences
+
+- Out-of-order delivery no longer corrupts the oracle, at the cost of up to
+  `reorderWindow` of added latency for the events that were out of order — and
+  a gap is now declared one window later than it used to be, which is strictly
+  more accurate.
+- An undecodable frame leaves a hole nothing can fill, so the events behind it
+  wait out the window. Bounded, and the price of not treating every reordered
+  pair as loss. Tested by §15 rows 15 and 16.
+- Phase 7's CRD status enum gains a value, and its conditions gain
+  `AwaitingSnapshot` and `MultiWriterUnsafe`.
+- `hack/verify-fault-matrix.sh` enforces the sixty rows from outside the
+  compiler and `TestFaultMatrix_Coverage` from inside, so neither a renamed test
+  nor a deleted one can leave a row silently uncovered.

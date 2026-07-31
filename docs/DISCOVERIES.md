@@ -30,6 +30,135 @@ written here in anticipation.
 
 ---
 
+## D-016 — Fifty idle checks held 640 MB, essentially all of it an empty channel
+
+**Found:** Phase 6, writing §15 row 60.
+
+**What happened:** The row requires memory to be linear in the number of checks
+and small enough that a manager can hold a realistic number of them. Fifty
+checks that had each ingested one event measured 12.9 MB apiece.
+
+The whole of it was one allocation. `pkg/check` sizes the channel between the
+source and the applier from `policy.ingestBufferSize`, whose §10.1 default is
+200,000, and a `source.RawMessage` is 64 bytes: 12.8 MB reserved at
+construction, per check, before a single message arrives.
+
+**Why it matters:** The default is correct for what it was written for. §10.2
+requires the ingest buffer to exceed the socket's high-water mark so that loss
+happens in the channel, where driftwatch counts it and can mark the affected
+keys suspect, rather than inside the transport where it is invisible. That
+argument is sound — and it only applies to a transport that can drop.
+
+A file source blocks its reader. A memory source is in-process. Neither can lose
+a message however far behind the applier falls, and both were paying 12.8 MB for
+a buffer sized against a socket they do not have. In the operator, which §15 row
+60 says must run fifty checks in one process, that is 640 MB of channel holding
+nothing.
+
+**Fix:** `ingestBufferFor` in `pkg/check`. A zmq or nats source keeps the
+configured size, because for those the §10.2 argument holds; everything else is
+capped at 4,096. Per-check memory went from 12.9 MB to 387 KiB, and what remains
+is the oracle's shards and settlement index, which is real state.
+
+**Evidence:** `docs/evidence/D-016-idle-check-memory.txt`
+
+**Regression test:** `test/faults: TestFault60_FiftyConcurrentChecksInOneManager`
+— it asserts a per-check ceiling, so the allocation cannot creep back.
+
+---
+
+## D-015 — Three metrics were declared, documented, exported and never written
+
+**Found:** Phase 6, writing §15 rows 18, 19, 23, 24 and 36.
+
+**What happened:** `driftwatch_publisher_clock_skew_seconds`,
+`driftwatch_events_dropped_total{reason="unknown_op"}` and
+`{reason="too_large"}` were all registered and all documented, and nothing in
+the codebase ever set them. `driftwatch_target_reachable` had the same shape:
+it was set only from a successful sweep's report, so a sweep that could not
+reach the store left it holding its previous value.
+
+Nothing caught it. `hack/verify-metrics-docs.sh` checks that the documentation
+matches the declarations, and the name test checks that the registry matches a
+hand-written list — both were satisfied, because both are about names. A metric
+registered and never written exports no series at all, which on a dashboard is
+indistinguishable from one correctly reporting zero.
+
+The drop reasons are the sharpest case. `pkg/codec` already distinguishes
+`ErrMalformed`, `ErrUnknownOp` and `ErrTooLarge`, with a comment saying why the
+three are separate; `pkg/check` reported all of them as `decode_error`.
+
+**Why it matters:** Each of the four is the metric an operator would reach for
+in exactly the situation it was silent in. `target_reachable` read 1 throughout
+an outage. `clock_skew_seconds` read nothing while a publisher's clock drifted.
+And the collapsed drop reasons send someone to the serializer when the real
+answer is that a producer started emitting an event type nobody configured.
+
+**Why the name tests were not enough:** they assert the contract's shape. §15
+asserts its behaviour — each of these was found by the row that names the value,
+not the metric.
+
+**Fix:** `decodeReason` maps the codec's typed errors onto the §12 reasons;
+`recordSkew` measures the publisher offset and feeds both the metric and the
+status block; `recordSweepMetrics` sets reachability on the failure path.
+`publishGauges` is also now called after every sweep, so a process that only
+sweeps out of band — which is what `driftwatch diff` and `watch --once` do —
+exports its state gauges more than once.
+
+**Evidence:** `docs/evidence/D-015-declared-and-unwritten-metrics.txt`
+
+**Regression test:** `test/faults`: rows 18, 19, 23, 24 and 36.
+
+---
+
+## D-014 — `Commutative()` was declared by every projection and read by nothing
+
+**Found:** Phase 6, writing §15 row 7.
+
+**What happened:** §9 M6 defines the method and states the obligation plainly —
+"If false, the oracle must order by seq before applying". All three projections
+report false. Nothing anywhere ordered by sequence number; the method was
+declared four times and called zero times.
+
+Row 7 requires that reordering driftwatch's stream produce zero findings, on the
+grounds that reordering loses ordering and not information. It failed.
+
+A publisher emits `add block:a replica-0` then `remove block:a replica-0`. The
+materializer applies them in order and ends with the key gone. driftwatch
+receives them swapped, applies the remove against a key that does not exist yet
+— a no-op — then the add, and ends holding a member the store does not have.
+
+**Why it matters:** Neither side is broken. The store is correct, driftwatch's
+expectation is not, and driftwatch reports the difference as drift. It is a
+false positive it manufactured entirely on its own, on a transport doing
+something PUB/SUB does routinely, and it never resolves: the oracle stays wrong
+until some later event happens to overwrite that key.
+
+This is the failure mode the whole project is built to avoid, arriving through
+the one mechanism nobody had implemented.
+
+**Fix:** `pkg/check/reorder.go`. A per-publisher buffer holds an event that
+arrives ahead of its predecessor and releases on whichever comes first: the
+predecessor arriving, a two-second window expiring, or the buffer filling at
+1,024 events. Bounded in both directions on purpose — holding forever would turn
+one lost message into a permanently stalled publisher, and releasing immediately
+is what produced the bug. When the wait times out the hole is a real gap and
+seqtrack records it as one, just later and with far fewer false alarms.
+
+Two consequences worth knowing. Gap detection is now deferred by up to the
+reorder window, which is strictly more accurate. And an undecodable frame leaves
+a hole nothing can fill — its sequence number was in the part that would not
+parse — so the events behind it wait out the window; §15 rows 15 and 16 pin that.
+
+**Evidence:** `docs/evidence/D-014-commutative-unconsumed.txt`
+
+**Regression test:** `test/faults: TestFault07_AdjacentPairReorderedOnDriftwatch`,
+and `TestFault08_WindowShuffleOverTenThousandEvents`, which shuffles 10,000
+events within a sliding window of eight and compares the oracle against
+`pkg/projection`'s independent reference fold.
+
+---
+
 ## D-013 — A key template makes the oracle key and the event key different, and the applier used the wrong one
 
 **Found:** Phase 5, on the first run of `TestCheck_EndToEnd_InProcess`.

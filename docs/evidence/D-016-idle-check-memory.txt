@@ -1,0 +1,38 @@
+D-016 — fifty idle checks held 640 MB, essentially all of it an empty channel.
+
+Found by §15 row 60, which requires that memory be linear in the number of
+checks and that a manager be able to hold a realistic number of them.
+
+    --- FAIL: TestFault60_FiftyConcurrentChecksInOneManager
+        Error:    "12938687" is not less than "8388608"
+        Messages: 12938687 bytes per idle check; memory has to be linear and
+                  small, or a manager cannot hold a realistic number of them
+
+12.9 MB per check that had ingested a single event. The whole of it was one
+allocation:
+
+    raw: make(chan source.RawMessage, spec.Source.IngestBufferSize)
+
+with §10.1's default ingestBufferSize of 200,000 and a RawMessage of 64 bytes:
+
+    200,000 x 64 = 12.8 MB, allocated at construction, per check
+
+The default is correct for what it was written for. §10.2 requires the ingest
+buffer to exceed the socket's high-water mark so that loss happens in the
+channel, where driftwatch counts it, rather than inside the transport where it
+is invisible. That argument applies to a transport that can drop.
+
+It does not apply to a file source, whose reader blocks, or a memory source,
+which is in-process. Neither can lose a message however far behind the applier
+falls, and both were paying 12.8 MB for a buffer sized against a socket they do
+not have.
+
+Fix: ingestBufferFor() in pkg/check. zmq and nats keep the configured size;
+everything else is capped at 4096.
+
+    --- PASS: TestFault60_FiftyConcurrentChecksInOneManager (0.02s)
+        50 concurrent checks: 50 distinct metric series, ~387 KiB per check
+
+387 KiB against 12.9 MB — a factor of 33, and the remaining figure is the
+oracle's 64 shards and their settlement index, which is real state rather than
+an empty buffer.
