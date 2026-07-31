@@ -46,7 +46,7 @@ func TestFaults_DriftwatchOwnLoss_ReportsSuspectNotConfirmed(t *testing.T) {
 			s.RunMaterializer()
 			s.AdvanceClock(5 * window)
 
-			rep := s.SweepAndConfirm(window)
+			rep := s.SweepAndConfirm()
 
 			// The oracle is genuinely wrong, so there is something to see.
 			require.NotEmpty(t, rep.Findings,
@@ -82,7 +82,7 @@ func TestFaults_MaterializerLoss_ReportsConfirmedDrift(t *testing.T) {
 			s.RunMaterializer()
 			s.AdvanceClock(5 * window)
 
-			rep := s.SweepAndConfirm(window)
+			rep := s.SweepAndConfirm()
 
 			require.NotEmpty(t, rep.Findings)
 			assert.NotEmpty(t, s.Confirmed(),
@@ -108,7 +108,7 @@ func TestScenario_AHealthyPipelineProducesNoFindings(t *testing.T) {
 			s.RunMaterializer()
 			s.AdvanceClock(5 * window)
 
-			rep := s.SweepAndConfirm(window)
+			rep := s.SweepAndConfirm()
 
 			s.RequireDivergentKeys(rep, 0)
 			s.RequireNoConfirmedDrift()
@@ -133,7 +133,7 @@ func TestScenario_ASingleDroppedEventDivergesTheKeyItTouched(t *testing.T) {
 			s.RunMaterializer()
 			s.AdvanceClock(5 * window)
 
-			rep := s.SweepAndConfirm(window)
+			rep := s.SweepAndConfirm()
 			key := s.KeyForSeq(droppedSeq)
 			require.NotEmpty(t, key, "the publisher records which key each seq touched")
 
@@ -171,7 +171,7 @@ func TestScenario_SetMembershipDivergesOnMemberMismatch(t *testing.T) {
 			s.RunMaterializer()
 			s.AdvanceClock(5 * window)
 
-			rep := s.SweepAndConfirm(window)
+			rep := s.SweepAndConfirm()
 
 			require.NotEmpty(t, rep.Findings)
 			// Dropping set operations leaves the target holding the wrong
@@ -203,7 +203,7 @@ func TestScenario_ADelayedMaterializerIsNotReportedAsDrift(t *testing.T) {
 			// Well past the longest delay, but the events did all arrive.
 			s.AdvanceClock(60 * time.Second)
 
-			rep := s.SweepAndConfirm(10 * time.Second)
+			rep := s.SweepAndConfirm()
 
 			s.RequireDivergentKeys(rep, 0)
 			s.RequireNoConfirmedDrift()
@@ -225,7 +225,7 @@ func TestScenario_DuplicateDeliveryChangesNothing(t *testing.T) {
 			s.RunMaterializer()
 			s.AdvanceClock(5 * window)
 
-			rep := s.SweepAndConfirm(window)
+			rep := s.SweepAndConfirm()
 
 			s.RequireDivergentKeys(rep, 0)
 			s.RequireNoConfirmedDrift()
@@ -248,7 +248,7 @@ func TestScenario_AnExplicitRestartDoesNotLookLikeLoss(t *testing.T) {
 				s.RunMaterializer()
 				s.AdvanceClock(5 * window)
 
-				rep := s.SweepAndConfirm(window)
+				rep := s.SweepAndConfirm()
 
 				assert.Zero(t, rep.Alertable(),
 					"a publisher that announced its restart has not lost anything")
@@ -273,7 +273,7 @@ func TestScenario_AnExplicitRestartDoesNotLookLikeLoss(t *testing.T) {
 				s.RunMaterializer()
 				s.AdvanceClock(5 * window)
 
-				rep := s.SweepAndConfirm(window)
+				rep := s.SweepAndConfirm()
 
 				// Whatever it finds, it must not claim the store is wrong: a
 				// publisher that went backwards without saying so leaves
@@ -303,7 +303,7 @@ func TestScenario_ClockSkewDoesNotAffectSettlement(t *testing.T) {
 			s.RunMaterializer()
 			s.AdvanceClock(5 * window)
 
-			rep := s.SweepAndConfirm(window)
+			rep := s.SweepAndConfirm()
 
 			assert.Positive(t, rep.KeysCompared,
 				"the skewed publisher's keys still settle and are still compared")
@@ -326,7 +326,7 @@ func TestScenario_TheSweepNeverWritesToTheStore(t *testing.T) {
 			s.PublishEvents(300)
 			s.RunMaterializer()
 			s.AdvanceClock(5 * window)
-			s.SweepAndConfirm(window)
+			s.SweepAndConfirm()
 
 			// The materializer's writes are filed as fixture setup; anything in
 			// Violations would be driftwatch's own.

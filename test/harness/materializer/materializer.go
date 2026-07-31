@@ -53,10 +53,17 @@ type Store interface {
 
 // Config configures a Materializer.
 type Config struct {
-	Store   Store
-	Codec   codec.Codec
-	Shape   projection.Shape
-	OnError func(error)
+	Store Store
+	Codec codec.Codec
+	Shape projection.Shape
+	// Projection supplies the key naming. A real materializer maintains an
+	// index under the same key scheme the events describe, so when a keyTemplate
+	// rewrites "9f3a" into "block:9f3a" it has to write to "block:9f3a" too.
+	// Without this the reference consumer and the oracle name different keys and
+	// every scenario with a template reports drift that is purely the harness
+	// disagreeing with itself.
+	Projection projection.Projection
+	OnError    func(error)
 }
 
 // Materializer applies decoded events to a store.
@@ -121,20 +128,33 @@ func (m *Materializer) Apply(msg source.RawMessage) {
 		return
 	}
 
+	key := e.Key
+	if m.cfg.Projection != nil {
+		resolved, keyErr := m.cfg.Projection.TargetKey(&e)
+		if keyErr != nil {
+			m.failed.Add(1)
+			if m.cfg.OnError != nil {
+				m.cfg.OnError(keyErr)
+			}
+			return
+		}
+		key = resolved
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	switch e.Op {
 	case event.OpSet:
-		m.cfg.Store.Set(e.Key, e.Value)
+		m.cfg.Store.Set(key, e.Value)
 	case event.OpDelete:
-		m.cfg.Store.Delete(e.Key)
+		m.cfg.Store.Delete(key)
 	case event.OpAdd:
-		m.cfg.Store.AddMember(e.Key, e.Member)
+		m.cfg.Store.AddMember(key, e.Member)
 	case event.OpRemove:
-		m.cfg.Store.RemoveMember(e.Key, e.Member)
+		m.cfg.Store.RemoveMember(key, e.Member)
 	case event.OpIncr:
-		m.cfg.Store.Incr(e.Key, e.Delta)
+		m.cfg.Store.Incr(key, e.Delta)
 	case event.OpUnknown, event.OpSnapshotBegin, event.OpSnapshotEnd, event.OpHeartbeat:
 		// These touch no key. A real materializer ignores them too.
 		return
