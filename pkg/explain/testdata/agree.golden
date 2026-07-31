@@ -1,0 +1,18 @@
+KEY  block:9f3a
+──────────────────────────────────────────────────────────────────────
+VERDICT   AGREE                                        settled 47s ago
+
+ORACLE    set(2)[replica-0 replica-2]        version 2   trust complete
+TARGET    set(2)[replica-0 replica-2]        read just now
+
+DIAGNOSIS
+  [high]   Oracle and target agree at version 2.
+           - both hold set(2)[replica-0 replica-2]
+           - last event 47s ago, settlement window 5s
+
+HISTORY (last 2)
+  #0   8801     replica-0   add      replica-0 → {replica-0}            v1    -49s
+  #1   8802     replica-0   add      replica-2 → {replica-0,replica-2}  v2    -47s
+
+PUBLISHERS
+  replica-0     epoch 1    hwm 8802      gaps 0        last seen 47s ago

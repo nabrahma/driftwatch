@@ -1,0 +1,23 @@
+KEY  block:9f3a
+──────────────────────────────────────────────────────────────────────
+VERDICT   DIVERGED                                     settled 47s ago
+
+ORACLE    set(1)[replica-0]                  version 2   trust complete
+TARGET    absent                             read just now
+DIFF      missing in target: replica-0
+
+DIAGNOSIS
+  [high]   Target is missing this key. driftwatch observed a complete event sequence for publisher
+           replica-0 (seq 8801..8802, no gaps), so the materializer most likely dropped or failed
+           to apply seq 8802.
+           - oracle expects set(1)[replica-0] at version 2
+           - target holds nothing, read just now
+           - 2 events for this key in the retained history
+           - the store reports 0 evictions in total, so eviction is unlikely
+
+HISTORY (last 2)
+  #0   8801     replica-0   add      replica-0 → {replica-0}            v1    -50s
+  #1   8802     replica-0   add      replica-0 → {replica-0}            v2    -47s
+
+PUBLISHERS
+  replica-0     epoch 1    hwm 8802      gaps 0        last seen 47s ago

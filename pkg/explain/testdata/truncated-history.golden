@@ -1,0 +1,28 @@
+KEY  block:9f3a
+──────────────────────────────────────────────────────────────────────
+VERDICT   DIVERGED                                   settled 1m02s ago
+
+ORACLE    set(1)[replica-0]                  version 12   trust complete
+TARGET    absent                             read just now
+DIFF      missing in target: replica-0
+
+DIAGNOSIS
+  [high]   Only the last 4 events are retained; earlier history is unavailable.
+           - the per-key ring holds 4 entries (policy.ringSize)
+           - the oracle is at version 12, so at least 8 events are not shown
+  [high]   Target is missing this key. driftwatch observed a complete event sequence for publisher
+           replica-0 (seq 8809..8812, no gaps), so the materializer most likely dropped or failed
+           to apply seq 8812.
+           - oracle expects set(1)[replica-0] at version 12
+           - target holds nothing, read just now
+           - 4 events for this key in the retained history
+           - the store reports 0 evictions in total, so eviction is unlikely
+
+HISTORY (last 4 retained, earlier events discarded)
+  #0   8809     replica-0   add      replica-0 → {replica-0}            v9    -1m08s
+  #1   8810     replica-0   add      replica-0 → {replica-0}            v10   -1m06s
+  #2   8811     replica-0   add      replica-0 → {replica-0}            v11   -1m04s
+  #3   8812     replica-0   add      replica-0 → {replica-0}            v12   -1m02s
+
+PUBLISHERS
+  replica-0     epoch 1    hwm 8812      gaps 0        last seen 1m02s ago

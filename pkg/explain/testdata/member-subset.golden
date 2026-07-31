@@ -1,0 +1,23 @@
+KEY  block:9f3a
+──────────────────────────────────────────────────────────────────────
+VERDICT   DIVERGED                                     settled 47s ago
+
+ORACLE    set(2)[replica-0 replica-2]        version 4   trust complete
+TARGET    set(1)[replica-0]                  read just now
+DIFF      missing in target: replica-2
+
+DIAGNOSIS
+  [high]   Target is missing 1 of 2 members (replica-2); consistent with dropped add events rather
+           than a wholesale failure.
+           - target holds 1 member, oracle expects 2
+           - every member the target does hold is one the oracle expects, so the materializer is
+             applying events rather than failing entirely
+
+HISTORY (last 4)
+  #0   8839     replica-0   add      replica-0 → {replica-0}            v1    -55s
+  #1   8841     replica-0   add      replica-2 → {replica-0,replica-2}  v2    -51s
+  #2   8842     replica-0   remove   replica-2 → {replica-0}            v3    -49s
+  #3   8847     replica-0   add      replica-2 → {replica-0,replica-2}  v4    -47s
+
+PUBLISHERS
+  replica-0     epoch 1    hwm 8847      gaps 0        last seen 47s ago

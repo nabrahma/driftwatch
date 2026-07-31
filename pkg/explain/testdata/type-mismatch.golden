@@ -1,0 +1,26 @@
+KEY  block:9f3a
+──────────────────────────────────────────────────────────────────────
+VERDICT   DIVERGED                                   settled 1m00s ago
+
+ORACLE    set(1)[replica-0]                  version 1   trust complete
+TARGET    holds a string                     which this projection cannot read
+DIFF      missing in target: replica-0
+
+DIAGNOSIS
+  [high]   Target is missing this key. driftwatch observed a complete event sequence for publisher
+           replica-0 (seq 8801..8801, no gaps), so the materializer most likely dropped or failed
+           to apply seq 8801.
+           - oracle expects set(1)[replica-0] at version 1
+           - target holds nothing, read just now
+           - 1 events for this key in the retained history
+           - the store reports 0 evictions in total, so eviction is unlikely
+  [high]   Target holds type string but the set projection expects set; the projection may be
+           misconfigured for this keyspace.
+           - the store answered, so this is what it holds rather than a failed read
+           - a whole keyspace of these usually means the wrong keyTemplate
+
+HISTORY (last 1)
+  #0   8801     replica-0   add      replica-0 → {replica-0}            v1    -1m00s
+
+PUBLISHERS
+  replica-0     epoch 1    hwm 8801      gaps 0        last seen 1m00s ago

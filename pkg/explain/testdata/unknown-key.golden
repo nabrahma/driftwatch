@@ -1,0 +1,17 @@
+KEY  block:typo-in-the-key-name
+──────────────────────────────────────────────────────────────────────
+VERDICT   UNKNOWN KEY                               no events observed
+
+ORACLE    absent                             never observed
+TARGET    absent                             read just now
+
+DIAGNOSIS
+  [high]   driftwatch has never observed an event for this key.
+           - the oracle has no entry, not even a tombstone from a deletion
+           - the store does not hold it either: most likely the key name is wrong, or the
+             keyTemplate does not produce this shape
+
+HISTORY   none
+
+PUBLISHERS
+  replica-0     epoch 1    hwm 8801      gaps 0        last seen 1m00s ago

@@ -1,0 +1,24 @@
+KEY  block:9f3a
+──────────────────────────────────────────────────────────────────────
+VERDICT   IN FLIGHT                         in flight, settles in 3.5s
+
+ORACLE    set(2)[replica-0 replica-2]        version 2   trust complete
+TARGET    set(1)[replica-0]                  read just now
+DIFF      missing in target: replica-2
+
+DIAGNOSIS
+  [high]   Last event was 1.5s ago, inside the 5s settlement window; disagreement here is expected.
+           - the key settles in 3.5s
+           - the materializer has not been given time to apply it yet
+  [high]   Target is missing 1 of 2 members (replica-2); consistent with dropped add events rather
+           than a wholesale failure.
+           - target holds 1 member, oracle expects 2
+           - every member the target does hold is one the oracle expects, so the materializer is
+             applying events rather than failing entirely
+
+HISTORY (last 2)
+  #0   8801     replica-0   add      replica-0 → {replica-0}            v1    -2.5s
+  #1   8802     replica-0   add      replica-2 → {replica-0,replica-2}  v2    -1.5s
+
+PUBLISHERS
+  replica-0     epoch 1    hwm 8802      gaps 0        last seen 1.5s ago

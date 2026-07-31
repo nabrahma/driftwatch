@@ -1,0 +1,22 @@
+KEY  block:9f3a
+──────────────────────────────────────────────────────────────────────
+VERDICT   SUSPECT                                      settled 47s ago
+
+ORACLE    set(1)[replica-0]                  version 2   trust suspect
+TARGET    absent                             read just now
+DIFF      missing in target: replica-0
+
+DIAGNOSIS
+  [high]   Publisher replica-0 has 45 missing sequence numbers ([8802,8846]); driftwatch's own view
+           may be incomplete, so this disagreement may be driftwatch's fault, not the target's.
+           - publisher replica-0: high-water mark 8847, 2 events observed
+           - the gap list is complete, so the missing count is exact
+           - keys touched by the missing events are marked suspect and never alerted on
+
+HISTORY (last 2)
+  #0   8801     replica-0   add      replica-0 → {replica-0}            v1    -50s
+  #1   8847     replica-0   add      replica-0 → {replica-0}            v2    -47s
+       ⚠ a gap precedes this event: earlier sequence numbers were never seen
+
+PUBLISHERS
+  replica-0     epoch 1    hwm 8847      gaps 45       last seen 47s ago

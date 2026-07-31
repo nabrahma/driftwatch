@@ -1,0 +1,20 @@
+KEY  block:orphan
+──────────────────────────────────────────────────────────────────────
+VERDICT   DIVERGED                                  no events observed
+
+ORACLE    absent                             never observed
+TARGET    set(2)[replica-3 replica-7]        read just now
+DIFF      extra in target:   replica-3, replica-7
+
+DIAGNOSIS
+  [high]   driftwatch has never observed an event for this key.
+           - the oracle has no entry, not even a tombstone from a deletion
+           - the store does hold it, so it predates driftwatch's subscription or was written
+             out-of-band
+  [medium] Target holds this key but no event ever created it. Either it predates driftwatch
+           (bootstrap mode Wait) or it was written out-of-band.
+           - target holds set(2)[replica-3 replica-7]
+           - the oracle has no record of this key at all, not even a deletion
+
+HISTORY   none
+
