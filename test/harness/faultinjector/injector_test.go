@@ -21,6 +21,16 @@ func TestMain(m *testing.M) { goleak.VerifyTestMain(m) }
 
 func epoch() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) }
 
+// drainBudget is how long a run may take to push its messages through the fault
+// chain.
+//
+// It is generous because it has to cover the slowest way this suite is run:
+// ten thousand messages through five chained faults under -race *and* coverage
+// instrumentation together, which is what `make test` does. It bounds a stall,
+// not a correctness property — nothing about the assertions depends on how long
+// the drain takes, only that it finishes before the clock is moved.
+const drainBudget = 3 * time.Minute
+
 // event renders one message in the harness publisher's format, which is what
 // the envelope-reading faults are pointed at.
 func event(publisher string, epochNum, seq uint64, at time.Time) source.RawMessage {
@@ -73,7 +83,7 @@ func run(t *testing.T, msgs []source.RawMessage, faults ...faultinjector.Fault) 
 	// had got, and that varies run to run. Draining first makes the whole
 	// input visible before any release decision is taken.
 	require.Eventually(t, func() bool { return inj.Stats().Received == uint64(len(msgs)) },
-		20*time.Second, time.Millisecond, "the injector never drained the source")
+		drainBudget, time.Millisecond, "the injector never drained the source")
 
 	// One large advance rather than many small ones, so every held message
 	// comes due at the same moment and leaves in a single sorted release. Then
@@ -82,7 +92,7 @@ func run(t *testing.T, msgs []source.RawMessage, faults ...faultinjector.Fault) 
 	// instead, and the boundary between the two paths would move run to run.
 	clk.Advance(time.Hour)
 	require.Eventually(t, func() bool { return !inj.HasPending() },
-		20*time.Second, time.Millisecond, "held messages were never released")
+		drainBudget, time.Millisecond, "held messages were never released")
 
 	require.NoError(t, src.Close())
 

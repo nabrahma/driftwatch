@@ -72,6 +72,11 @@ const (
 
 func epoch() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) }
 
+// drainBudget bounds how long the injector may take to push a scenario's events
+// through its fault chain. Generous, because it must cover a run under -race
+// and coverage instrumentation at once; it bounds a stall, not a property.
+const drainBudget = 3 * time.Minute
+
 // Builder accumulates a scenario's configuration.
 type Builder struct {
 	t *testing.T
@@ -266,7 +271,7 @@ func (s *Session) perturb(msgs []source.RawMessage) []source.RawMessage {
 	go func() { done <- inj.Run(ctx, out) }()
 
 	require.Eventually(s.t, func() bool { return inj.Stats().Received == uint64(len(msgs)) },
-		20*time.Second, time.Millisecond, "the injector never drained the stream")
+		drainBudget, time.Millisecond, "the injector never drained the stream")
 
 	// Let anything a timed fault is holding come due and leave in one sorted
 	// release, before the close sends the remainder out through the flush
@@ -274,7 +279,7 @@ func (s *Session) perturb(msgs []source.RawMessage) []source.RawMessage {
 	if inj.HasPending() {
 		s.clk.Advance(time.Hour)
 		require.Eventually(s.t, func() bool { return !inj.HasPending() },
-			20*time.Second, time.Millisecond, "held messages were never released")
+			drainBudget, time.Millisecond, "held messages were never released")
 	}
 	require.NoError(s.t, src.Close())
 
