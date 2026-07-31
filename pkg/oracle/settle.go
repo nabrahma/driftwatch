@@ -83,20 +83,49 @@ func (s *shard) promote(now time.Time, maxWindow time.Duration) {
 	}
 }
 
+// isSettled reports whether an entry may be compared against the target.
+//
+// The first clause is the settlement window itself: the key has been quiet for
+// longer than W, so the materializer has had its grace period (§5.3).
+//
+// The second is the stability-window check, and it exists because of a blind
+// spot the first clause has on its own. A key updated every 100ms with W at 5s
+// is permanently in flight and would never be compared at all — a hot key is
+// exactly the key most worth auditing, and it would be the one key driftwatch
+// silently never looked at.
+//
+// §5.3 states the rescue as two conditions: the key has been in flight longer
+// than the never-settled threshold, and its value has been unchanged for W
+// despite events arriving. Both collapse into one comparison. If the value has
+// not changed for the whole threshold while events keep arriving, the key has
+// necessarily been in flight for that long too, so a single timestamp decides
+// it. The collapsed form is the stricter of the two — it waits the full
+// threshold for stability where §5.3 asks only for W — which is the safe
+// direction: it can delay a comparison, never rush one.
+//
+// Comparing such a key is sound because W measures the time the materializer
+// needs after the value it must write last changed. Idempotent repeats give it
+// no new work, so the wait has already been served.
+func isSettled(e *entry, now time.Time, w, neverSettled time.Duration) bool {
+	if e.lastEventAt.Before(now.Add(-w)) {
+		return true
+	}
+	return !e.lastValueChangeAt.IsZero() && e.lastValueChangeAt.Before(now.Add(-neverSettled))
+}
+
 // settledKeys appends the keys settled as of now under window w.
-func (s *shard) settledKeys(dst []string, now time.Time, w time.Duration) []string {
+func (s *shard) settledKeys(dst []string, now time.Time, w, neverSettled time.Duration) []string {
 	for k := range s.settled {
 		dst = append(dst, k)
 	}
 
-	cutoff := now.Add(-w)
 	for _, keys := range s.buckets {
 		for k := range keys {
 			e, ok := s.entries[k]
 			if !ok {
 				continue
 			}
-			if e.lastEventAt.Before(cutoff) {
+			if isSettled(e, now, w, neverSettled) {
 				dst = append(dst, k)
 			}
 		}
@@ -104,23 +133,32 @@ func (s *shard) settledKeys(dst []string, now time.Time, w time.Duration) []stri
 	return dst
 }
 
-// countSettled returns how many keys are settled as of now under window w.
-func (s *shard) countSettled(now time.Time, w time.Duration) int {
-	n := len(s.settled)
+// countSettled returns how many keys are settled as of now, and how many are so
+// persistently in flight that the stability check could not rescue them either.
+//
+// The second number is §5.3's honest blind spot: keys driftwatch has never been
+// able to compare. An undocumented blind spot is a lie by omission, so it is
+// counted and exported rather than left to be discovered.
+func (s *shard) countSettled(now time.Time, w, neverSettled time.Duration) (settled, neverSettledKeys int) {
+	settled = len(s.settled)
 
-	cutoff := now.Add(-w)
+	horizon := now.Add(-neverSettled)
 	for _, keys := range s.buckets {
 		for k := range keys {
 			e, ok := s.entries[k]
 			if !ok {
 				continue
 			}
-			if e.lastEventAt.Before(cutoff) {
-				n++
+			if isSettled(e, now, w, neverSettled) {
+				settled++
+				continue
+			}
+			if e.createdAt.Before(horizon) {
+				neverSettledKeys++
 			}
 		}
 	}
-	return n
+	return settled, neverSettledKeys
 }
 
 // oldestIndexed returns a key from the least recently touched part of the

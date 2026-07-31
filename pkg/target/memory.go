@@ -73,6 +73,14 @@ func WithFailureRate(rate float64) MemoryOption {
 	}
 }
 
+// WithClock injects the clock used for simulated latency and key expiry.
+//
+// Without it a memory target with expiries never expires anything, which is the
+// safe default for a test that did not ask for time to pass.
+func WithClock(c Clock) MemoryOption {
+	return func(m *MemoryTarget) { m.clock.Clock = c }
+}
+
 // NewMemory returns an empty in-process target.
 func NewMemory(opts ...MemoryOption) *MemoryTarget {
 	m := &MemoryTarget{
@@ -190,6 +198,24 @@ func (m *MemoryTarget) SeedSets(values map[string][]string) {
 			continue
 		}
 		m.sets[k] = set
+	}
+}
+
+// Remove deletes keys outright, standing in for a materializer that dropped a
+// write or a key someone deleted by hand. Test setup only.
+//
+// It exists because SimulateEvict chooses its own victims, and a test that
+// needs one specific key to go missing should say which one rather than seed a
+// single key and hope.
+func (m *MemoryTarget) Remove(keys ...string) {
+	m.emit("DEL")
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, key := range keys {
+		delete(m.scalars, key)
+		delete(m.sets, key)
+		delete(m.expiries, key)
 	}
 }
 

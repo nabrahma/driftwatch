@@ -55,6 +55,11 @@ type Entry struct {
 
 	Trust       TrustState
 	LastEventAt time.Time // monotonic local receive time, never a publisher clock
+	// LastValueChangeAt is when Value last actually changed, which is not the
+	// same as when an event last arrived. A key fed idempotent repeats has a
+	// moving LastEventAt and a still LastValueChangeAt, and the difference is
+	// what lets a permanently-hot key ever be compared (§5.3).
+	LastValueChangeAt time.Time
 
 	LastSeq       uint64
 	LastEpoch     uint64
@@ -108,11 +113,17 @@ type ApplyResult struct {
 
 // Counts reports cardinalities for metrics.
 type Counts struct {
-	Total     int
-	Settled   int
-	InFlight  int
-	ByTrust   map[TrustState]int
-	Truncated int
+	Total    int
+	Settled  int
+	InFlight int
+	// NeverSettled counts keys that have been in flight longer than the
+	// never-settled threshold and that the stability-window check could not
+	// rescue either, because their value keeps changing. These are the keys
+	// driftwatch has never managed to compare — §5.3's documented blind spot,
+	// counted rather than left to be discovered.
+	NeverSettled int
+	ByTrust      map[TrustState]int
+	Truncated    int
 }
 
 // entry is the internal, mutable form. Only the applier goroutine writes it,
@@ -121,9 +132,10 @@ type entry struct {
 	key   string
 	value event.Value
 
-	version     uint64
-	trust       TrustState
-	lastEventAt time.Time
+	version           uint64
+	trust             TrustState
+	lastEventAt       time.Time
+	lastValueChangeAt time.Time
 
 	lastSeq       uint64
 	lastEpoch     uint64
@@ -149,16 +161,18 @@ type entry struct {
 // snapshot returns the deep copy handed out to callers.
 func (e *entry) snapshot(effectiveTrust TrustState) Entry {
 	return Entry{
-		Key:           e.key,
-		Value:         e.value.Clone(),
-		Version:       e.version,
-		Trust:         effectiveTrust,
-		LastEventAt:   e.lastEventAt,
-		LastSeq:       e.lastSeq,
-		LastEpoch:     e.lastEpoch,
-		LastPublisher: e.lastPublisher,
-		TTL:           e.ttl,
-		Truncated:     e.truncated,
-		CreatedAt:     e.createdAt,
+		Key:         e.key,
+		Value:       e.value.Clone(),
+		Version:     e.version,
+		Trust:       effectiveTrust,
+		LastEventAt: e.lastEventAt,
+
+		LastValueChangeAt: e.lastValueChangeAt,
+		LastSeq:           e.lastSeq,
+		LastEpoch:         e.lastEpoch,
+		LastPublisher:     e.lastPublisher,
+		TTL:               e.ttl,
+		Truncated:         e.truncated,
+		CreatedAt:         e.createdAt,
 	}
 }

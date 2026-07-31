@@ -22,6 +22,7 @@ func TestMain(m *testing.M) {
 
 var epoch = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
+//nolint:gocritic // hugeParam: mirrors oracle.New's by-value Config.
 func newOracle(t *testing.T, cfg oracle.Config) (*oracle.Oracle, clock.FakeClock) {
 	t.Helper()
 	clk := clock.Fake(epoch)

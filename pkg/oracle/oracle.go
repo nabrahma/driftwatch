@@ -15,11 +15,12 @@ import (
 
 // Defaults for Config.
 const (
-	defaultShards           = 64
-	defaultMaxTrackedKeys   = 1_000_000
-	defaultRingSize         = 16
-	defaultBucketWidth      = time.Second
-	defaultMaxSettlementWin = 120 * time.Second
+	defaultShards             = 64
+	defaultNeverSettledFactor = 10
+	defaultMaxTrackedKeys     = 1_000_000
+	defaultRingSize           = 16
+	defaultBucketWidth        = time.Second
+	defaultMaxSettlementWin   = 120 * time.Second
 )
 
 // Config configures an Oracle. The zero value is usable.
@@ -45,6 +46,10 @@ type Config struct {
 	RetainRaw bool
 	// SettlementWindow is W. May be updated at runtime.
 	SettlementWindow time.Duration
+	// NeverSettledFactor multiplies W to give the threshold past which a
+	// permanently in-flight key is rescued by the stability-window check.
+	// Default 10, from §5.3.
+	NeverSettledFactor int
 	// MaxSettlementWindow is the largest W that can ever be configured. It sets
 	// the horizon past which a key is settled regardless of W. Default 120s,
 	// matching the hard maxW in §5.3.
@@ -58,6 +63,9 @@ type Config struct {
 func (c *Config) applyDefaults() {
 	if c.Shards <= 0 {
 		c.Shards = defaultShards
+	}
+	if c.NeverSettledFactor <= 0 {
+		c.NeverSettledFactor = defaultNeverSettledFactor
 	}
 	if c.MaxTrackedKeys <= 0 {
 		c.MaxTrackedKeys = defaultMaxTrackedKeys
@@ -113,6 +121,10 @@ type Oracle struct {
 }
 
 // New returns an Oracle configured by cfg.
+// Config is by value so applyDefaults mutates the copy rather than the
+// caller's struct. New is called once per check at startup.
+//
+//nolint:gocritic // hugeParam: deliberate, see above.
 func New(cfg Config) *Oracle {
 	cfg.applyDefaults()
 
@@ -191,6 +203,12 @@ func (o *Oracle) Apply(m projection.Mutation, e *event.Event, verdict seqtrack.V
 	ent.lastPublisher = e.Publisher
 	ent.truncated = m.Truncated
 
+	// Whether the value actually moved decides whether the materializer has
+	// any new work to do, which is what the settlement window is really
+	// measuring. A key fed idempotent repeats keeps its old change time and so
+	// becomes comparable despite never going quiet (§5.3).
+	previous := ent.value
+
 	switch m.Action {
 	case projection.ActionUpsert:
 		ent.value = m.Value
@@ -204,6 +222,10 @@ func (o *Oracle) Apply(m projection.Mutation, e *event.Event, verdict seqtrack.V
 		ent.ttl = nil
 		res.Deleted = true
 	case projection.ActionNone:
+	}
+
+	if res.Created || !previous.Equal(ent.value) {
+		ent.lastValueChangeAt = now
 	}
 
 	sh.remember(ent, floor)
@@ -291,6 +313,19 @@ func effectiveTrust(e *entry, floor uint64) TrustState {
 	return e.trust
 }
 
+// neverSettledThreshold is how long a key may stay in flight before the
+// stability-window check tries to rescue it (§5.3, default 10x W).
+func (o *Oracle) neverSettledThreshold(w time.Duration) time.Duration {
+	d := time.Duration(o.cfg.NeverSettledFactor) * w
+	if d > o.cfg.MaxSettlementWindow {
+		// The horizon past which promote() has already coalesced everything.
+		// A threshold beyond it could never fire, so the check would be
+		// decorative rather than merely slow.
+		d = o.cfg.MaxSettlementWindow
+	}
+	return d
+}
+
 // SettledKeys returns an iterator over keys settled as of now.
 //
 // The iterator holds no lock between yields, so callers must use version
@@ -300,6 +335,7 @@ func effectiveTrust(e *entry, floor uint64) TrustState {
 func (o *Oracle) SettledKeys(now time.Time) func(yield func(string) bool) {
 	return func(yield func(string) bool) {
 		w := o.window()
+		neverSettled := o.neverSettledThreshold(w)
 
 		// One buffer, reused across shards and grown to the largest shard seen.
 		// Letting append grow it from a small start costs a reallocation per
@@ -314,7 +350,7 @@ func (o *Oracle) SettledKeys(now time.Time) func(yield func(string) bool) {
 			if n := len(sh.entries); cap(buf) < n {
 				buf = make([]string, 0, n)
 			}
-			buf = sh.settledKeys(buf[:0], now, w)
+			buf = sh.settledKeys(buf[:0], now, w, neverSettled)
 			sh.mu.Unlock()
 
 			for _, k := range buf {
@@ -329,14 +365,17 @@ func (o *Oracle) SettledKeys(now time.Time) func(yield func(string) bool) {
 // Counts returns cardinalities for metrics.
 func (o *Oracle) Counts(now time.Time) Counts {
 	w := o.window()
+	neverSettled := o.neverSettledThreshold(w)
 	out := Counts{ByTrust: map[TrustState]int{}}
 
 	for _, sh := range o.shards {
 		sh.mu.Lock()
 		sh.promote(now, o.cfg.MaxSettlementWindow)
 
+		settled, never := sh.countSettled(now, w, neverSettled)
 		out.Total += len(sh.entries)
-		out.Settled += sh.countSettled(now, w)
+		out.Settled += settled
+		out.NeverSettled += never
 		out.Truncated += sh.truncated
 		out.ByTrust[TrustComplete] += sh.fresh
 		out.ByTrust[TrustAdopted] += sh.adopted

@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
+	"github.com/nabrahma/driftwatch/pkg/event"
 	"github.com/nabrahma/driftwatch/pkg/projection"
 	"github.com/nabrahma/driftwatch/pkg/target"
 )
@@ -246,6 +247,47 @@ func TestRecordingTarget_ViolationsCanBeInspectedDeliberately(t *testing.T) {
 
 	assert.False(t, tb.failed)
 	assert.Equal(t, []string{"SET", "FLUSHDB"}, rec.Violations())
+}
+
+func TestRecordingTarget_FixtureWritesAreSetupRatherThanViolations(t *testing.T) {
+	// A sweeper test has to change the store while the test runs — a
+	// materializer that never writes produces no drift to detect. Fixture is
+	// the narrow, named seam for that, and this pins its two halves: the write
+	// inside does not fail the test, and it is filed separately from a real
+	// violation so the two are never confused.
+	tb := &fakeTB{}
+	mem := target.NewMemory()
+	rec := target.Recording(tb, mem)
+	ctx := context.Background()
+
+	rec.Fixture(func() {
+		mem.Seed(map[string][]byte{"k": []byte("v")})
+		mem.Remove("k")
+	})
+
+	got, err := rec.Get(ctx, "k", projection.ShapeScalar)
+	require.NoError(t, err)
+
+	assert.False(t, tb.failed, "a write inside Fixture must not fail the test")
+	assert.Equal(t, event.ValueAbsent, got.Kind, "the fixture write must have happened")
+	assert.Empty(t, rec.Violations())
+	assert.Equal(t, []string{"SET", "DEL"}, rec.FixtureCommands())
+}
+
+func TestRecordingTarget_CheckingResumesWhenTheFixtureEnds(t *testing.T) {
+	// The dangerous failure is a suspension that outlives its scope: every
+	// later write would pass unnoticed, and the test would still look like it
+	// was enforcing read-only access.
+	tb := &fakeTB{}
+	mem := target.NewMemory()
+	rec := target.Recording(tb, mem).AllowViolations()
+
+	rec.Fixture(func() { mem.Seed(map[string][]byte{"k": []byte("v")}) })
+	mem.Seed(map[string][]byte{"after": []byte("v")})
+
+	assert.Equal(t, []string{"SET"}, rec.FixtureCommands())
+	assert.Equal(t, []string{"SET"}, rec.Violations(),
+		"the write after the fixture must be refused")
 }
 
 func TestRecordingTarget_RefusesToWrapATargetItCannotCheck(t *testing.T) {

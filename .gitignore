@@ -16,3 +16,8 @@ bench.txt
 *.swp
 .DS_Store
 Thumbs.db
+
+# rapid writes a shrunk counterexample here when a property fails. It is a
+# local reproduction aid for the run that failed, not a fixture: the failing
+# input is pinned as a named test instead.
+testdata/rapid/

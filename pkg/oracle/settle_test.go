@@ -211,7 +211,11 @@ func TestOracle_SettlementIndexSurvivesManyRoundsOfMovement(t *testing.T) {
 	for round := 0; round < 50; round++ {
 		now = now.Add(time.Second)
 		for i := 0; i < 20; i++ {
-			m, e := upsert("k"+strconv.Itoa(i), now, "a")
+			// The value has to move on every round. A key rewritten with the
+			// value it already holds is rescued by the stability-window check
+			// after the never-settled threshold, which is correct but is not
+			// what this test is about.
+			m, e := upsert("k"+strconv.Itoa(i), now, "v"+strconv.Itoa(round))
 			apply(o, m, e)
 		}
 		settledKeys(o, now)
@@ -225,6 +229,74 @@ func TestOracle_SettlementIndexSurvivesManyRoundsOfMovement(t *testing.T) {
 	later := now.Add(time.Hour)
 	assert.Len(t, settledKeys(o, later), 20)
 	assert.Equal(t, 20, o.Counts(later).Settled)
+}
+
+func TestOracle_AHotKeyWhoseValueStopsChangingBecomesComparable(t *testing.T) {
+	// §5.3's blind spot and its rescue. A key updated faster than W is
+	// permanently in flight under the settlement rule alone, and a hot key is
+	// exactly the key most worth auditing — it would be the one key driftwatch
+	// silently never looked at.
+	//
+	// The rescue is that W measures the time the materializer needs after the
+	// value it must write last changed. Idempotent repeats give it no new work.
+	o, _ := newOracle(t, oracle.Config{
+		Shards:              4,
+		SettlementWindow:    5 * time.Second,
+		MaxSettlementWindow: 120 * time.Second,
+		NeverSettledFactor:  10,
+		BucketWidth:         time.Second,
+	})
+
+	// An event every second against a five-second window: never quiet. Sixty
+	// rounds so the key is past the fifty-second never-settled threshold.
+	now := epoch
+	for round := 0; round < 60; round++ {
+		now = now.Add(time.Second)
+		m, e := upsert("hot", now, "changing"+strconv.Itoa(round))
+		apply(o, m, e)
+	}
+
+	require.Empty(t, settledKeys(o, now), "a key whose value keeps moving stays in flight")
+	assert.Equal(t, 1, o.Counts(now).NeverSettled,
+		"and it is counted, because an undocumented blind spot is a lie by omission")
+
+	// The value stops changing. The events keep coming.
+	for round := 0; round < 60; round++ {
+		now = now.Add(time.Second)
+		m, e := upsert("hot", now, "settled")
+		apply(o, m, e)
+	}
+
+	assert.Equal(t, []string{"hot"}, settledKeys(o, now),
+		"unchanged for longer than the threshold, so the materializer has had its grace period")
+	assert.Zero(t, o.Counts(now).NeverSettled)
+}
+
+func TestOracle_TheStabilityRescueNeverFiresBeforeItsThreshold(t *testing.T) {
+	// The rescue must not become a back door that compares a key before the
+	// materializer has had W. Ten times W is a long time to be sure.
+	o, _ := newOracle(t, oracle.Config{
+		Shards:              4,
+		SettlementWindow:    5 * time.Second,
+		MaxSettlementWindow: 120 * time.Second,
+		NeverSettledFactor:  10,
+		BucketWidth:         time.Second,
+	})
+
+	now := epoch
+	for round := 0; round < 49; round++ {
+		now = now.Add(time.Second)
+		m, e := upsert("hot", now, "same")
+		apply(o, m, e)
+	}
+
+	// 48s of stability against a 50s threshold.
+	assert.Empty(t, settledKeys(o, now))
+
+	now = now.Add(3 * time.Second)
+	m, e := upsert("hot", now, "same")
+	apply(o, m, e)
+	assert.Equal(t, []string{"hot"}, settledKeys(o, now))
 }
 
 func TestOracle_ConfigDefaultsProduceAUsableOracle(t *testing.T) {

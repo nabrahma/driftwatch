@@ -1,0 +1,23 @@
+=== RUN   TestProp_NoKeyIsEverBothInFlightAndReported
+    sweeper_property_test.go:148: [rapid] OK, passed 1000 tests (154.0081ms)
+--- PASS: TestProp_NoKeyIsEverBothInFlightAndReported (0.16s)
+PASS
+ok  	github.com/nabrahma/driftwatch/pkg/sweeper	2.552s
+
+--- the counterexample, before the fix -------------------------------------
+
+rapid shrank a 60-step interleaving to seven steps. W = 1s:
+
+  apply("a", "x")        the oracle learns key a
+  advance 1s
+  advance 1s             a is now settled
+  sweep                  target has no a -> candidate raised
+  advance 1s
+  sweep + confirm        still missing -> CONFIRMED
+  apply("a", "x")        one more event, same value
+
+  FAIL: key "a" is confirmed divergent while inside its settlement window
+
+The confirmation at step 6 was correct. The event at step 7 put the key back
+in flight without touching the finding, so between that event and the next
+sweep the key was both in-flight and reported.

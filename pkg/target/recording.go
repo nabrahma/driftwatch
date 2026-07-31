@@ -50,6 +50,10 @@ type RecordingTarget struct {
 	// allowViolations makes a refused command recorded rather than fatal. Only
 	// the test that proves the enforcement works sets it.
 	allowViolations bool
+	// fixture is the nesting depth of Fixture calls. Above zero, a mutating
+	// command is the test's own setup rather than driftwatch's.
+	fixture  int
+	fixtures []string
 }
 
 // Recording wraps inner so that any command outside the read-only allowlist
@@ -80,18 +84,58 @@ func (r *RecordingTarget) AllowViolations() *RecordingTarget {
 	return r
 }
 
+// Fixture runs fn with mutation checking suspended, for test setup that writes
+// to the audited store directly — seeding a value, deleting a key, simulating
+// an eviction.
+//
+// A test needs this because the store it audits has to change during the test:
+// a materializer that never writes produces no drift to detect. The suspension
+// is deliberately narrow and deliberately visible. Commands issued inside fn go
+// to FixtureCommands rather than Violations, so the two are never confused, and
+// checking resumes the moment fn returns.
+//
+// Nothing belonging to driftwatch may run inside fn. RecordingTarget exists to
+// prove that driftwatch's own commands are read-only, and a test that runs a
+// sweep inside Fixture has switched off the guarantee it is relying on.
+func (r *RecordingTarget) Fixture(fn func()) {
+	r.mu.Lock()
+	r.fixture++
+	r.mu.Unlock()
+
+	defer func() {
+		r.mu.Lock()
+		r.fixture--
+		r.mu.Unlock()
+	}()
+
+	fn()
+}
+
+// FixtureCommands returns the mutating commands issued inside Fixture, so a
+// test can assert its own setup did what it meant to.
+func (r *RecordingTarget) FixtureCommands() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.fixtures...)
+}
+
 // observe is invoked for every command the wrapped target issues.
 func (r *RecordingTarget) observe(name string) {
 	r.mu.Lock()
 	r.commands = append(r.commands, name)
 	allowed := IsReadOnlyCommand(name)
-	if !allowed {
+	inFixture := r.fixture > 0
+	switch {
+	case allowed:
+	case inFixture:
+		r.fixtures = append(r.fixtures, name)
+	default:
 		r.violations = append(r.violations, name)
 	}
 	tolerate := r.allowViolations
 	r.mu.Unlock()
 
-	if allowed {
+	if allowed || inFixture {
 		return
 	}
 

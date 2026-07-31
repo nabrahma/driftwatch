@@ -19,6 +19,16 @@ type Report struct {
 	KeysCompared        int `json:"keysCompared"`
 	KeysSkippedInFlight int `json:"keysSkippedInFlight"`
 	KeysSkippedSuspect  int `json:"keysSkippedSuspect"`
+	// KeysSkippedAdopted counts keys read out of the target at startup that no
+	// event has touched since. Comparing one against the target would prove
+	// only that the target agrees with itself (§5.6).
+	KeysSkippedAdopted int `json:"keysSkippedAdopted"`
+
+	// SettlementWindow is the W this sweep ran with, captured once at sweep
+	// start. It is stated because a finding means little without it: the same
+	// disagreement is a false positive under a 1s window and real drift under a
+	// 60s one.
+	SettlementWindow time.Duration `json:"settlementWindow"`
 
 	Findings   []Finding                 `json:"findings"`
 	ByCategory map[Category]int          `json:"-"`
@@ -258,6 +268,9 @@ type reportJSON struct {
 	KeysCompared        int `json:"keysCompared"`
 	KeysSkippedInFlight int `json:"keysSkippedInFlight"`
 	KeysSkippedSuspect  int `json:"keysSkippedSuspect"`
+	KeysSkippedAdopted  int `json:"keysSkippedAdopted"`
+
+	SettlementWindow string `json:"settlementWindow"`
 
 	Total     int `json:"total"`
 	Alertable int `json:"alertable"`
@@ -312,6 +325,8 @@ func (r *Report) JSON() ([]byte, error) {
 		KeysCompared:        r.KeysCompared,
 		KeysSkippedInFlight: r.KeysSkippedInFlight,
 		KeysSkippedSuspect:  r.KeysSkippedSuspect,
+		KeysSkippedAdopted:  r.KeysSkippedAdopted,
+		SettlementWindow:    r.SettlementWindow.String(),
 		Total:               r.Total(),
 		Alertable:           r.Alertable(),
 		ByCategory:          map[string]int{},

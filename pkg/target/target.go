@@ -284,6 +284,16 @@ func ConnectionCommands() []string {
 // Constructor builds a Target from configuration.
 type Constructor func(cfg Config) (Target, error)
 
+// Clock is the subset of clock.Clock a target needs.
+//
+// It is declared here rather than imported so that pkg/target does not depend
+// on pkg/clock: the dependency would be one-directional and harmless, but this
+// interface is two methods and stating them is cheaper than the coupling.
+type Clock interface {
+	Now() time.Time
+	Sleep(ctx context.Context, d time.Duration) error
+}
+
 // Config is the string-keyed configuration a target is built from, plus the
 // injected dependencies that cannot be expressed as strings.
 type Config struct {
@@ -292,10 +302,7 @@ type Config struct {
 	Settings map[string]string
 	// Clock is the injected clock. Targets that simulate latency need it;
 	// targets that talk to a real store use it for timeouts.
-	Clock interface {
-		Now() time.Time
-		Sleep(ctx context.Context, d time.Duration) error
-	}
+	Clock Clock
 }
 
 // Setting returns a configured value or a default.

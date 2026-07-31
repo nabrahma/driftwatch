@@ -30,6 +30,71 @@ written here in anticipation.
 
 ---
 
+## D-009 — A confirmed finding is a claim about one oracle version, and nothing was withdrawing it
+
+**Found:** Phase 3, the first run of the I11 property test.
+
+**What happened:** the sweeper confirms a finding, stores it, and clears it when
+a later sweep finds the key agreeing again. That is the resolution path §9 M10
+asks for, it is tested directly, and it works.
+
+`TestProp_NoKeyIsEverBothInFlightAndReported` shrank a random interleaving to
+seven steps and showed it is not enough:
+
+```text
+apply("a", "x")     the oracle learns key a
+advance 1s
+advance 1s          a is settled
+sweep               target has no a  -> candidate raised
+advance 1s
+sweep + confirm     still missing    -> CONFIRMED
+apply("a", "x")     one more event
+```
+
+The confirmation was correct when it happened. The last event put the key back
+inside its settlement window, and nothing touched the finding — so between that
+event and the next sweep, key `a` was simultaneously in the in-flight set and
+reported as divergent. That is invariant I11, and it is the exact false positive
+the settlement window exists to prevent.
+
+**Why it matters:** the window is only worth having if it covers every path that
+can report a key, and I had been thinking of it as a filter applied at one point
+in time — the sweep. It is not. A finding survives between sweeps, so it is a
+standing claim, and a standing claim has to be withdrawn by anything that
+invalidates it. An event arriving is such a thing, and the sweeper is never told
+an event arrived.
+
+The size of the hole depends on the sweep interval: with the default 30s sweep
+and a 5s window, a key that receives an event just after being confirmed spends
+up to 30 seconds reported as drift while it is legitimately in flight. Every
+per-key test passed, because the only way to see it is to interleave an event
+with a confirmation and look in between.
+
+**Fix:** a finding records the oracle version it was raised against, so the test
+is exact rather than heuristic: if the oracle has moved past that version, the
+claim is about an expectation that no longer exists and is withdrawn. The next
+sweep establishes a fresh one on the new value, with its own two reads.
+
+The withdrawal happens lazily, in `liveEpisodes`, on every read of `Confirmed()`
+or `Episodes()`. Doing it in the sweep would leave the same gap in miniature —
+correct only just after a sweep — and there is no event the sweeper could hang
+it on instead.
+
+It is counted as `ConfirmedSuperseded`, apart from `DriftResolved`. Withdrawing
+a claim because the question changed is not the target having been repaired, and
+merging the two would make the repair rate rise with the event rate.
+
+This is the same rule the fence applies within a sweep and the confirm loop
+applies to a waiting candidate (§5.5, I12). It was implemented in both of those
+places and missing from the third, which is what a property test is for.
+
+**Evidence:** `docs/evidence/D-009-superseded-finding.txt`
+
+**Regression test:** `pkg/sweeper: TestProp_NoKeyIsEverBothInFlightAndReported`,
+`TestSweeper_ANewEventWithdrawsAConfirmedFinding`
+
+---
+
 ## D-008 — Discarding timed-out probes shrinks the settlement window 12x, and only during an outage
 
 **Found:** Phase 3, implementing the convergence estimator (M11).

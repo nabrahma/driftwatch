@@ -90,6 +90,8 @@ func BenchmarkOracleVersion(b *testing.B) {
 
 // seedMillion fills an oracle with a million keys, which is the scale every
 // §19.1 target is stated at.
+//
+//nolint:gocritic // hugeParam: mirrors oracle.New's by-value Config.
 func seedMillion(b *testing.B, cfg oracle.Config) *oracle.Oracle {
 	b.Helper()
 
