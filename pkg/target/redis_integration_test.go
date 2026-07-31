@@ -219,7 +219,6 @@ func TestRedisIntegration_ScanOver100kKeys(t *testing.T) {
 		const keyCount = 100_000
 		seedKeys(t, s, keyCount, "block-")
 
-		start := time.Now()
 		seen := map[string]struct{}{}
 		it := tgt.Scan(ctx, "*", 1000)
 		batches := 0
@@ -235,8 +234,7 @@ func TestRedisIntegration_ScanOver100kKeys(t *testing.T) {
 		require.NoError(t, it.Close())
 
 		assert.Len(t, seen, keyCount)
-		t.Logf("Redis %s: scanned %d keys in %d batches in %s",
-			s.version, len(seen), batches, time.Since(start).Round(time.Millisecond))
+		t.Logf("Redis %s: scanned %d keys in %d batches", s.version, len(seen), batches)
 	})
 }
 
