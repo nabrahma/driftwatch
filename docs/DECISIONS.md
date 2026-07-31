@@ -555,3 +555,129 @@ comment.
   covered rather than implying it is.
 - Each deferred file is now a phase exit criterion. If Phase 8 lands without a
   `Dockerfile`, the table above is the thing that catches it.
+
+---
+
+## ADR-0008 — Publisher label limit lowered to 50 to fit the cardinality budget
+
+**Status:** Accepted
+**Date:** 2026-07-31
+**Phase:** 5
+**PRD reference:** §9 M12, §12
+
+### Context
+
+§9 M12 gives two numbers for the same mechanism, and they are incompatible.
+
+The `publisher` label is allowed but must be bounded: "if distinct publishers
+exceed `maxPublisherLabels` (default 100), collapse further ones into
+`publisher="__other__"`". The same section then requires a cardinality test that
+feeds 10,000 keys and 500 publishers and asserts "total time series is under a
+fixed budget (e.g. 500)".
+
+§12 defines seven metrics carrying the `publisher` label. Six of them are touched
+by an ordinary ingest workload, and each costs `limit + 1` series once the
+aggregate is counted. At a limit of 100 that is 606 series before any other
+metric is counted at all — 21% over the whole budget, from the publisher label
+alone.
+
+Measured, at four limits:
+
+| `maxPublisherLabels` | time series | within budget |
+|---|---|---|
+| 25 | 156 | yes |
+| 50 | 306 | yes |
+| 75 | 456 | yes |
+| 100 | 606 | **no** |
+
+### Options
+
+**A. Keep the limit at 100 and raise the budget.** Honest about the arithmetic,
+but the budget is the number with real consequences. driftwatch is deployed
+beside the store it audits, often one replica per node, so its series count is
+multiplied by the fleet before it reaches Prometheus. A tool costing a hundred
+series per replica becomes the monitoring incident it was deployed to detect.
+
+**B. Drop some of the publisher-labelled metrics.** §12 names them explicitly
+and per-publisher rates are the point of most of them: `seq_gaps_total` without a
+publisher label cannot tell an operator which replica is lossy, which is the
+question it exists to answer.
+
+**C. Lower the default limit so both numbers hold.** Costs individual graphs for
+publishers 51 through 100 in a fleet that large, and nothing else:
+`driftwatch_publishers_tracked` still reports the true count when labels have
+collapsed, and per-publisher detail past that point belongs in
+`driftwatch explain` and the logs rather than in a metric label.
+
+### Decision
+
+**C.** `metrics.DefaultMaxPublisherLabels` is 50. The budget of 500 is enforced
+by `TestMetrics_CardinalityStaysBoundedUnderTenThousandKeys` exactly as §9 M12
+specifies it, and the whole registry has a second stated ceiling of 700 in
+`TestMetrics_CardinalityStaysBoundedWithEveryMetricExercised`.
+
+The limit remains configurable through `metrics.Options.MaxPublisherLabels`, so a
+deployment that genuinely wants per-publisher detail on a hundred replicas can
+have it deliberately.
+
+### Consequences
+
+- A fleet of more than fifty publishers loses individual time series for the
+  excess, aggregated under `publisher="__other__"` and logged once.
+- The full-registry cardinality test is the standing guard on the relationship.
+  Adding an eighth publisher-labelled metric, or raising the default back to 100,
+  moves a number that test asserts on — which forces the trade-off to be made
+  deliberately rather than discovered by a Prometheus that fell over.
+- Recorded in `docs/DISCOVERIES.md` D-012 with the measurement that produced it.
+
+---
+
+## ADR-0009 — `Projection` grows a `TargetKey` method
+
+**Status:** Accepted
+**Date:** 2026-07-31
+**Phase:** 5
+**PRD reference:** §9 M6, §9 M14
+
+### Context
+
+§9 M6 defines the projection interface as `Apply(prev event.Value, e *event.Event)`,
+where `prev` is the key's current value. That signature requires the caller to
+fetch `prev` before calling — and gives it no way to know which key to fetch.
+
+The store key is the projection's `keyTemplate` applied to the event, and the
+event carries a raw key which the template rewrites. With the §25.2 example
+configuration, `keyTemplate: "block:{{.Key}}"`, an event carrying key `9f3a`
+becomes `block:9f3a` in the store.
+
+The composition root looked up the raw key, missed on every event, and handed
+`Apply` an absent previous value — so every event overwrote rather than
+accumulated. See D-013 for the evidence.
+
+### Options
+
+**A. Call `Apply` twice: once with an absent value to learn the key, then again
+with the real one.** Works because the projections are pure, and doubles the cost
+of the hottest path in the system to work around an interface gap.
+
+**B. Expand the key template in the composition root.** Duplicates projection
+logic outside the projection, and gets it wrong the moment a projection derives
+its key from something other than the template.
+
+**C. Add `TargetKey(e *event.Event) (string, error)` to the interface.** One more
+method on three implementations, each a single line delegating to the same
+expander `Apply` uses.
+
+### Decision
+
+**C.** The addition is recorded here because §9 M6 specifies the interface and
+§1.1.9 requires deviations to be written down.
+
+### Consequences
+
+- Anyone adding a projection implements one more method, and the compiler says so.
+- The gap is closed at the type level rather than by a comment asking callers to
+  remember, which is what let it go unnoticed through four phases.
+- `pkg/check` and the scenario harness both resolve the store key before the
+  lookup; the harness had the same latent bug, invisible only because none of its
+  projections were configured with a key template.

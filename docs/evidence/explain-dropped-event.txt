@@ -1,0 +1,49 @@
+driftwatch explain — a materializer that dropped an event
+
+Phase 5 demo (PRD §20 Phase 5), captured against a real Redis:
+
+    $ docker run -d -p 6379:6379 redis
+    $ redis-cli SADD block:8e2b41ff replica-1 replica-3
+    $ driftwatch explain -f check.yaml --key block:9f3a2c1e --wait 15s
+
+check.yaml is examples/local.yaml with source.type=file pointed at a
+captured event stream, so the run is reproducible. The capture holds
+replica-0's contiguous sequence 8801..8847 — two adds to block:9f3a2c1e
+with forty-five heartbeats between them — and two adds to block:8e2b41ff.
+
+The store was seeded with block:8e2b41ff only. block:9f3a2c1e is the key a
+materializer would have dropped: no error anywhere, nothing in any log, and
+every existing monitor green.
+
+----------------------------------------------------------------------
+KEY  block:9f3a2c1e
+──────────────────────────────────────────────────────────────────────
+VERDICT   DIVERGED                                    settled 2.1s ago
+
+ORACLE    set(2)[replica-0 replica-2]        version 2   trust complete
+TARGET    absent                             read just now
+DIFF      missing in target: replica-0, replica-2
+
+DIAGNOSIS
+  [high]   Target is missing this key. driftwatch observed a complete event sequence for publisher
+           replica-0 (seq 8801..8847, no gaps), so the materializer most likely dropped or failed
+           to apply seq 8847.
+           - oracle expects set(2)[replica-0 replica-2] at version 2
+           - target holds nothing, read just now
+           - 2 events for this key in the retained history
+           - the store reports 0 evictions in total, so eviction is unlikely
+
+HISTORY (last 2)
+  #0   8801     replica-0   add      replica-0 → {replica-0}            v1    -2.1s
+  #1   8847     replica-0   add      replica-2 → {replica-0,replica-2}  v2    -2.1s
+
+PUBLISHERS
+  replica-0     epoch 1    hwm 8847      gaps 0        last seen 2.1s ago
+  replica-1     epoch 1    hwm 2         gaps 0        last seen 2.1s ago
+----------------------------------------------------------------------
+
+The load-bearing line is the diagnosis. driftwatch does not say the key is
+missing and leave it there: it says it observed replica-0's sequence from
+8801 to 8847 with no gaps, so its own view was complete — which is what
+makes the target the party that lost something, and names seq 8847 as the
+event to look for in the materializer's logs.

@@ -1,0 +1,46 @@
+D-012 — the publisher label limit and the cardinality budget from §9 M12 are
+        mutually incompatible at the values the PRD gives.
+
+Measured by driving the ingest path with 10,000 keys and 500 distinct
+publishers, at four values of maxPublisherLabels, and counting the time series
+the registry would expose (histogram buckets counted individually, plus _sum,
+_count and the implicit +Inf).
+
+    $ go test -run TestEvidence_D012 -v ./pkg/metrics/
+
+    === RUN   TestEvidence_D012
+        maxPublisherLabels=25   -> 156 time series (budget 500) OK
+        maxPublisherLabels=50   -> 306 time series (budget 500) OK
+        maxPublisherLabels=75   -> 456 time series (budget 500) OK
+        maxPublisherLabels=100  -> 606 time series (budget 500) OVER BUDGET
+    --- PASS: TestEvidence_D012 (0.07s)
+
+The arithmetic behind it: §12 defines seven metrics carrying the `publisher`
+label —
+
+    driftwatch_events_received_total
+    driftwatch_events_dropped_total
+    driftwatch_seq_gaps_total
+    driftwatch_seq_missing_events
+    driftwatch_publisher_restarts_total
+    driftwatch_publisher_clock_skew_seconds
+    driftwatch_gapset_truncated
+
+Six of the seven are touched by a plain ingest workload, and each costs
+(limit + 1) series once the __other__ aggregate is included. At the PRD's
+default of 100 that is 6 x 101 = 606 before any other metric is counted, which
+is 21% over the whole budget the same section sets.
+
+The default is therefore 50 rather than 100. See docs/DECISIONS.md ADR-0008.
+
+Standing guard, so the two numbers cannot silently diverge again:
+
+    $ go test -run Cardinality -v ./pkg/metrics/
+
+    === RUN   TestMetrics_CardinalityStaysBoundedUnderTenThousandKeys
+        10000 keys and 500 publishers produced 329 time series (budget 500,
+        50 publisher labels admitted)
+    --- PASS: TestMetrics_CardinalityStaysBoundedUnderTenThousandKeys (0.01s)
+    === RUN   TestMetrics_CardinalityStaysBoundedWithEveryMetricExercised
+        every metric exercised with 500 publishers: 597 time series (budget 700)
+    --- PASS: TestMetrics_CardinalityStaysBoundedWithEveryMetricExercised (0.00s)

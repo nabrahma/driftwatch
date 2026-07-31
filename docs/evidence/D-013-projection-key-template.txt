@@ -1,0 +1,56 @@
+D-013 — with a keyTemplate configured, the composition root looked up the wrong
+        key, so every event folded onto an empty previous value.
+
+Found by TestCheck_EndToEnd_InProcess on its first run, against this spec:
+
+    projection:
+      type: keysetOwnership
+      keyTemplate: "block:{{.Key}}"
+
+Six events were published: three blocks, each added by replica-0 and then by
+replica-1. The oracle should have held two members per block. It held one.
+
+    $ go test -run TestDebugKeys -v ./pkg/check/
+
+    key="block:0" oracle=set(1)[replica-1] trust=complete target=set(2)[replica-0 replica-1]
+    key="block:2" oracle=set(1)[replica-1] trust=complete target=set(2)[replica-0 replica-1]
+    key="block:1" oracle=set(1)[replica-1] trust=complete target=set(2)[replica-0 replica-1]
+
+    driftwatch sweep report
+    =======================
+    compared   3 keys
+    findings   3 total, 3 alertable
+
+    by category
+      member_mismatch    3
+
+    findings
+      member_mismatch  block:0
+        oracle   set(1)[replica-1]
+        target   set(2)[replica-0 replica-1]
+        extra    replica-0
+        version  2, last event ... from replica-0 seq 2
+
+The version is 2, so both events were applied. Only the first member is missing
+from each key, which is the signature: every Apply started from an absent
+previous value and overwrote rather than accumulated.
+
+Cause: Projection.Apply takes the key's previous value, and the caller has to
+fetch it — but the store key is the key template's output ("block:0"), while the
+event carries the raw key ("0"). The applier looked up "0", missed every time,
+and handed Apply an empty set.
+
+Nothing errored. The pipeline ran, the oracle filled, and the report was
+confidently wrong about every key, in a direction that reads as real drift: the
+target holds a member the oracle does not expect.
+
+Fix: Projection grew a TargetKey(e) method, resolved through the same template
+Apply uses. pkg/check, and the scenario harness which had the same latent bug,
+now resolve the store key before fetching the previous value.
+
+After the fix, the same test:
+
+    $ go test -run TestCheck_EndToEnd_InProcess -v ./pkg/check/
+
+    === RUN   TestCheck_EndToEnd_InProcess
+    --- PASS: TestCheck_EndToEnd_InProcess (0.01s)

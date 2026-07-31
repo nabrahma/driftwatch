@@ -30,6 +30,94 @@ written here in anticipation.
 
 ---
 
+## D-013 — A key template makes the oracle key and the event key different, and the applier used the wrong one
+
+**Found:** Phase 5, on the first run of `TestCheck_EndToEnd_InProcess`.
+
+**What happened:** With `keyTemplate: "block:{{.Key}}"` configured, six events —
+three blocks, each added by two replicas — produced an oracle holding one member
+per key instead of two. The version was 2, so both events had been applied. Only
+the first member of each key was missing.
+
+`Projection.Apply` takes the key's previous value, so the caller has to fetch it
+first. But the store key is the template's output (`block:0`) and the event
+carries the raw key (`0`), and the applier looked up the raw one. It missed every
+time, handed `Apply` an absent value, and every event overwrote instead of
+accumulating.
+
+Nothing errored. The pipeline ran, the oracle filled, and the report was
+confidently wrong about every single key.
+
+**Why it matters:** The direction of the wrongness is what makes this bad. An
+oracle holding fewer members than it should reports `extra_in_target` — the
+target has a member no event created — so driftwatch would have accused the store
+of holding data nobody wrote, on every key, in the exact configuration §25.2 ships
+as the example. The failure is also invisible without a key template, which is
+why every unit test in the repository passed: the harness projections were all
+configured with the default `{{.Key}}`, where the raw key and the store key
+happen to be the same string.
+
+**Fix:** `Projection` grew a `TargetKey(e *event.Event) (string, error)`, resolved
+through the same template `Apply` uses. `pkg/check` resolves the store key before
+fetching the previous value; the scenario harness, which had the same latent bug,
+was fixed with it.
+
+**Evidence:** `docs/evidence/D-013-projection-key-template.txt`
+
+**Regression test:** `pkg/check: TestCheck_EndToEnd_InProcess` — the flagship
+composition test, which is what found it. It is the only test in the repository
+that runs a key template through the whole pipeline, and that is precisely why
+§9 M14 asks for it.
+
+---
+
+## D-012 — §12's default publisher label limit and its cardinality budget cannot both be satisfied
+
+**Found:** Phase 5, writing the cardinality test M12 requires.
+
+**What happened:** The test — 10,000 keys and 500 publishers, asserting the
+registry stays under 500 time series — failed at 629 on its first run, with the
+`maxPublisherLabels` default of 100 that §9 M12 specifies.
+
+The two numbers are in the same section and are not compatible. §12 defines seven
+metrics carrying the `publisher` label, six of which a plain ingest workload
+touches, and each costs `limit + 1` series once the `__other__` aggregate is
+counted. At a limit of 100 that is 6 x 101 = 606 series before any other metric
+exists, which is 21% over the whole budget.
+
+Measured across four limits:
+
+```
+maxPublisherLabels=25   -> 156 time series (budget 500) OK
+maxPublisherLabels=50   -> 306 time series (budget 500) OK
+maxPublisherLabels=75   -> 456 time series (budget 500) OK
+maxPublisherLabels=100  -> 606 time series (budget 500) OVER BUDGET
+```
+
+**Why it matters:** The budget is the number worth keeping. driftwatch runs
+beside the store it audits, frequently one replica per node, so its series count
+is multiplied by the fleet before it reaches Prometheus. A tool that costs a
+hundred series per replica is the monitoring incident it was deployed to detect,
+and it gets uninstalled after the first one.
+
+The limit, by contrast, only decides how many publishers keep an individual graph.
+`driftwatch_publishers_tracked` still reports the true count once labels collapse,
+and per-publisher detail beyond fifty publishers belongs in `driftwatch explain`
+and the logs rather than in a label.
+
+**Fix:** `DefaultMaxPublisherLabels` is 50, deviating from §9 M12's 100, with the
+arithmetic recorded in ADR-0008. The full-registry cardinality test is the guard:
+adding an eighth publisher-labelled metric, or raising the limit back to 100,
+moves a number that test asserts on, which forces the decision to be made
+deliberately rather than discovered in production.
+
+**Evidence:** `docs/evidence/D-012-publisher-label-budget.txt`
+
+**Regression test:** `pkg/metrics: TestMetrics_CardinalityStaysBoundedUnderTenThousandKeys`
+and `TestMetrics_CardinalityStaysBoundedWithEveryMetricExercised`.
+
+---
+
 ## D-011 — Caching the first DNS resolution turns a pod reschedule into permanent silence
 
 **Found:** Phase 4, implementing the ZMQ source's reconnect loop.

@@ -1,0 +1,81 @@
+driftwatch watch -f examples/local.yaml against a local docker Redis
+
+PRD §20 Phase 5 exit criterion. Nothing here is a fake or a fixture: a real
+redis:8.10 container, the committed examples/local.yaml unmodified, and the
+binary built from this tree.
+
+    $ docker run -d -p 6379:6379 redis
+    $ docker exec ... redis-cli SADD block:9f3a2c1e replica-0 replica-2
+    $ docker exec ... redis-cli SADD block:8e2b41ff replica-1
+    $ go build -o driftwatch ./cmd/driftwatch
+
+=== driftwatch version ===
+driftwatch dev
+  commit     unknown
+  built      unknown
+  go         go1.26.4
+  platform   windows/amd64
+
+=== driftwatch watch -f examples/local.yaml --timeout 6s --status-interval 2s ===
+Watching       keys 0 (0 settled, 0 in flight)  events 0  drift 0  W 2.0s
+Watching       keys 0 (0 settled, 0 in flight)  events 0  drift 0  W 2.0s
+Watching       keys 0 (0 settled, 0 in flight)  events 0  drift 0  W 2.0s
+Pending        keys 0 (0 settled, 0 in flight)  events 0  drift 0  W 2.0s
+exit=0
+
+The store is reachable and the check runs; the oracle is empty because
+examples/local.yaml uses source.type=memory, so no events arrive. The keys
+already in the store are what the target-to-oracle scan is for:
+
+=== driftwatch diff -f examples/local.yaml --warmup 1s ===
+driftwatch sweep report
+=======================
+
+started    2026-07-31T16:14:14Z
+duration   2ms
+compared   0 keys
+
+findings   2 total, 2 alertable
+
+by category
+  extra_in_target    2
+
+findings
+  extra_in_target  block:9f3a2c1e
+    oracle   absent
+    target   set(2)[replica-0 replica-2]
+    version  0, last event 0001-01-01T00:00:00Z from  seq 0
+
+  extra_in_target  block:8e2b41ff
+    oracle   absent
+    target   set(1)[replica-1]
+    version  0, last event 0001-01-01T00:00:00Z from  seq 0
+
+target
+  reachable        true
+  version          8.10.0
+  role             master
+  keyspace         2
+  evicted keys     0
+driftwatch: 2 divergent keys confirmed
+exit=3
+
+Exit code 3, which §11 reserves for confirmed drift and which is what makes
+this usable as a CI gate. Both keys predate the subscription, so under
+bootstrap: Wait they are correctly reported as extras rather than ignored.
+
+=== /metrics, served by the same process ===
+driftwatch_build_info{commit="unknown",goversion="go1.26.4",version="dev"} 1
+driftwatch_checks_active 1
+driftwatch_confirm_queue_depth{check="default"} 0
+driftwatch_confirm_queue_dropped_total{check="default"} 0
+driftwatch_ingest_queue_depth{check="default",stage="raw"} 0
+driftwatch_lag_probe_timeouts_total{check="default"} 0
+driftwatch_oracle_evictions_total{check="default"} 0
+driftwatch_oracle_inflight_keys{check="default"} 0
+driftwatch_oracle_keys{check="default",trust="adopted"} 0
+driftwatch_oracle_keys{check="default",trust="complete"} 0
+driftwatch_oracle_keys{check="default",trust="suspect"} 0
+driftwatch_oracle_never_settled_keys{check="default"} 0
+driftwatch_oracle_settled_keys{check="default"} 0
+driftwatch_publishers_tracked{check="default"} 0

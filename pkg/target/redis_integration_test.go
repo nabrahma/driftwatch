@@ -243,7 +243,7 @@ func TestRedisIntegration_ScanOver100kKeys(t *testing.T) {
 //
 // PRD M8 predicts an infinite loop here. It does not happen on either version:
 // the scan terminates early and reports success, having seen a fraction of the
-// keyspace. This pins the behaviour that actually occurs, so that if a future
+// keyspace. This pins the behavior that actually occurs, so that if a future
 // Redis does start looping the assertion changes rather than the tool hanging.
 func TestRedisIntegration_ScanSurvivesAFlushMidIteration(t *testing.T) {
 	eachVersion(t, func(t *testing.T, s *server) {
