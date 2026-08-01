@@ -1,0 +1,26 @@
+global:
+  # Fast, because the demo is watched in real time rather than reviewed later.
+  # Production would be 30s; anything under 10s in a real deployment costs more
+  # in cardinality churn than it buys in resolution.
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+rule_files:
+  # Generated at `make demo` time from config/prometheus/rules.yaml by
+  # hack/prom-rules.sh, which strips the PrometheusRule custom resource down to
+  # the plain rule-file format Prometheus parses.
+  #
+  # Generated rather than committed, because a second committed copy is a second
+  # thing to keep in step and the demo would eventually be showing alerts the
+  # cluster no longer has. Prometheus parses rule files strictly, so mounting
+  # the custom resource directly fails at startup with a complaint about an
+  # unknown `apiVersion` field — which is the right behaviour and the reason
+  # this indirection exists.
+  - /etc/prometheus/rules/driftwatch.yaml
+
+scrape_configs:
+  - job_name: driftwatch
+    static_configs:
+      - targets: ["driftwatch:9091"]
+        labels:
+          instance: demo

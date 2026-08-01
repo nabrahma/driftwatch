@@ -1,0 +1,65 @@
+# The check the demo runs.
+#
+# Same schema as `DriftCheck.spec` (§11), so this file would go into a cluster
+# unchanged. That is the point of the CLI reading the same document: the demo
+# and the deployment cannot drift apart.
+name: kvcache-demo
+namespace: demo
+
+source:
+  type: zmq
+  zmq:
+    endpoints:
+      - tcp://publisher:5557
+    topics: ["kv-events"]
+    recvHWM: 100000
+  ingestBufferSize: 200000
+
+codec:
+  type: json
+  maxPayloadBytes: 1048576
+  # Payloads are never retained. The demo does not need them and §18 is
+  # explicit: what driftwatch does not store, it cannot leak.
+  retainRaw: false
+
+projection:
+  type: keysetOwnership
+  keyTemplate: "{{.Key}}"
+  memberTemplate: "{{.Member}}"
+
+target:
+  type: redis
+  redis:
+    mode: standalone
+    addr: redis:6379
+    keyPattern: "block:*"
+    readBatchSize: 500
+    scanCount: 1000
+
+policy:
+  settlementWindow:
+    # Static rather than adaptive, and short. Adaptive is right in production —
+    # it tracks a materializer whose latency moves — but it starts at the floor
+    # and widens as evidence arrives, and a visitor watching for sixty seconds
+    # would see the window still climbing rather than the drift story.
+    mode: static
+    static: 3s
+    min: 1s
+    max: 30s
+  # Fast enough that injected drift shows up while somebody is still looking at
+  # the screen. Production defaults to 30s.
+  sweepInterval: 5s
+  extraScanInterval: 30s
+  bootstrap: Adopt
+  expiryPolicy: Strict
+  # The demo Redis is a single node, which reports itself as a master. Left on,
+  # this would be correct and unhelpful.
+  requirePrimary: false
+  maxTrackedKeys: 100000
+  ringSize: 16
+
+alert:
+  divergentKeysThreshold: 10
+  divergentRatioThreshold: "0.001"
+  forDuration: 30s
+  includeSuspect: false

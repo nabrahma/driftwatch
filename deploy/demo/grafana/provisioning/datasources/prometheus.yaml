@@ -1,0 +1,18 @@
+# Provisioned rather than clicked. `make demo` has to open on a working
+# dashboard, and a datasource somebody has to add by hand is four clicks
+# between a visitor and the point.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    # The dashboard's DS_PROMETHEUS variable resolves to whichever Prometheus
+    # datasource is default, so this uid is what makes the provisioned
+    # dashboard bind without an import step.
+    uid: driftwatch-prometheus
+    jsonData:
+      timeInterval: 5s
+      httpMethod: POST

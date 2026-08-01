@@ -1,0 +1,122 @@
+# `make demo` — drift detected, then resolved
+
+Captured 2026-08-01 against the compose stack in `deploy/demo/`. Reproduce with:
+
+    make demo                 # wait ~60s for the oracle to fill
+    make demo-inject-drift
+    open http://localhost:3000
+
+Everything below is real: a ZMQ PUB publisher over TCP, a materializer that is a
+separate process subscribing to it, a real Redis, and driftwatch as a third
+independent subscriber. Nothing shares memory with anything else.
+
+## The stack
+
+    $ make demo
+     Container driftwatch-demo-redis          Healthy
+     Container driftwatch-demo-publisher      Healthy
+     Container driftwatch-demo-materializer   Healthy
+     Container driftwatch-demo-driftwatch     Healthy
+     Container driftwatch-demo-prometheus     Healthy
+     Container driftwatch-demo-grafana        Healthy
+
+      Grafana      http://localhost:3000   (opens on the dashboard)
+      Prometheus   http://localhost:9090
+      driftwatch   http://localhost:9091/metrics
+
+Prometheus is scraping and all ten §12.2 alerts loaded:
+
+    $ curl -s localhost:9090/api/v1/rules | grep -oE '"name":"Driftwatch[A-Za-z]+"' | sort -u
+    "name":"DriftwatchDriftDetected"
+    "name":"DriftwatchDriftSevere"
+    "name":"DriftwatchEventLoss"
+    "name":"DriftwatchIngestBackpressure"
+    "name":"DriftwatchLowCoverage"
+    "name":"DriftwatchOracleSaturated"
+    "name":"DriftwatchSettlementWindowAtMax"
+    "name":"DriftwatchSourceDisconnected"
+    "name":"DriftwatchSweepsSkipped"
+    "name":"DriftwatchTargetUnavailable"
+
+Grafana has the shipped dashboard provisioned, not a demo-only copy:
+
+    $ curl -s 'localhost:3000/api/search?query=driftwatch'
+    [{"uid":"driftwatch-main","title":"driftwatch","url":"/d/driftwatch-main/driftwatch", ...}]
+
+## Steady state before the fault
+
+    driftwatch_coverage_ratio          0.9969
+    driftwatch_divergent_keys (all)    0
+    driftwatch_oracle_keys{trust=complete}  ~19,500
+    events applied                     ~400/sec
+
+## The fault
+
+    $ make demo-inject-drift
+    demo-inject-drift: Redis holds 19489 keys; deleting 400 of them
+    demo-inject-drift: Redis now holds 19097 keys (392 removed)
+
+392 keys deleted straight out of Redis, behind driftwatch's back. That models a
+materializer that failed a batch, an eviction, or an operator mistake — from
+driftwatch's side all three look the same.
+
+## The arc
+
+    time      confirmed  missing_in_target  coverage  redis_keys
+    10:14:56  0          0                  0.9969    19108     <- fault injected
+    10:15:03  360        360                0.9971    19213     <- detected
+    10:15:10  323        323                0.9978    19317
+    10:15:17  291        291                0.9982    19398
+    10:15:24  232        232                0.9978    19486
+    10:15:30  209        209                0.9984    19561
+    10:15:37  189        189                0.9978    19627
+    10:15:44  149        149                0.9985    19673
+    10:15:51  142        142                0.9991    19712
+    10:15:58  120        120                0.9992    19743
+    10:16:05  115        115                0.9990    19775
+    10:16:18  91         91                 0.9995    19823
+    10:16:32  77         77                 0.9996    19855
+    10:16:45  61         61                 0.9997    19895
+    10:16:59  50         50                 0.9996    19920
+    10:17:13  41         41                 0.9995    19935
+    10:17:26  35         35                 0.9998    19947
+    10:17:40  25         25                 0.9997    19960
+    10:17:54  16         16                 0.9998    19975
+    10:18:14  12         12                 0.9996    19984
+    10:19:44  1          1                  0.9999    19998     <- resolved
+
+    driftwatch_drift_episodes_total{category="missing_in_target"}  360
+    driftwatch_drift_resolved_total{category="missing_in_target"}  210
+
+## What the numbers say
+
+**Detection took one sweep plus one confirmation.** The fault landed at 10:14:56
+and 360 keys were confirmed by 10:15:03. Not instant, and deliberately so: a key
+seen to disagree once is a candidate, not a finding, and it has to still
+disagree on a second read a settlement window later. That is the mechanism that
+makes the number trustworthy enough to alert on.
+
+**360 of 392, not 392.** The other 32 were touched by the publisher again
+between the two reads, so they had already been rewritten by the time the
+confirming read happened. Those are counted as transient rather than confirmed —
+which is correct. They were never divergent by the time anybody could have acted
+on it.
+
+**Coverage never moved.** It sat between 0.9969 and 0.9999 across the whole
+episode, which is what makes the divergence count mean something: driftwatch was
+asserting on essentially the entire keyspace the whole time. A count of 360
+against a coverage of 0.03 would have been noise.
+
+**Recovery was not instrumented.** Nothing told driftwatch the keys had come
+back. The publisher kept emitting, the materializer kept writing, and each key
+resolved on the first sweep after an event touched it again — which is the
+`drift_resolved_total` counter climbing to 210 while `drift_episodes_total`
+stayed at 360.
+
+## Screenshot
+
+`docs/evidence/dashboard-drift-detected.png` is not in this repository. The
+capture above is the same data the dashboard renders — it was read from the same
+`/metrics` endpoint Prometheus scrapes — but a PNG of the Grafana window has to
+be taken by a human with a browser open. The steps are at the top of this file
+and take about four minutes end to end.

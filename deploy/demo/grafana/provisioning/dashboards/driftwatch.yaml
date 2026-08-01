@@ -1,0 +1,18 @@
+# Loads deploy/grafana/driftwatch-dashboard.json — the same file an operator
+# would import into their own Grafana. The demo therefore shows the shipped
+# dashboard rather than a demo-only variant that could quietly diverge from it.
+apiVersion: 1
+
+providers:
+  - name: driftwatch
+    orgId: 1
+    folder: ""
+    type: file
+    disableDeletion: false
+    # Off: the file is mounted read-only, and an updateIntervalSeconds poll
+    # against a read-only mount logs an error every ten seconds for the whole
+    # demo.
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false
