@@ -1,0 +1,100 @@
+name: e2e
+
+# A separate workflow from ci, per §17.2, and the reason is failure isolation
+# rather than tidiness. This job needs Docker, a Kind cluster and about eight
+# minutes; ci needs none of that and finishes in two. Merging them would mean a
+# containerd hiccup blocking a documentation change.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    # §14.5 budgets eight minutes for the scenarios on a 2-core runner. Twenty
+    # covers the cluster, two image builds and the loads on top of that, and
+    # still fails rather than hanging if something deadlocks.
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+
+      # The suite creates its own cluster — §14.5 requires `make e2e` to work
+      # from a clean clone with only Docker and Go, and a workflow that created
+      # the cluster for it would be testing a path nobody else uses. kind is
+      # installed rather than run, so the binary is present when kind.go looks
+      # for it.
+      - name: install kind
+        uses: helm/kind-action@v1
+        with:
+          version: v0.26.0
+          install_only: true
+
+      - name: e2e
+        run: make e2e
+
+      # Always, not only on failure. §14.3 makes the diagnostics an explicit
+      # deliverable, and a passing run's artifacts are what the next failure gets
+      # compared against.
+      - name: upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts-${{ github.run_number }}
+          path: test/e2e/_artifacts/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: cluster state on failure
+        if: failure()
+        run: |
+          kubectl --context kind-driftwatch-e2e get pods -A -o wide || true
+          kubectl --context kind-driftwatch-e2e get driftchecks -A || true
+          kubectl --context kind-driftwatch-e2e -n driftwatch-system \
+            logs -l app.kubernetes.io/name=driftwatch --tail=200 || true
+
+  # Wire compatibility with real libzmq (§16.6). Its own job because it needs a
+  # Python toolchain and nothing else in the repository does, and because it
+  # takes three seconds — there is no reason for it to wait behind a cluster.
+  interop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: install pyzmq
+        # The wheel bundles a real libzmq, which is the whole point: this has to
+        # test against the C implementation rather than a second copy of the Go
+        # one.
+        run: python -m pip install --quiet pyzmq
+
+      - name: report the libzmq version under test
+        run: python -c "import zmq; print('pyzmq', zmq.__version__, 'libzmq', zmq.zmq_version())"
+
+      - name: interop
+        run: make test-interop

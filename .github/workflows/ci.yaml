@@ -73,6 +73,20 @@ jobs:
           ./hack/sync-helm-crd.sh
           ./hack/verify-helm-rbac.sh
 
+      # A panel querying a metric that no longer exists renders an empty graph
+      # forever, which on this dashboard looks identical to healthy — half its
+      # panels are green at zero.
+      - name: verify the Grafana dashboard against the metric registry
+        run: go run ./hack/dashboardcheck deploy/grafana/driftwatch-dashboard.json
+
+      # The demo mounts the shipped alert rules, so a change that Prometheus
+      # cannot parse breaks `make demo` rather than only the cluster.
+      - name: verify the alert rules parse as a Prometheus rule file
+        run: |
+          ./hack/prom-rules.sh /tmp/rules.yaml
+          docker run --rm -v /tmp/rules.yaml:/rules.yaml \
+            --entrypoint promtool prom/prometheus:v3.1.0 check rules /rules.yaml
+
       - name: verify fault matrix coverage
         run: ./hack/verify-fault-matrix.sh
 

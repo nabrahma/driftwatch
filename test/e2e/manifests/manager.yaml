@@ -1,0 +1,187 @@
+# The operator, as the e2e suite runs it.
+#
+# Deliberately not config/default. That overlay is what an operator applies, and
+# it is right for that: two replicas, leader election, webhooks off, pprof off.
+# The suite needs three things it does not give.
+#
+#   One replica, so E6 can compare a goroutine count before and after a
+#   lifecycle without wondering which pod it read.
+#   pprof on, because E6's assertion is that goroutine count, and there is no
+#   honest way to measure it from outside the process.
+#   A shorter status refresh, so a scenario waits five seconds for status to
+#   catch up rather than fifteen — which across eight scenarios is most of a
+#   minute of the eight-minute budget.
+#
+# Everything §18 asks for is kept: nonroot, 65532, read-only root, all
+# capabilities dropped, seccomp RuntimeDefault. The suite runs the hardened
+# container, because a suite that ran a relaxed one would not be testing the
+# thing that ships.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: driftwatch-system
+  labels:
+    app.kubernetes.io/name: driftwatch
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: driftwatch-manager
+  namespace: driftwatch-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: driftwatch-manager
+rules:
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get]
+  - apiGroups: [driftwatch.io]
+    resources: [driftchecks]
+    verbs: [get, list, watch, update, patch]
+  - apiGroups: [driftwatch.io]
+    resources: [driftchecks/finalizers]
+    verbs: [update]
+  - apiGroups: [driftwatch.io]
+    resources: [driftchecks/status]
+    verbs: [get, update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: driftwatch-manager
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: driftwatch-manager
+subjects:
+  - kind: ServiceAccount
+    name: driftwatch-manager
+    namespace: driftwatch-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: driftwatch-leader-election
+  namespace: driftwatch-system
+rules:
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [get, list, watch, create, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: driftwatch-leader-election
+  namespace: driftwatch-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: driftwatch-leader-election
+subjects:
+  - kind: ServiceAccount
+    name: driftwatch-manager
+    namespace: driftwatch-system
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: driftwatch-metrics
+  namespace: driftwatch-system
+  labels:
+    app.kubernetes.io/name: driftwatch
+spec:
+  selector:
+    app.kubernetes.io/name: driftwatch
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: metrics
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: driftwatch-manager
+  namespace: driftwatch-system
+  labels:
+    app.kubernetes.io/name: driftwatch
+spec:
+  # One. E6 reads /debug/pprof/goroutine from "the manager pod", and with two
+  # replicas the leader and the standby have very different goroutine counts —
+  # the standby has started no runners at all.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: driftwatch
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: driftwatch
+    spec:
+      serviceAccountName: driftwatch-manager
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: manager
+          image: driftwatch/manager:e2e
+          # Never: the image is built and `kind load`ed by the suite itself and
+          # was never pushed anywhere. Always or IfNotPresent would both try a
+          # registry pull on a tag that does not exist there.
+          imagePullPolicy: Never
+          args:
+            - --leader-elect=false
+            - --metrics-bind-address=:8080
+            - --health-probe-bind-address=:8081
+            - --log-format=console
+            - --log-level=debug
+            - --enable-webhooks=false
+            - --enable-pprof
+            - --status-refresh-interval=5s
+            - --restart-interval=2s
+            - --shutdown-grace=20s
+          ports:
+            - name: metrics
+              containerPort: 8080
+            - name: probes
+              containerPort: 8081
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+          livenessProbe:
+            httpGet: { path: /healthz, port: probes }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /readyz, port: probes }
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            # Generous relative to what the scenarios push through it, and
+            # deliberately not tight: an OOMKill mid-scenario would look like a
+            # driftwatch bug and be a test-harness one.
+            limits: { cpu: "2", memory: 1Gi }
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi

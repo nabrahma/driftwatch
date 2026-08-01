@@ -201,6 +201,76 @@ envtest: ## Install setup-envtest and fetch the API server binaries
 		go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$(ENVTEST_VERSION)
 	@"$(ENVTEST)" use $(ENVTEST_K8S_VERSION) -p path >/dev/null
 
+COMPOSE := docker compose -f deploy/demo/docker-compose.yaml
+
+# The e2e suite needs no arguments and no environment. §14.5 requires it to work
+# from a clean clone with only Docker and Go, so the cluster, both images, the
+# CRD and the manager are all brought up by the suite itself.
+E2E_TIMEOUT ?= 25m
+
+.PHONY: e2e
+e2e: ## Kind up, build, load, run all 8 scenarios, tear down
+	@docker version --format '{{.Server.Version}}' >/dev/null 2>&1 || \
+		{ echo "Docker is not reachable; make e2e needs a running daemon"; exit 1; }
+	go test -tags=e2e -timeout=$(E2E_TIMEOUT) -v ./test/e2e/...
+
+.PHONY: e2e-keep
+e2e-keep: ## Run the suite and leave the cluster standing for debugging
+	DRIFTWATCH_E2E_KEEP=1 $(MAKE) e2e
+
+.PHONY: e2e-reuse
+e2e-reuse: ## Reuse an existing cluster, for fast local iteration
+	DRIFTWATCH_E2E_REUSE_CLUSTER=1 $(MAKE) e2e
+
+.PHONY: e2e-break
+e2e-break: ## Fail one scenario on purpose, to inspect the diagnostics dump
+	DRIFTWATCH_E2E_REUSE_CLUSTER=1 DRIFTWATCH_E2E_BREAK=1 \
+		go test -tags=e2e -timeout=$(E2E_TIMEOUT) -v \
+		--ginkgo.focus='E1 HappyPath' ./test/e2e/... || true
+	@echo ''
+	@echo 'The dump is under test/e2e/_artifacts/. That failure was deliberate.'
+
+.PHONY: test-interop
+test-interop: ## Prove wire compatibility with real libzmq (needs python3 + pyzmq)
+	@python3 -c 'import zmq' 2>/dev/null || python -c 'import zmq' 2>/dev/null || { \
+		echo 'pyzmq not found — install it with: python -m pip install pyzmq'; exit 1; }
+	go test -tags=interop -timeout=5m -v ./test/interop/
+
+.PHONY: demo
+demo: ## Bring up the whole stack: redis, publisher, materializer, driftwatch, prometheus, grafana
+	@docker version --format '{{.Server.Version}}' >/dev/null 2>&1 || \
+		{ echo "Docker is not reachable; make demo needs a running daemon"; exit 1; }
+	@bash hack/prom-rules.sh
+	$(COMPOSE) up -d --build --wait
+	@echo ''
+	@echo '  Grafana      http://localhost:3000   (opens on the dashboard)'
+	@echo '  Prometheus   http://localhost:9090'
+	@echo '  driftwatch   http://localhost:9091/metrics'
+	@echo ''
+	@echo '  Give it ~30s to fill the graphs, then:'
+	@echo '    make demo-inject-drift    # watch divergent keys rise, then recover'
+	@echo '    make demo-down            # tear it all down'
+	@echo ''
+
+.PHONY: demo-inject-drift
+demo-inject-drift: ## Delete keys from Redis behind driftwatch's back, so drift appears and then resolves
+	@bash hack/demo-inject-drift.sh
+
+.PHONY: demo-logs
+demo-logs: ## Follow the demo's logs
+	$(COMPOSE) logs -f
+
+.PHONY: demo-down
+demo-down: ## Tear the demo down, volumes and all
+	$(COMPOSE) down -v --remove-orphans
+
+.PHONY: soak
+soak: ## Run the soak test (DURATION=60m by default)
+	@docker version --format '{{.Server.Version}}' >/dev/null 2>&1 || \
+		{ echo "Docker is not reachable; the soak needs a running daemon"; exit 1; }
+	DRIFTWATCH_SOAK_DURATION=$(or $(DURATION),60m) \
+		go test -tags=soak -timeout=$(or $(SOAK_TIMEOUT),120m) -v -run TestSoak ./test/soak/
+
 .PHONY: install-tools
 install-tools: controller-gen envtest ## Install the pinned development tools into $(go env GOPATH)/bin
 	GOLANGCI_VERSION=$(GOLANGCI_VERSION) ./hack/install-tools.sh

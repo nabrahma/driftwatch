@@ -10,6 +10,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/http"
+	"net/http/pprof"
 	"os"
 	"time"
 
@@ -53,6 +55,7 @@ type options struct {
 
 	maxPublisherLabels int
 
+	enablePprof bool
 	showVersion bool
 }
 
@@ -90,6 +93,11 @@ func (o *options) bind(fs *flag.FlagSet) {
 
 	fs.IntVar(&o.maxPublisherLabels, "max-publisher-labels", metrics.DefaultMaxPublisherLabels,
 		"distinct publisher label values before the rest collapse into __other__")
+
+	fs.BoolVar(&o.enablePprof, "enable-pprof", false,
+		"serve net/http/pprof on the metrics endpoint; off by default because a "+
+			"goroutine profile carries stack traces, which is more than a scrape "+
+			"endpoint should hand out unasked")
 
 	fs.BoolVar(&o.showVersion, "version", false, "print the build information and exit")
 }
@@ -152,7 +160,7 @@ func run() error {
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                  scheme,
-		Metrics:                 metricsserver.Options{BindAddress: opts.metricsAddr},
+		Metrics:                 metricsOptions(&opts),
 		HealthProbeBindAddress:  opts.probeAddr,
 		LeaderElection:          opts.leaderElect,
 		LeaderElectionID:        "driftwatch-manager.driftwatch.io",
@@ -231,6 +239,33 @@ func buildScheme() (*runtime.Scheme, error) {
 		return nil, fmt.Errorf("registering the driftwatch types: %w", err)
 	}
 	return scheme, nil
+}
+
+// metricsOptions configures the scrape endpoint, and optionally pprof.
+//
+// pprof rides on the metrics server rather than a port of its own so that the
+// two share the manager's single exposed port and the NetworkPolicy that
+// eventually guards it. It is off by default: a goroutine profile carries stack
+// traces, and while that is exactly what makes it useful for hunting a leak, it
+// is more than an unauthenticated scrape endpoint should hand out unasked.
+//
+// The e2e suite turns it on, because §14.4 E6 asserts the manager's goroutine
+// count is unchanged across a full DriftCheck lifecycle and there is no honest
+// way to measure that from outside the process.
+func metricsOptions(opts *options) metricsserver.Options {
+	out := metricsserver.Options{BindAddress: opts.metricsAddr}
+	if !opts.enablePprof {
+		return out
+	}
+
+	out.ExtraHandlers = map[string]http.Handler{
+		"/debug/pprof/":        http.HandlerFunc(pprof.Index),
+		"/debug/pprof/cmdline": http.HandlerFunc(pprof.Cmdline),
+		"/debug/pprof/profile": http.HandlerFunc(pprof.Profile),
+		"/debug/pprof/symbol":  http.HandlerFunc(pprof.Symbol),
+		"/debug/pprof/trace":   http.HandlerFunc(pprof.Trace),
+	}
+	return out
 }
 
 // buildMetrics puts driftwatch's metrics on controller-runtime's registry.

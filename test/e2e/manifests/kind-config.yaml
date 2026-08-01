@@ -1,0 +1,32 @@
+# Single node, per §14.2.
+#
+# One node rather than three: everything the suite tests is inside one process
+# or between pods that could be co-located anyway, and a multi-node cluster
+# costs another ninety seconds of startup per run for nothing. The scenarios
+# that care about scheduling — E7's publisher restart — work identically.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: driftwatch-e2e
+
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      # Lets a scenario reach a NodePort from the host without a port-forward
+      # subprocess to manage and reap.
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      # Prometheus, if a scenario ever wants to scrape from outside. Reserved
+      # rather than used: the diagnostics collector reaches /metrics through the
+      # API server's proxy, which needs no port at all.
+      - containerPort: 30090
+        hostPort: 30090
+        protocol: TCP
+
+# containerd is left at its defaults. `kind load docker-image` puts images
+# straight into the node's image store, so there is no registry to configure and
+# nothing that needs to reach the network mid-run — which is what makes the
+# suite work on a laptop with no internet.

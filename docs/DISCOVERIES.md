@@ -30,6 +30,313 @@ written here in anticipation.
 
 ---
 
+## D-024 — A DriftCheck's endpoints resolve from the manager, not from itself
+
+**Found:** Phase 8, the first full run of the e2e suite — all eight scenarios
+failing identically.
+
+**What happened:** Every scenario timed out waiting for its check to leave
+Bootstrapping. Redis held 3,000 keys, the publisher had emitted tens of
+thousands of events, and driftwatch had applied zero.
+
+The diagnostics dump answered it in two lines:
+
+```text
+redis: connection pool: failed to dial after 2 attempts:
+  dial tcp: lookup redis: i/o timeout
+the source may have missed messages; ... "detail": "resolving publisher:
+  lookup publisher on 10.96.0.10:53: server misbehaving"
+```
+
+The DriftCheck said `addr: redis:6379` and
+`endpoints: ["tcp://publisher:5557"]`. Both services exist — in the scenario's
+own namespace. The manager runs in `driftwatch-system`, and a bare service name
+resolves through the *resolving pod's* search domain, so the manager was looking
+for a Service called `redis` in `driftwatch-system` and correctly not finding
+one.
+
+**Why it matters:** this is not a test bug that happens to look like a product
+one. It is a trap sitting in the deployment `config/default` ships.
+
+The manager is cluster-scoped by default: one operator in `driftwatch-system`
+reconciling DriftChecks in every namespace. An operator writing a DriftCheck in
+their own namespace will naturally write `addr: redis:6379`, because that is
+what every other manifest in that namespace says and what works from every pod
+in it. It will not work, and the way it fails is the problem — not a clean
+"service not found" but a DNS timeout, so the check sits in Bootstrapping
+retrying a scan against a Redis that is up and healthy one namespace away. The
+status says `Bootstrapping`, `targetReachable: false`, and nothing anywhere says
+"you wrote a name I cannot resolve from where I am".
+
+Eight scenarios failing at once is what made this cheap to find. One would have
+looked like a scenario bug.
+
+**Fix:** The suite qualifies every endpoint the manager consumes —
+`redis.<namespace>.svc.cluster.local:6379` — and the fixture exposes them as
+methods rather than constants so the namespace is impossible to omit. The short
+forms are kept, separately named, for the materializer and the throwaway curl
+pod, which really are in the namespace.
+
+Nothing changed in driftwatch itself, and that is a decision rather than an
+oversight: resolving a bare name against the *object's* namespace instead of the
+process's would mean driftwatch second-guessing DNS, and would break the
+legitimate case of a check pointing at a store outside the cluster entirely. The
+right fix is documentation and, eventually, a warning condition when a
+single-label host fails to resolve. `docs/OPERATIONS.md` and the sample manifests
+already use fully-qualified names; this makes the reason explicit.
+
+**Evidence:** `test/e2e/_artifacts/` from the failing run — the manager log and
+`07-redis-dbsize.txt` showing 3,000 keys present while `01-driftcheck.yaml`
+showed `trackedKeys: 0`.
+
+**Regression test:** All eight e2e scenarios. Any of them reverting to a bare
+service name fails within ninety seconds.
+
+---
+
+## D-023 — pure-Go zmq4 is wire compatible with libzmq, and the slow joiner is real
+
+**Found:** Phase 8, writing the §16.6 interop test.
+
+**What happened:** ADR-0001 chose `github.com/go-zeromq/zmq4`, a pure-Go ZMTP
+implementation, over a cgo binding to libzmq. That buys static binaries,
+cross-compilation and a distroless image, and it costs a guarantee: wire
+compatibility with the libzmq publishers driftwatch will actually be pointed at
+becomes a claim rather than something the linker enforces.
+
+Measured against real libzmq 4.3.5 through pyzmq 27.1.0, over TCP loopback, the
+claim holds in both directions:
+
+```text
+libzmq PUB -> Go SUB   6,667 of 10,000 delivered (correct: prefix filtering)
+Go PUB -> libzmq SUB   5,000 of 5,000 delivered, contiguous
+binary payloads        byte-identical in both directions
+framing                topic-then-payload and single-frame both parsed
+```
+
+The interesting part is not that it works. It is the two ways the test was wrong
+first.
+
+**The slow joiner is not a theory.** A PUB socket discards every message it has
+no subscriber for, silently and without buffering, and connecting a SUB socket
+is asynchronous — the TCP connect returns, the ZMTP handshake completes, and the
+subscription itself travels as a later frame the publisher processes some time
+after that. A publisher that starts emitting the instant after `bind()` loses an
+unpredictable prefix. The conventional fix is `sleep(0.1)`, which is a guess
+that fails on a loaded CI runner and fails in a way that looks exactly like
+message loss in the library under test.
+
+The test therefore has the subscriber announce itself and the publisher wait for
+that announcement. In the libzmq→Go direction that is a REQ/REP handshake. In
+the Go→libzmq direction it started as one too, and had to be replaced: when
+nothing arrived, there was no way to tell whether the PUB/SUB pair or the
+REQ/REP pair had failed, because two independent socket pairs were between two
+processes that were not talking. A file the subscriber creates and the publisher
+polls for has no handshake of its own to get wrong. It is still a real
+synchronisation, not a sleep.
+
+**6,667 of 10,000 is the correct answer, and the first assertion called it a
+bug.** The publisher emits across three topics; the subscriber asks for
+`kv-events`; ZMQ subscription is a *prefix* match, so `kv-events-secondary`
+arrives too and `other-events` does not. Two thirds of ten thousand is 6,667.
+The first version of the test asserted that the received sequence numbers were
+contiguous, and reported ~3,300 "gaps" — every one of them a message correctly
+filtered out.
+
+That is the more dangerous of the two, because the failure was loud and precise
+and pointed at the wrong thing. An assertion that "obviously" holds — a stream
+should have no holes in it — quietly stopped being true the moment filtering
+entered the picture. The fix asserts the exact expected set of sequence numbers
+rather than contiguity, which is also strictly stronger: it catches a filter
+that dropped the right *number* of the wrong messages.
+
+**Why it matters:** driftwatch's entire input path depends on this library
+reading what vLLM's libzmq-backed publishers emit. Without this test that is an
+assumption; ADR-0001 would be a bet rather than a decision. It also means the
+prefix-matching behaviour is pinned: an operator who sets `topics: ["kv"]`
+expecting an exact match will receive `kv-events`, `kv-cache` and anything else
+starting with those two letters, and that is ZMQ's semantics rather than
+driftwatch's to change.
+
+**Fix:** Nothing in driftwatch. Both defects were in the test, and both are now
+documented in it at the point where somebody would otherwise make the same
+mistake again.
+
+**Evidence:** `docs/evidence/interop-libzmq-both-directions.txt`
+
+**Regression test:** `test/interop: TestInterop_LibzmqPublisherToGoSubscriber`
+and `TestInterop_GoPublisherToLibzmqSubscriber`, behind the `interop` build tag,
+run by the `interop` job in `.github/workflows/e2e.yaml`.
+
+---
+
+## D-022 — The oracle's memory does not level off when the key count does
+
+**Found:** Phase 8, the first soak run failing its RSS assertion three times.
+
+**What happened:** §16.7 asserts RSS growth under 5% over the steady-state
+window, allowing for warmup. Every early run failed it, and not marginally: a
+four-minute run at 50,000 keys went from 230 MiB to 627 MiB, +173%, with the key
+count flat at 50,000 from the forty-second mark onwards.
+
+Nothing was leaking. The heap profile named it immediately:
+
+```text
+127.31MB 56.19%  oracle.(*ring).push
+ 47.01MB 20.75%  projection.cloneMembers
+```
+
+The oracle keeps the last `ringSize` events per key for `driftwatch explain`.
+The key count reaches its ceiling as soon as the workload has touched every key
+once — but each key's *ring* only fills after that key has been touched sixteen
+times. Memory therefore keeps climbing long after the thing everybody watches
+has gone flat.
+
+The time to steady state is `ringSize × keys / rate`, and it is not small. At
+§16.7's own parameters — 500,000 keys, 5,000 events/sec — it is
+16 × 500,000 / 5,000 = 1,600 seconds. **Twenty-seven minutes of a sixty-minute
+soak is warmup**, and §16.7's "final 45 minutes" window starts fifteen minutes
+before the oracle has finished growing.
+
+**Why it matters:** Two things, and the second is worse than the first.
+
+The soak as specified cannot pass at the parameters it specifies, and would have
+been "fixed" by whoever hit it next — most likely by widening the threshold from
+5% to something that accommodated the growth, which would have discarded the
+assertion's entire value. The failure looks exactly like a leak.
+
+The capacity picture is also worse than §19.1 assumes. Measured at 50,000 keys
+with rings roughly a third full, the ring costs about 530 bytes per retained
+event. At §19.1's stated case — 1,000,000 keys, `ringSize: 16`,
+`retainRaw: false` — full rings alone come to roughly 8 GB, against a stated
+budget of 512 MiB. `docs/KNOWN_GAPS.md` G-001 already recorded 640 MiB at 1M
+keys; that measurement was taken before the rings had filled, so it was
+measuring the same warmup this discovery is about. G-001 is updated accordingly.
+
+**Fix:** The test now computes its own warmup from `ringSize × keys / rate`
+rather than taking a fixed fraction of the run, and refuses to assert on a run
+too short for the rings to fill — with a message that says so rather than
+reporting a leak.
+
+The memory itself is not fixed here. It is a real capacity limit and belongs in
+G-001 with a number attached, not in a quiet threshold change.
+
+**Evidence:** `docs/evidence/S2-soak-heap-middle.pprof`, and the RSS column in
+`docs/evidence/S2-soak-60min-zero-drift.txt`.
+
+**Regression test:** `test/soak: TestSoak` — `Config.ringFillTime` and the
+`require.Less(t, warmup, len(samples))` guard mean a run that cannot see steady
+state says so instead of failing the memory assertion.
+
+---
+
+## D-021 — A soak that "detected nothing" was injecting a fault that changed nothing
+
+**Found:** Phase 8, the first soak run reaching its midpoint.
+
+**What happened:** §16.7 asks for a deliberate 10-event drop at the halfway mark,
+detected and then resolved, to prove the tool still works after half an hour
+rather than merely still running. The obvious implementation is for the
+materializer to skip those ten events. It was, and driftwatch reported nothing.
+
+driftwatch was right. The workload emits `add key member` and the materializer
+applies `SADD`, which is idempotent — and the workload cycles each key through
+the same three publishers forever, so by the midpoint every member is already in
+every set. Skipping one more `add` leaves the store holding exactly what the
+oracle expects. There was no divergence to find.
+
+The second attempt made the fault real by removing the member instead, and the
+next run detected 8 of 10 within one sample and resolved them in the next.
+
+The 8 rather than 10 is the other half of the finding, and it is correct: two of
+the ten keys were touched again by the workload between the sweep that raised
+them and the read that would have confirmed them, so two-phase confirmation
+classified them as transient. They had stopped being divergent before anybody
+could have acted on them.
+
+**Why it matters:** A test that injects a fault and asserts detection is only
+worth having if the fault is observable. This one asserted the most important
+property in §16.7 — that detection still works late in a long run — and would
+have passed the moment somebody weakened it to "detected or not", or failed
+forever while looking like a detection bug in driftwatch rather than a modelling
+bug in the test.
+
+It also produced a second trap immediately. Reducing the key count to make a
+short validation run cheap made the fault invisible again for a different
+reason: at 20,000 keys and 5,000 events/sec each key comes round every four
+seconds, so the removed member was written back long before a 30-second sweep
+could confirm it was gone. The fault is only observable when
+`keys / rate > sweepInterval + settlementWindow.max`. §16.7's parameters give
+100 seconds against 90; the margin is thinner than it looks.
+
+**Fix:** The drop removes the member rather than skipping the write, and
+`Config.requireFaultIsObservable` fails before the run starts if the parameters
+cannot see it, naming the arithmetic.
+
+**Evidence:** `docs/evidence/S2-soak-60min-zero-drift.txt` — the drift column
+going non-zero at the midpoint and back to zero one sample later.
+
+**Regression test:** `test/soak: TestSoak` — `requireFaultIsObservable`, plus the
+existing `require.NotZero(t, detectedAt)`.
+
+---
+
+## D-020 — The extras scan overwrote the one gauge that stops the dashboard lying
+
+**Found:** Phase 8, watching the demo's own dashboard for thirty seconds.
+
+**What happened:** `driftwatch_coverage_ratio` dropped to zero and came back, on
+a period that turned out to be exactly `policy.extraScanInterval`:
+
+```text
+10:02:55  coverage=0.9905
+10:03:01  coverage=0.0000     <- extras scan
+10:03:06  coverage=0.9910
+10:03:29  coverage=0.0000     <- extras scan
+10:03:35  coverage=0.9905
+```
+
+Both halves of §5.5's comparison reach the metrics through one `OnReport`
+callback, and `recordSweepMetrics` did not distinguish them. The target→oracle
+pass walks the *store* looking for keys no event created, so its `KeysCompared`
+is a count of store keys — and coverage, which means "what fraction of the
+oracle did the last sweep verify", was being recomputed from it every time.
+
+The same fall-through counted each extras scan as
+`sweeps_total{kind="oracle_to_target"}` and mixed its duration into that
+histogram, so both the sweep count and the sweep p99 were measuring two
+different operations at once. The p99 that `DriftwatchSweepsSkipped` and the
+row-5 dashboard panel are built on was a blend of a keyspace walk and a
+comparison.
+
+**Why it matters:** Of every gauge this could have hit, it hit the one whose
+entire purpose is to stop the dashboard overstating its own verdict. §12.1 says
+so in as many words: zero divergence at 3% coverage is meaningless, and this
+panel is what makes that visible. An operator watching it would have seen it
+flash red on a timer and learned to disregard it — which is the failure mode the
+panel exists to prevent, arriving through the panel itself.
+
+Nothing in the unit suite could have caught it. Every test that drives an extras
+scan calls `ScanExtras` directly and asserts on the report it returns; none of
+them asserted on a gauge that a *different* operation had set earlier. The bug
+only exists in the interleaving, and the interleaving only happens in a process
+that runs both on their own timers for longer than `extraScanInterval`.
+
+**Fix:** `differ.Report` gained a `Pass` field, set by the sweeper for each half.
+`recordSweepMetrics` routes a target→oracle report to `recordExtrasScanMetrics`,
+which records the scan's own result, duration and observed target health and
+touches nothing else — so every gauge it has no opinion about keeps the value
+the last real sweep gave it, which is the honest answer.
+
+**Evidence:** `docs/evidence/demo-drift-detected-and-resolved.txt` — the coverage
+column holding between 0.9969 and 0.9999 across a full drift episode, including
+several extras-scan boundaries.
+
+**Regression test:**
+`pkg/check: TestCheck_ExtrasScanDoesNotClobberSweepMetrics`.
+
+---
+
 ## D-019 — The manager panicked at startup on a registry every test built differently
 
 **Found:** Phase 7, the first time the real image ran in a Kind cluster.
@@ -350,7 +657,7 @@ exists, which is 21% over the whole budget.
 
 Measured across four limits:
 
-```
+```text
 maxPublisherLabels=25   -> 156 time series (budget 500) OK
 maxPublisherLabels=50   -> 306 time series (budget 500) OK
 maxPublisherLabels=75   -> 456 time series (budget 500) OK
