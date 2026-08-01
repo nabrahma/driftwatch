@@ -59,6 +59,7 @@ func (s *Sweeper) ScanExtrasOnce(ctx context.Context) (*differ.Report, error) {
 	opts.Now = now
 
 	rep := differ.NewReport(now, opts)
+	rep.Pass = differ.PassTargetToOracle
 	rep.SettlementWindow = w
 
 	// Second pass first: a set that has waited its window is decided now, using

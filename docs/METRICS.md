@@ -71,6 +71,24 @@ further publishers collapse into `publisher="__other__"`.
 | `check` | the DriftCheck name, bounded by how many checks are configured |
 | `publisher` | publisher id, bounded by `maxPublisherLabels` (default 50), then `__other__` |
 
+### `driftwatch_seq_epoch`
+
+**gauge** — The incarnation each publisher currently declares. A change is a restart.
+
+| Label | Values |
+|---|---|
+| `check` | the DriftCheck name, bounded by how many checks are configured |
+| `publisher` | publisher id, bounded by `maxPublisherLabels` (default 50), then `__other__` |
+
+### `driftwatch_seq_high_water_mark`
+
+**gauge** — Highest sequence number seen from each publisher, within its current epoch.
+
+| Label | Values |
+|---|---|
+| `check` | the DriftCheck name, bounded by how many checks are configured |
+| `publisher` | publisher id, bounded by `maxPublisherLabels` (default 50), then `__other__` |
+
 ### `driftwatch_publisher_restarts_total`
 
 **counter** — Publisher restarts, explicit (epoch bump) or implicit (sequence reset without one).

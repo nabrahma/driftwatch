@@ -11,8 +11,34 @@ import (
 	"github.com/nabrahma/driftwatch/pkg/target"
 )
 
+// Pass names which half of the comparison produced a report (§5.5).
+//
+// The two halves answer different questions and cannot be measured with the
+// same numbers. The oracle→target pass walks the keys driftwatch expects and
+// asks whether the store has them; its KeysCompared is a fraction of the
+// oracle, which is what the coverage ratio means. The target→oracle pass walks
+// the store looking for keys no event created; its KeysCompared says nothing
+// about oracle coverage at all.
+//
+// A report that did not say which it was let the extras scan overwrite the
+// coverage gauge with a number that was not coverage. See docs/DISCOVERIES.md.
+type Pass string
+
+// The two passes.
+const (
+	// PassOracleToTarget is the sweep: does the store hold what the events say?
+	PassOracleToTarget Pass = "oracle_to_target"
+	// PassTargetToOracle is the extras scan: does the store hold anything the
+	// events never produced?
+	PassTargetToOracle Pass = "target_to_oracle"
+)
+
 // Report aggregates findings for one sweep.
 type Report struct {
+	// Pass names which half of the comparison this is. Defaults to
+	// PassOracleToTarget, which is what an unset value used to mean implicitly.
+	Pass Pass `json:"pass"`
+
 	StartedAt  time.Time `json:"startedAt"`
 	FinishedAt time.Time `json:"finishedAt"`
 
@@ -53,6 +79,7 @@ type Report struct {
 func NewReport(startedAt time.Time, opts Options) *Report {
 	opts.applyDefaults()
 	return &Report{
+		Pass:        PassOracleToTarget,
 		StartedAt:   startedAt,
 		ByCategory:  map[Category]int{},
 		ByTrust:     map[oracle.TrustState]int{},

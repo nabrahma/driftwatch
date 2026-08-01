@@ -181,6 +181,24 @@ var defs = []Def{
 		Help:   "Sequence numbers currently unaccounted for, by publisher.",
 		Labels: []string{LabelCheck, LabelPublisher},
 	},
+	// The two the §12.1 publisher table needs and nothing else does.
+	//
+	// The CRD status has carried epoch and the high-water mark per publisher
+	// since §10.1, so the data was always there — it simply never reached
+	// Prometheus, which meant the dashboard's sequence-integrity table could
+	// show four of its six columns. Both are gauges rather than counters: a
+	// high-water mark that goes backwards is a restart, and a counter that goes
+	// backwards is a reset PromQL would silently paper over with rate().
+	{
+		Name: "driftwatch_seq_epoch", Kind: KindGauge, Section: sectionSequence,
+		Help:   "The incarnation each publisher currently declares. A change is a restart.",
+		Labels: []string{LabelCheck, LabelPublisher},
+	},
+	{
+		Name: "driftwatch_seq_high_water_mark", Kind: KindGauge, Section: sectionSequence,
+		Help:   "Highest sequence number seen from each publisher, within its current epoch.",
+		Labels: []string{LabelCheck, LabelPublisher},
+	},
 	{
 		Name: "driftwatch_publisher_restarts_total", Kind: KindCounter, Section: sectionSequence,
 		Help:   "Publisher restarts, explicit (epoch bump) or implicit (sequence reset without one).",

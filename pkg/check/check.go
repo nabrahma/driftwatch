@@ -1049,12 +1049,19 @@ func (c *Check) publishGauges() {
 	publishers := c.tracker.Publishers()
 	c.m.SetPublishersTracked(len(publishers))
 	for _, ps := range publishers {
+		// Position and skew first, and outside the nil check below. A publisher
+		// with no gap set is one that has never lost anything — the healthy
+		// case — and skipping the whole loop body for it meant the sequence
+		// table on the dashboard was populated only by publishers already in
+		// trouble.
+		c.m.SetSeqPosition(ps.ID, ps.Epoch, ps.HWM)
+		c.m.SetClockSkew(ps.ID, c.skewOf(ps.ID))
+
 		if ps.Gaps == nil {
 			continue
 		}
 		c.m.SetMissingEvents(ps.ID, ps.Gaps.Count())
 		c.m.SetGapsetTruncated(ps.ID, ps.Gaps.Truncated())
-		c.m.SetClockSkew(ps.ID, c.skewOf(ps.ID))
 	}
 
 	stats := c.swp.Stats()
@@ -1241,11 +1248,15 @@ func (c *Check) FlushReorder() {
 // full comparison (§5.5).
 func (c *Check) ScanExtras(ctx context.Context) (*differ.Report, error) {
 	rep, err := c.swp.ScanExtrasOnce(ctx)
+	if c.m != nil {
+		// The same recording the Run loop's extras scan gets. Out-of-band
+		// callers — `driftwatch diff`, and every test that drives a scan by
+		// hand — were previously getting only the counter, so a scan run this
+		// way left its duration and the target health it observed unrecorded.
+		c.recordExtrasScanMetrics(rep, err)
+	}
 	if err != nil {
 		return nil, err
-	}
-	if c.m != nil {
-		c.m.Sweep(metrics.SweepTargetToOracle, metrics.SweepSuccess)
 	}
 	return rep, nil
 }
@@ -1264,6 +1275,39 @@ func (c *Check) PollLag(ctx context.Context) { c.est.Tick(ctx, c.clk.Now()) }
 // one process rather than waiting for the sweeper's own timer.
 func (c *Check) ConfirmDue(ctx context.Context) int {
 	return c.swp.ConfirmDue(ctx, c.clk.Now())
+}
+
+// recordExtrasScanMetrics records the target→oracle pass.
+//
+// Deliberately narrow. The extras scan walks the store rather than the oracle,
+// so it has nothing to say about coverage, about which keys settled, or about
+// how much of the expectation was verified — and every gauge it stayed silent
+// on keeps the value the last real sweep gave it, which is the honest answer.
+//
+// What it does own is its own result, its own duration, and the target health
+// it observed on the way past, since it is talking to the same store.
+func (c *Check) recordExtrasScanMetrics(rep *differ.Report, err error) {
+	result := metrics.SweepSuccess
+	switch {
+	case errors.Is(err, sweeper.ErrTargetUnavailable):
+		result = metrics.SweepTargetUnavailable
+	case errors.Is(err, context.Canceled):
+		result = metrics.SweepAborted
+	case err != nil:
+		result = metrics.SweepError
+	}
+	c.m.Sweep(metrics.SweepTargetToOracle, result)
+
+	if result == metrics.SweepTargetUnavailable {
+		c.m.SetTargetReachable(false)
+	}
+	if rep == nil {
+		return
+	}
+
+	c.m.ObserveSweepDuration(metrics.SweepTargetToOracle, rep.Duration())
+	c.m.SetTargetReachable(rep.TargetHealth.Reachable)
+	c.m.SetTargetKeyspaceSize(rep.TargetHealth.KeyspaceSize)
 }
 
 // onReport records a sweep's outcome in the status and the metrics.
@@ -1291,6 +1335,22 @@ func (c *Check) onReport(rep *differ.Report, err error) {
 
 func (c *Check) recordSweepMetrics(rep *differ.Report, err error) {
 	if c.m == nil {
+		return
+	}
+
+	// The extras scan comes through the same callback and is not a sweep.
+	//
+	// Letting it fall through was a real defect, found by watching the demo's
+	// dashboard: every extraScanInterval the coverage gauge dropped to zero and
+	// came back, because the extras report's KeysCompared counts store keys
+	// walked rather than oracle keys compared, and coverage was recomputed from
+	// it. The most important panel on the dashboard flashed red on a timer.
+	//
+	// It also mislabelled itself — every extras scan incremented
+	// sweeps_total{kind="oracle_to_target"} and mixed its duration into that
+	// histogram, so both were measuring two different operations at once.
+	if rep != nil && rep.Pass == differ.PassTargetToOracle {
+		c.recordExtrasScanMetrics(rep, err)
 		return
 	}
 

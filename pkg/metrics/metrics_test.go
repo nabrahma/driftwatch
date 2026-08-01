@@ -35,6 +35,8 @@ var wantMetricNames = []string{
 	// sequence integrity
 	"driftwatch_seq_gaps_total",
 	"driftwatch_seq_missing_events",
+	"driftwatch_seq_epoch",
+	"driftwatch_seq_high_water_mark",
 	"driftwatch_publisher_restarts_total",
 	"driftwatch_publisher_clock_skew_seconds",
 	"driftwatch_publishers_tracked",

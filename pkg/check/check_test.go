@@ -265,3 +265,117 @@ func sampleValue(m *dto.Metric) float64 {
 		return 0
 	}
 }
+
+// TestCheck_ExtrasScanDoesNotClobberSweepMetrics is a regression test for a
+// defect the whole unit suite missed and thirty seconds of watching the demo's
+// dashboard found.
+//
+// Both halves of §5.5's comparison reach the metrics through one callback. The
+// extras scan walks the *store* looking for keys no event produced, so its
+// KeysCompared has nothing to do with how much of the oracle was verified — and
+// coverage was being recomputed from it anyway. Every extraScanInterval the
+// coverage gauge dropped to zero and came back, which on the dashboard is the
+// one panel that exists to stop a zero-divergence verdict from overstating
+// itself, flashing red on a timer.
+//
+// The same fall-through counted each extras scan as an oracle_to_target sweep
+// and mixed its duration into that histogram, so `sweeps_total` and the sweep
+// duration p99 were both measuring two different operations at once.
+func TestCheck_ExtrasScanDoesNotClobberSweepMetrics(t *testing.T) {
+	clk := clock.Fake(epoch())
+	reg := prometheus.NewRegistry()
+	met := metrics.New(metrics.Options{Registry: reg})
+
+	spec, err := check.Load(strings.NewReader(inProcessSpec))
+	require.NoError(t, err)
+
+	c, err := check.New(spec, check.Deps{Clock: clk, Metrics: met})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, c.Close()) })
+
+	ctx := context.Background()
+	store, ok := c.Target().(*target.MemoryTarget)
+	require.True(t, ok, "the spec configures a memory target")
+
+	// A keyspace both sides agree on, settled and swept, so coverage is real.
+	for b := 0; b < 4; b++ {
+		msg := source.RawMessage{
+			Payload:    addEvent("replica-0", uint64(b+1), b, "replica-0"),
+			ObservedAt: clk.Now(),
+		}
+		c.Ingest(msg)
+		store.Seed(map[string][]byte{blockKey(b): []byte("replica-0")})
+	}
+
+	clk.Advance(30 * time.Second)
+	_, err = c.SweepNow(ctx)
+	require.NoError(t, err)
+
+	coverageAfterSweep := gaugeValue(t, reg, "driftwatch_coverage_ratio")
+	require.Positive(t, coverageAfterSweep,
+		"the sweep compared keys, so coverage must be above zero")
+
+	sweepsBefore := valueOf(t, reg, "driftwatch_sweeps_total")
+
+	// Now the other half of the comparison, exactly as the Run loop drives it.
+	_, err = c.ScanExtras(ctx)
+	require.NoError(t, err)
+
+	assert.InDelta(t, coverageAfterSweep,
+		gaugeValue(t, reg, "driftwatch_coverage_ratio"), 1e-9,
+		"the extras scan walks the store, not the oracle: it knows nothing "+
+			"about coverage and must leave the gauge where the last sweep put it")
+
+	assert.Equal(t, sweepsBefore+1, valueOf(t, reg, "driftwatch_sweeps_total"),
+		"the scan is counted once")
+	assert.Equal(t, 1, labelledValue(t, reg, "driftwatch_sweeps_total",
+		"kind", "target_to_oracle"),
+		"and counted as what it is")
+	assert.Equal(t, 1, labelledValue(t, reg, "driftwatch_sweeps_total",
+		"kind", "oracle_to_target"),
+		"the sweep count is untouched by it")
+}
+
+// gaugeValue reads a single gauge, summed across labels.
+func gaugeValue(t *testing.T, reg *prometheus.Registry, name string) float64 {
+	t.Helper()
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+
+	for _, mf := range families {
+		if mf.GetName() != name {
+			continue
+		}
+		total := 0.0
+		for _, m := range mf.GetMetric() {
+			total += sampleValue(m)
+		}
+		return total
+	}
+	return 0
+}
+
+// labelledValue sums the samples carrying one label value.
+func labelledValue(t *testing.T, reg *prometheus.Registry, name, label, value string) int {
+	t.Helper()
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+
+	for _, mf := range families {
+		if mf.GetName() != name {
+			continue
+		}
+		total := 0.0
+		for _, m := range mf.GetMetric() {
+			for _, lp := range m.GetLabel() {
+				if lp.GetName() == label && lp.GetValue() == value {
+					total += sampleValue(m)
+				}
+			}
+		}
+		return int(total)
+	}
+	return 0
+}

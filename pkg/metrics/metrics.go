@@ -309,6 +309,19 @@ func (c *CheckMetrics) SetMissingEvents(publisher string, n uint64) {
 	c.gauge("driftwatch_seq_missing_events", c.publisher.label(publisher)).Set(float64(n))
 }
 
+// SetSeqPosition records a publisher's epoch and high-water mark.
+//
+// Both together, because either alone is misleading: a high-water mark of 12
+// after one of 900,000 is a restart if the epoch moved and a catastrophe if it
+// did not, and a dashboard that showed one without the other could not tell
+// those apart.
+func (c *CheckMetrics) SetSeqPosition(publisher string, epoch, highWaterMark uint64) {
+	label := c.publisher.label(publisher)
+
+	c.gauge("driftwatch_seq_epoch", label).Set(float64(epoch))
+	c.gauge("driftwatch_seq_high_water_mark", label).Set(float64(highWaterMark))
+}
+
 // PublisherRestart counts one restart.
 func (c *CheckMetrics) PublisherRestart(publisher string, kind RestartKind) {
 	c.counter("driftwatch_publisher_restarts_total",
