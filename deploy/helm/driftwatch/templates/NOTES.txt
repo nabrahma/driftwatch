@@ -1,0 +1,55 @@
+driftwatch {{ .Chart.AppVersion }} is installed in {{ .Release.Namespace }}.
+
+  kubectl -n {{ .Release.Namespace }} get deploy {{ include "driftwatch.fullname" . }}
+  kubectl -n {{ .Release.Namespace }} logs -l app.kubernetes.io/name={{ include "driftwatch.name" . }} -f
+
+Create a check:
+
+  kubectl explain driftcheck.spec          # every field is documented there
+  kubectl apply -f your-driftcheck.yaml
+  kubectl get driftchecks -A
+
+What to read on a check:
+
+  PHASE       Watching means it is comparing. Degraded means it is running and
+              honest about not seeing everything — which is not the same as
+              Failed and must not page anyone the same way.
+  DRIFT       Confirmed divergent keys. This is the number to alert on.
+  SUSPECT     Divergent keys whose event stream driftwatch knows it partly
+              missed. Never alert on it: it measures driftwatch, not the store.
+
+{{ if not .Values.webhook.enabled }}
+The admission webhook is DISABLED.
+
+The CRD schema still enforces enums, ranges and per-field defaults, so a
+malformed spec is still rejected. What is not enforced is the cross-field
+validation in §10.2 — in particular that source.ingestBufferSize is at least
+source.zmq.recvHWM. Getting that one wrong is invisible rather than loud: the
+socket discards frames before driftwatch ever sees them, so the loss never
+reaches a counter and the check reports a complete view of a stream it is
+quietly missing pieces of.
+
+Enable it wherever a certificate source exists:
+
+  --set webhook.enabled=true --set webhook.certManager.enabled=true \
+    --set webhook.certManager.issuerRef.name=<issuer> \
+    --set webhook.certManager.issuerRef.kind=ClusterIssuer
+{{- end }}
+{{- if not .Values.manager.leaderElect }}
+
+Leader election is DISABLED. Safe at one replica and unsafe at more than one:
+every replica would run every check, sweeping the same store and writing metrics
+under the same check label.
+{{- end }}
+{{- if and .Values.metrics.enabled (not .Values.metrics.serviceMonitor.enabled) }}
+
+Metrics are served on :{{ .Values.metrics.port }} but nothing is scraping them.
+With the Prometheus operator installed:
+
+  --set metrics.serviceMonitor.enabled=true --set metrics.prometheusRule.enabled=true
+{{- end }}
+
+Sizing: budget roughly 700 bytes per tracked key, times policy.maxTrackedKeys,
+times the number of checks this manager runs. The default limit of
+{{ .Values.resources.limits.memory }} covers one check at the default
+1,000,000 keys.

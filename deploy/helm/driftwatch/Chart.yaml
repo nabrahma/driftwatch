@@ -1,0 +1,32 @@
+apiVersion: v2
+name: driftwatch
+description: >-
+  Detects silent divergence between an event stream and the datastore built from
+  it, by folding the events independently and comparing the result.
+type: application
+
+# The chart version tracks the chart, the appVersion tracks the binary. They
+# move independently: a values change that does not touch the image is a chart
+# bump alone.
+version: 0.1.0
+appVersion: "0.1.0"
+
+keywords:
+  - drift
+  - consistency
+  - redis
+  - observability
+  - kv-cache
+
+home: https://github.com/nabrahma/driftwatch
+sources:
+  - https://github.com/nabrahma/driftwatch
+
+maintainers:
+  - name: nabrahma
+    url: https://github.com/nabrahma
+
+annotations:
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/operator: "true"
+  artifacthub.io/operatorCapabilities: Seamless Upgrades

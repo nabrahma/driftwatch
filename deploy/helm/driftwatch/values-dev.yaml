@@ -1,0 +1,87 @@
+# Development overrides: one replica, no leader election, small resources, a
+# check wired to an in-cluster Redis.
+#
+# Everything here turns the production defaults *down*. That direction matters:
+# a chart whose defaults are the development configuration ships an insecure or
+# under-resourced install to anybody who does not read the whole values file,
+# and the people least likely to read it are the ones installing in a hurry.
+#
+#   helm install driftwatch deploy/helm/driftwatch -f values-dev.yaml
+
+replicaCount: 1
+
+manager:
+  # Safe at one replica, and only at one. The chart refuses replicaCount > 1
+  # with this off, because two managers would each run every check.
+  leaderElect: false
+  watchNamespace: default
+  logLevel: debug
+  logFormat: console
+  verbosity: 1
+  # Faster feedback than production's 15s: on a laptop you are watching
+  # `kubectl get driftcheck -w` rather than a dashboard.
+  statusRefreshInterval: 5s
+  restartInterval: 2s
+  shutdownGrace: 10s
+
+image:
+  # Whatever `make docker-build` last produced, loaded into Kind.
+  tag: dev
+  pullPolicy: IfNotPresent
+
+rbac:
+  scope: namespace
+
+webhook:
+  # No cert-manager on a Kind cluster by default. The CRD schema still validates
+  # what it can; see NOTES.txt for what is not enforced without this.
+  enabled: false
+
+resources:
+  # A dev keyspace is thousands of keys, not a million.
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: false
+  prometheusRule:
+    enabled: false
+
+podDisruptionBudget:
+  enabled: false
+
+driftChecks:
+  - name: dev-kvcache
+    namespace: default
+    spec:
+      source:
+        type: zmq
+        zmq:
+          endpoints:
+            - tcp://vllm.default.svc:5557
+      projection:
+        type: keysetOwnership
+        keyTemplate: "block:{{.Key}}"
+      target:
+        type: redis
+        redis:
+          addr: redis.default.svc:6379
+          keyPattern: "block:*"
+      policy:
+        # Tighter than production so a demo shows something inside a minute.
+        settlementWindow:
+          mode: static
+          static: 2s
+        sweepInterval: 5s
+        extraScanInterval: 30s
+        maxTrackedKeys: 10000
+        # requirePrimary off: a single-node dev Redis reports as a master
+        # anyway, and leaving it on turns a docker-compose Redis into a
+        # confusing startup failure.
+        requirePrimary: false

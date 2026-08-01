@@ -1,0 +1,144 @@
+# Production overrides.
+#
+# Most of this is already the chart's default — the defaults are the production
+# ones deliberately. What this file adds is the part that cannot be a default
+# because it names things in a specific cluster: the issuer, the Prometheus
+# release label, the endpoints, the secret.
+#
+#   helm install driftwatch deploy/helm/driftwatch -n driftwatch-system \
+#     --create-namespace -f values-prod.yaml
+
+replicaCount: 2
+
+image:
+  # Pinned. An unpinned tag means a pod rescheduled at 3am can come back on a
+  # different build from the one next to it, and the two would disagree about
+  # the same store.
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+manager:
+  leaderElect: true
+  logLevel: info
+  logFormat: json
+  statusRefreshInterval: 15s
+  restartInterval: 5s
+  # Comfortably below terminationGracePeriodSeconds, or the pod is SIGKILLed
+  # mid-shutdown and no Close runs at all.
+  shutdownGrace: 30s
+  maxPublisherLabels: 50
+
+webhook:
+  # On in production. The cross-field rules in §10.2 are the ones the CRD schema
+  # cannot express, and the ingestBufferSize >= recvHWM rule in particular fails
+  # silently when it is violated rather than loudly.
+  enabled: true
+  failurePolicy: Fail
+  certManager:
+    enabled: true
+    issuerRef:
+      name: cluster-issuer
+      kind: ClusterIssuer
+      group: cert-manager.io
+
+rbac:
+  # Cluster-scoped so one manager can audit checks in several namespaces. Where
+  # only one namespace is audited, prefer rbac.scope=namespace with
+  # manager.watchNamespace set — §18 asks for that wherever the environment
+  # allows it, because a manager that can read secrets cluster-wide is a much
+  # larger blast radius.
+  scope: cluster
+
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    labels:
+      # The label the Prometheus operator selects ServiceMonitors by. Wrong
+      # value and the ServiceMonitor exists, looks correct, and is never read.
+      release: prometheus
+  prometheusRule:
+    enabled: true
+    labels:
+      release: prometheus
+
+resources:
+  # One check at the default 1,000,000 keys. §19.1 budgets 512 MiB and the
+  # measured figure is closer to 640 MiB (docs/KNOWN_GAPS.md G-001), so the
+  # limit sits above the budget rather than at it — a limit that OOM-kills the
+  # manager takes every check in it down at once.
+  #
+  # Multiply by the number of checks and by maxTrackedKeys / 1,000,000.
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    # ScheduleAnyway rather than DoNotSchedule: on a single-node cluster the
+    # strict form leaves the second replica permanently Pending, and an
+    # unschedulable standby is worse than a co-located one.
+    whenUnsatisfiable: ScheduleAnyway
+
+driftChecks:
+  - name: kvcache-index
+    namespace: inference
+    spec:
+      source:
+        type: zmq
+        zmq:
+          endpoints:
+            - tcp://vllm-0.vllm.inference.svc:5557
+            - tcp://vllm-1.vllm.inference.svc:5557
+          topics: ["kv_events"]
+          recvHWM: 100000
+        ingestBufferSize: 200000
+      codec:
+        type: json
+        retainRaw: false
+        opMapping:
+          BLOCK_STORED: add
+          BLOCK_EVICTED: remove
+          SNAPSHOT_START: snapshotBegin
+          SNAPSHOT_END: snapshotEnd
+      projection:
+        type: keysetOwnership
+        keyTemplate: "block:{{.Key}}"
+        maxMembersPerKey: 100000
+      target:
+        type: redis
+        redis:
+          mode: standalone
+          addr: redis.inference.svc:6379
+          passwordSecretRef:
+            name: redis-creds
+            key: password
+          keyPattern: "block:*"
+      policy:
+        settlementWindow:
+          mode: adaptive
+          min: 1s
+          max: 120s
+          safetyFactor: "3.0"
+        sweepInterval: 30s
+        extraScanInterval: 5m
+        bootstrap: Adopt
+        expiryPolicy: Strict
+        # Never compare against a replica: a replica is legitimately behind its
+        # primary, so comparing against one manufactures drift that is not there.
+        requirePrimary: true
+        maxTrackedKeys: 1000000
+      alert:
+        divergentKeysThreshold: 10
+        divergentRatioThreshold: "0.001"
+        forDuration: 60s
+        includeSuspect: false

@@ -1,0 +1,172 @@
+# Default values for driftwatch.
+#
+# The defaults here are the production ones. That is a deliberate choice: a
+# chart whose defaults are the development configuration ships insecure or
+# under-resourced installs to anybody who does not read the whole file, and the
+# people most likely not to read it are the ones installing it in a hurry.
+# values-dev.yaml turns things *down*; nothing needs turning up.
+
+image:
+  repository: ghcr.io/nabrahma/driftwatch
+  # Empty means the chart's appVersion, so an upgrade of the chart moves the
+  # image with it unless someone has deliberately pinned one.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Two replicas, one leader. The standby is not idle capacity — it is what stops
+# a node drain from ending the audit for as long as the scheduler takes.
+replicaCount: 2
+
+manager:
+  # Leader election must stay on with more than one replica. Two managers each
+  # running the same checks would sweep the same store, write metrics under the
+  # same check label, and patch the same status from two different oracles.
+  leaderElect: true
+
+  # Empty watches every namespace. Naming one restricts the cache and, with
+  # rbac.scope=namespace below, restricts the RBAC to match — which §18 prefers
+  # wherever the environment allows it, because a manager that can read secrets
+  # cluster-wide is a much larger blast radius.
+  watchNamespace: ""
+
+  logLevel: info
+  logFormat: json
+  verbosity: 0
+
+  # How often a running check's status is rewritten. Frequent enough that
+  # `kubectl get driftcheck` is worth reading, seldom enough not to be churn.
+  statusRefreshInterval: 15s
+  # Minimum time between restarts of one check, so a spec edited repeatedly does
+  # not rebuild the oracle on every edit.
+  restartInterval: 5s
+  # How long to wait for checks to stop before giving up on them. Must be
+  # comfortably below terminationGracePeriodSeconds, or the pod is SIGKILLed
+  # mid-shutdown and no Close runs at all.
+  shutdownGrace: 30s
+
+  # Distinct publisher label values before the rest collapse into __other__.
+  # §9 M12 budgets 500 Prometheus time series per check; 50 is what actually
+  # fits inside that (docs/DECISIONS.md ADR-0008).
+  maxPublisherLabels: 50
+
+  extraArgs: []
+
+webhook:
+  # Off by default, and this is the one default that is not simply the safe
+  # choice. Admission needs a serving certificate, and where that comes from is
+  # an opinion about the cluster rather than about driftwatch. The CRD's own
+  # schema still enforces the enums, ranges and defaults, so a malformed spec is
+  # still rejected; what is lost is the cross-field validation in §10.2 — the
+  # ingestBufferSize >= recvHWM rule in particular, whose whole point is that
+  # getting it wrong is otherwise invisible.
+  #
+  # Turn this on wherever a certificate source exists. It is worth the setup.
+  enabled: false
+  port: 9443
+  # cert-manager issues and rotates the certificate. Without it, supply
+  # certSecretName pointing at a secret holding tls.crt and tls.key.
+  certManager:
+    enabled: false
+    issuerRef: {}
+  certSecretName: ""
+  failurePolicy: Fail
+
+crds:
+  # Helm installs CRDs from crds/ once and never upgrades them, which is a
+  # footgun for a project whose schema is still v1alpha1. Templating them
+  # instead means `helm upgrade` moves the schema with the chart.
+  install: true
+  # Leave the CRD behind on uninstall. Removing it would delete every DriftCheck
+  # in the cluster, and an uninstall is not always a decision to discard the
+  # configuration.
+  keepOnUninstall: true
+
+rbac:
+  create: true
+  # cluster grants a ClusterRole; namespace grants a Role in the release
+  # namespace only. Use namespace with manager.watchNamespace set.
+  scope: cluster
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+metrics:
+  enabled: true
+  port: 8080
+  service:
+    type: ClusterIP
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+  prometheusRule:
+    enabled: false
+    labels: {}
+
+probes:
+  port: 8081
+
+resources:
+  # Sized for the default policy.maxTrackedKeys of 1,000,000 at roughly 700
+  # bytes per key. §19.1 budgets 512 MiB for that; the measured figure is closer
+  # to 640 MiB (docs/KNOWN_GAPS.md G-001), so the limit sits above the budget
+  # rather than at it — a limit that OOM-kills the manager takes every check in
+  # it down at once.
+  #
+  # Multiply the memory by the number of checks and by maxTrackedKeys/1,000,000.
+  requests:
+    cpu: 200m
+    memory: 512Mi
+  limits:
+    cpu: "2"
+    memory: 1Gi
+
+# §18. Every field is load-bearing; nothing here is boilerplate.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 65532
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+terminationGracePeriodSeconds: 45
+
+# Keeps the replicas off one node, or the standby dies with the leader.
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}
+podLabels: {}
+
+# DriftChecks to create alongside the manager. Each entry is a spec exactly as
+# `kubectl explain driftcheck.spec` describes it, so a chart value and a
+# hand-written manifest are the same document.
+driftChecks: []

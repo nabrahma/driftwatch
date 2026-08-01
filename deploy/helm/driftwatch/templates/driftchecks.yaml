@@ -1,0 +1,24 @@
+{{- range .Values.driftChecks }}
+{{/*
+A DriftCheck per entry in .Values.driftChecks. The spec is passed through
+unchanged, so a chart value and a hand-written manifest are the same document —
+which means `kubectl explain driftcheck.spec` documents the values file too.
+*/}}
+---
+apiVersion: driftwatch.io/v1alpha1
+kind: DriftCheck
+metadata:
+  name: {{ required "driftwatch: each entry in driftChecks needs a name" .name }}
+  namespace: {{ .namespace | default $.Release.Namespace }}
+  labels:
+    {{- include "driftwatch.labels" $ | nindent 4 }}
+    {{- with .labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- required "driftwatch: each entry in driftChecks needs a spec" .spec | toYaml | nindent 2 }}
+{{- end }}

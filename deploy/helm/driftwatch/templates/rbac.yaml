@@ -1,0 +1,146 @@
+{{- if .Values.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "driftwatch.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "driftwatch.labels" . | nindent 4 }}
+  {{- with .Values.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- if .Values.rbac.create }}
+---
+{{/*
+Exactly the verbs in §10.3 and nothing else. No pods, no nodes, no deployments:
+driftwatch reads an event stream and a datastore, and has no reason to enumerate
+what is running in the cluster. A controller that could would be a far more
+interesting thing to compromise than one that cannot.
+
+This mirrors config/rbac/role.yaml, which is generated from the kubebuilder
+markers and committed. The chart cannot consume that file directly — Helm has no
+include-from-outside-the-chart — so it is repeated here, and
+hack/verify-helm-rbac.sh fails CI if the two ever disagree.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+{{- if eq .Values.rbac.scope "namespace" }}
+kind: Role
+metadata:
+  name: {{ include "driftwatch.fullname" . }}-manager
+  namespace: {{ .Values.manager.watchNamespace }}
+{{- else }}
+kind: ClusterRole
+metadata:
+  name: {{ include "driftwatch.fullname" . }}-manager
+{{- end }}
+  labels:
+    {{- include "driftwatch.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
+  - apiGroups:
+      - driftwatch.io
+    resources:
+      - driftchecks
+    verbs:
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - driftwatch.io
+    resources:
+      - driftchecks/finalizers
+    verbs:
+      - update
+  - apiGroups:
+      - driftwatch.io
+    resources:
+      - driftchecks/status
+    verbs:
+      - get
+      - patch
+      - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+{{- if eq .Values.rbac.scope "namespace" }}
+kind: RoleBinding
+metadata:
+  name: {{ include "driftwatch.fullname" . }}-manager
+  namespace: {{ .Values.manager.watchNamespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "driftwatch.fullname" . }}-manager
+{{- else }}
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "driftwatch.fullname" . }}-manager
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "driftwatch.fullname" . }}-manager
+{{- end }}
+  labels:
+    {{- include "driftwatch.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "driftwatch.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+---
+{{/*
+Leader election is namespaced whatever rbac.scope says. The manager needs
+exactly one lease, in its own namespace; cluster-wide lease write would let a
+compromised driftwatch evict the leader of every other operator in the cluster.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "driftwatch.fullname" . }}-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "driftwatch.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "driftwatch.fullname" . }}-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "driftwatch.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "driftwatch.fullname" . }}-leader-election
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "driftwatch.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

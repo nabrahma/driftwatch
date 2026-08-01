@@ -1,0 +1,130 @@
+{{- include "driftwatch.validateValues" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "driftwatch.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "driftwatch.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "driftwatch.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "driftwatch.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "driftwatch.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      containers:
+        - name: manager
+          image: {{ include "driftwatch.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --leader-elect={{ .Values.manager.leaderElect }}
+            - --metrics-bind-address=:{{ .Values.metrics.port }}
+            - --health-probe-bind-address=:{{ .Values.probes.port }}
+            - --log-level={{ .Values.manager.logLevel }}
+            - --log-format={{ .Values.manager.logFormat }}
+            - -v={{ .Values.manager.verbosity }}
+            - --status-refresh-interval={{ .Values.manager.statusRefreshInterval }}
+            - --restart-interval={{ .Values.manager.restartInterval }}
+            - --shutdown-grace={{ .Values.manager.shutdownGrace }}
+            - --max-publisher-labels={{ .Values.manager.maxPublisherLabels }}
+            - --enable-webhooks={{ .Values.webhook.enabled }}
+            {{- if .Values.webhook.enabled }}
+            - --webhook-port={{ .Values.webhook.port }}
+            {{- end }}
+            {{- if .Values.manager.watchNamespace }}
+            - --namespace={{ .Values.manager.watchNamespace }}
+            {{- end }}
+            - --leader-election-namespace={{ .Release.Namespace }}
+            {{- with .Values.manager.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+            - name: probes
+              containerPort: {{ .Values.probes.port }}
+              protocol: TCP
+            {{- if .Values.webhook.enabled }}
+            - name: webhook
+              containerPort: {{ .Values.webhook.port }}
+              protocol: TCP
+            {{- end }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: probes
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: probes
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            {{- if .Values.webhook.enabled }}
+            - name: webhook-certs
+              mountPath: /tmp/k8s-webhook-server/serving-certs
+              readOnly: true
+            {{- end }}
+            # readOnlyRootFilesystem means a writable /tmp has to come from
+            # somewhere. Capped rather than unbounded: a writable path with no
+            # size limit is a way to fill a node's disk.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        {{- if .Values.webhook.enabled }}
+        - name: webhook-certs
+          secret:
+            secretName: {{ include "driftwatch.webhookCertSecret" . }}
+        {{- end }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- range . }}
+        - maxSkew: {{ .maxSkew }}
+          topologyKey: {{ .topologyKey }}
+          whenUnsatisfiable: {{ .whenUnsatisfiable }}
+          labelSelector:
+            matchLabels:
+              {{- include "driftwatch.selectorLabels" $ | nindent 14 }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

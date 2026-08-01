@@ -1,0 +1,19 @@
+{{- if and .Values.podDisruptionBudget.enabled (gt (int .Values.replicaCount) 1) }}
+{{/*
+Guarded on replicaCount, because a PDB with minAvailable: 1 over a single
+replica blocks every voluntary eviction — a node drain would hang forever
+waiting for a pod that can never be safely removed.
+*/}}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "driftwatch.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "driftwatch.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "driftwatch.selectorLabels" . | nindent 6 }}
+{{- end }}
