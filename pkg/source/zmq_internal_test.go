@@ -312,7 +312,7 @@ func TestZMQ_BackoffIsBoundedAndJittered(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, src.Close()) })
 
-	var distinct = map[time.Duration]struct{}{}
+	distinct := map[time.Duration]struct{}{}
 	for attempt := 1; attempt <= 50; attempt++ {
 		d := src.backoff(attempt)
 

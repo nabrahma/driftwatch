@@ -1,0 +1,46 @@
+# Phase 7 — the CRD schema rejects what it can, without the webhook
+
+Applied against Kind with no admission webhook installed. Everything below
+is caught by the structural schema generated from the kubebuilder markers,
+which is what makes `kubectl apply -f config/crd/` alone useful.
+
+## The spec applied
+
+```yaml
+apiVersion: driftwatch.io/v1alpha1
+kind: DriftCheck
+metadata:
+  name: bad
+  namespace: inference
+spec:
+  source:
+    type: kafka
+    zmq:
+      endpoints: []
+  projection:
+    type: histogram
+  target:
+    type: cassandra
+  policy:
+    ringSize: 4096
+    oracleShards: 100
+    maxTrackedKeys: 10
+```
+
+## kubectl apply
+
+```
+The DriftCheck "bad" is invalid: 
+* spec.projection.type: Unsupported value: "histogram": supported values: "keysetOwnership", "scalar", "counter"
+* spec.source.type: Unsupported value: "kafka": supported values: "zmq", "nats", "file", "memory"
+* spec.source.zmq.endpoints: Invalid value: 0: spec.source.zmq.endpoints in body should have at least 1 items
+* spec.target.type: Unsupported value: "cassandra": supported values: "redis", "memory"
+* spec.policy.maxTrackedKeys: Invalid value: 10: spec.policy.maxTrackedKeys in body should be greater than or equal to 1000
+* spec.policy.ringSize: Invalid value: 4096: spec.policy.ringSize in body should be less than or equal to 1024
+```
+
+The cross-field rules in §10.2 — ingestBufferSize >= recvHWM, bootstrap=
+Strict requiring the snapshot markers, expiryPolicy=Ignore requiring
+assumedTTL, and the immutability of projection.type and target.type —
+cannot be expressed in a structural schema. Those are the webhook, and
+each has a unit test in api/v1alpha1/driftcheck_webhook_test.go.

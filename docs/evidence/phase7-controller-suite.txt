@@ -1,0 +1,167 @@
+# Phase 7 — the controller and CRD suites
+
+envtest 1.31.0, race detector on, captured 2026-08-01.
+Reproduce with: make test-controller
+
+## api/v1alpha1 — the twenty §10.2 validation rules
+
+```
+--- PASS: TestWebhook_ValidSpecIsAdmitted (0.00s)
+--- PASS: TestWebhookRule01_UnknownSourceType (0.00s)
+--- PASS: TestWebhookRule02_ZMQEndpointsRequiredAndParseable (0.00s)
+--- PASS: TestWebhookRule03_IngestBufferMustCoverRecvHWM (0.00s)
+--- PASS: TestWebhookRule03_DefaultingDoesNotHideTheMismatch (0.00s)
+--- PASS: TestWebhookRule04_NATSQueueGroupMustBeEmpty (0.00s)
+--- PASS: TestWebhookRule05_UnknownCodecTypeAndFieldMapping (0.00s)
+--- PASS: TestWebhookRule06_UnknownOpInOpMapping (0.00s)
+--- PASS: TestWebhookRule07_UnknownProjectionType (0.00s)
+--- PASS: TestWebhookRule08_NonCommutativeCounterWarnsRatherThanFails (0.00s)
+--- PASS: TestWebhookRule09_RedisClusterModeAddressing (0.00s)
+--- PASS: TestWebhookRule10_InvalidKeyPatternGlob (0.00s)
+--- PASS: TestWebhookRule11_SettlementWindowOrdering (0.00s)
+--- PASS: TestWebhookRule12_SafetyFactorAtLeastOne (0.00s)
+--- PASS: TestWebhookRule12_SafetyFactorMustBeANumber (0.00s)
+--- PASS: TestWebhookRule13_SweepIntervalLowerBound (0.00s)
+--- PASS: TestWebhookRule14_TightSweepIntervalWarns (0.00s)
+--- PASS: TestWebhookRule15_MaxTrackedKeysBounds (0.00s)
+--- PASS: TestWebhookRule16_OracleShardsPowerOfTwo (0.00s)
+--- PASS: TestWebhookRule17_RingSizeBounds (0.00s)
+--- PASS: TestWebhookRule18_StrictBootstrapNeedsSnapshotOps (0.00s)
+--- PASS: TestWebhookRule19_IgnoreExpiryNeedsAssumedTTL (0.00s)
+--- PASS: TestWebhookRule20_SecretRefsAreNotResolvedByTheWebhook (0.00s)
+--- PASS: TestWebhookRule21_ImmutableFields (0.00s)
+--- PASS: TestWebhook_DefaultingFillsEveryOptionalField (0.00s)
+--- PASS: TestWebhook_DefaultingIsIdempotent (0.00s)
+--- PASS: TestWebhook_DefaultingCreatesTheRedisBlock (0.00s)
+--- PASS: TestWebhook_ConversionCarriesEveryField (0.00s)
+--- PASS: TestWebhook_ValidateRejectsTheWrongObjectType (0.00s)
+--- PASS: TestWebhook_EveryProblemIsReportedAtOnce (0.00s)
+PASS
+ok  	github.com/nabrahma/driftwatch/api/v1alpha1	1.395s
+```
+
+## internal/controller — registry, reconciler, manager
+
+```
+=== RUN   TestReconcile_CreateStartsARunnerAndAddsTheFinalizer
+--- PASS: TestReconcile_CreateStartsARunnerAndAddsTheFinalizer (2.08s)
+=== RUN   TestReconcile_MissingObjectStopsItsRunner
+--- PASS: TestReconcile_MissingObjectStopsItsRunner (0.06s)
+=== RUN   TestReconcile_UnchangedSpecDoesNotRestartTheRunner
+--- PASS: TestReconcile_UnchangedSpecDoesNotRestartTheRunner (0.19s)
+=== RUN   TestReconcile_SpecChangeRestartsTheRunner
+--- PASS: TestReconcile_SpecChangeRestartsTheRunner (0.07s)
+=== RUN   TestReconcile_RapidUpdateStormThroughTheAPIServer
+--- PASS: TestReconcile_RapidUpdateStormThroughTheAPIServer (0.84s)
+=== RUN   TestReconcile_RestartsAreDebounced
+--- PASS: TestReconcile_RestartsAreDebounced (0.40s)
+=== RUN   TestReconcile_PauseAndResume
+--- PASS: TestReconcile_PauseAndResume (0.17s)
+=== RUN   TestReconcile_DeleteStopsTheRunnerBeforeReleasingTheObject
+--- PASS: TestReconcile_DeleteStopsTheRunnerBeforeReleasingTheObject (0.08s)
+=== RUN   TestReconcile_DeleteMidBootstrapTerminatesWithinTwoSeconds
+    driftcheck_controller_test.go:305: delete mid-bootstrap completed in 14.6989ms
+--- PASS: TestReconcile_DeleteMidBootstrapTerminatesWithinTwoSeconds (0.09s)
+=== RUN   TestReconcile_DeleteIsIdempotent
+--- PASS: TestReconcile_DeleteIsIdempotent (0.10s)
+=== RUN   TestReconcile_SecretResolutionFailureAndRecovery
+--- PASS: TestReconcile_SecretResolutionFailureAndRecovery (0.11s)
+=== RUN   TestReconcile_SecretIsSubstitutedIntoTheRunningSpec
+--- PASS: TestReconcile_SecretIsSubstitutedIntoTheRunningSpec (0.08s)
+=== RUN   TestReconcile_RotatedSecretRestartsTheCheck
+--- PASS: TestReconcile_RotatedSecretRestartsTheCheck (0.13s)
+=== RUN   TestReconcile_SecretMissingTheNamedKey
+--- PASS: TestReconcile_SecretMissingTheNamedKey (0.11s)
+=== RUN   TestReconcile_StatusPatchSurvivesAConcurrentSpecEdit
+--- PASS: TestReconcile_StatusPatchSurvivesAConcurrentSpecEdit (0.11s)
+=== RUN   TestReconcile_StatusPatchRetriesOnConflict
+--- PASS: TestReconcile_StatusPatchRetriesOnConflict (0.10s)
+=== RUN   TestReconcile_StatusCarriesEveryFieldTheCheckReports
+--- PASS: TestReconcile_StatusCarriesEveryFieldTheCheckReports (0.09s)
+=== RUN   TestReconcile_SuspectAndConfirmedNeverMerge
+--- PASS: TestReconcile_SuspectAndConfirmedNeverMerge (0.11s)
+=== RUN   TestReconcile_EveryConditionIsSet
+--- PASS: TestReconcile_EveryConditionIsSet (0.11s)
+=== RUN   TestReconcile_SaturationConditionExplainsWhatItChanges
+--- PASS: TestReconcile_SaturationConditionExplainsWhatItChanges (0.10s)
+=== RUN   TestReconcile_SequenceIntegrityNamesTheWorstPublisher
+--- PASS: TestReconcile_SequenceIntegrityNamesTheWorstPublisher (0.10s)
+=== RUN   TestReconcile_NonCommutativeProjectionIsReportedAsACondition
+--- PASS: TestReconcile_NonCommutativeProjectionIsReportedAsACondition (0.09s)
+=== RUN   TestReconcile_EmitsTheEightEventsFromTheSpec
+--- PASS: TestReconcile_EmitsTheEightEventsFromTheSpec (0.30s)
+=== RUN   TestReconcile_UnchangedStateEmitsNoEvents
+--- PASS: TestReconcile_UnchangedStateEmitsNoEvents (0.28s)
+=== RUN   TestReconcile_AnAdoptedCheckDoesNotReplayItsHistory
+--- PASS: TestReconcile_AnAdoptedCheckDoesNotReplayItsHistory (0.06s)
+=== RUN   TestReconcile_DriftGrowthIsItsOwnEvent
+--- PASS: TestReconcile_DriftGrowthIsItsOwnEvent (0.13s)
+=== RUN   TestReconcile_TwoChecksOverTheSameSourceAndTargetDoNotInterfere
+--- PASS: TestReconcile_TwoChecksOverTheSameSourceAndTargetDoNotInterfere (0.16s)
+=== RUN   TestReconcile_APanickingCheckIsReportedNotHidden
+--- PASS: TestReconcile_APanickingCheckIsReportedNotHidden (0.12s)
+=== RUN   TestReconcile_AnInvalidSpecIsReportedRatherThanCrashing
+--- PASS: TestReconcile_AnInvalidSpecIsReportedRatherThanCrashing (0.04s)
+=== RUN   TestFixture_NamespaceNamesAreLegal
+=== RUN   TestFixture_NamespaceNamesAreLegal/short
+=== RUN   TestFixture_NamespaceNamesAreLegal/TestManager_RunsChecksAndLeavesNothingBehindAfterTeardown
+=== RUN   TestFixture_NamespaceNamesAreLegal/TestReconcile_SomethingWithAVeryLongName/and_a_subtest_name_that_pushes_the_whole_thing_well_past_sixty_three_characters
+=== RUN   TestFixture_NamespaceNamesAreLegal/Test____
+--- PASS: TestFixture_NamespaceNamesAreLegal (0.00s)
+=== RUN   TestManager_RunsChecksAndLeavesNothingBehindAfterTeardown
+    stopper.go:41: stopper: "level"=0 "msg"="leadership released; stopping every check" "runners"=2
+    stopper.go:59: stopper: "level"=0 "msg"="every check stopped"
+--- PASS: TestManager_RunsChecksAndLeavesNothingBehindAfterTeardown (0.66s)
+=== RUN   TestManager_StopperStopsEveryRunnerOnLeadershipLoss
+    stopper.go:41: stopper: "level"=0 "msg"="leadership released; stopping every check" "runners"=3
+    stopper.go:59: stopper: "level"=0 "msg"="every check stopped"
+--- PASS: TestManager_StopperStopsEveryRunnerOnLeadershipLoss (0.05s)
+=== RUN   TestManager_StopperIsLeaderElected
+--- PASS: TestManager_StopperIsLeaderElected (0.00s)
+=== RUN   TestManager_ReconcilerFillsItsOwnDependencies
+--- PASS: TestManager_ReconcilerFillsItsOwnDependencies (0.00s)
+=== RUN   TestRegistry_RapidUpdateStormLeavesExactlyOneRunner
+--- PASS: TestRegistry_RapidUpdateStormLeavesExactlyOneRunner (0.01s)
+=== RUN   TestRegistry_ConcurrentEnsuresNeverLeaveTwoRunners
+--- PASS: TestRegistry_ConcurrentEnsuresNeverLeaveTwoRunners (0.00s)
+=== RUN   TestRegistry_DeleteMidBootstrapTerminatesWithinTwoSeconds
+    runner_test.go:307: mid-bootstrap deletion completed in 538.1µs
+--- PASS: TestRegistry_DeleteMidBootstrapTerminatesWithinTwoSeconds (0.00s)
+=== RUN   TestRegistry_PanicInOneCheckDoesNotAffectAnother
+--- PASS: TestRegistry_PanicInOneCheckDoesNotAffectAnother (0.00s)
+=== RUN   TestRegistry_AFailedRunnerIsRestartedOnTheNextReconcile
+--- PASS: TestRegistry_AFailedRunnerIsRestartedOnTheNextReconcile (0.00s)
+=== RUN   TestRegistry_UnchangedSpecDoesNotRestart
+--- PASS: TestRegistry_UnchangedSpecDoesNotRestart (0.00s)
+=== RUN   TestRegistry_RestartsAreRateLimited
+--- PASS: TestRegistry_RestartsAreRateLimited (0.00s)
+=== RUN   TestRegistry_ForgetClearsTheRateLimit
+--- PASS: TestRegistry_ForgetClearsTheRateLimit (0.00s)
+=== RUN   TestRegistry_StopAllStopsEveryRunnerInParallel
+    runner_test.go:519: 50 checks stopped in 4.3616ms
+--- PASS: TestRegistry_StopAllStopsEveryRunnerInParallel (0.01s)
+=== RUN   TestRegistry_ShutdownRefusesLateStarts
+--- PASS: TestRegistry_ShutdownRefusesLateStarts (0.00s)
+=== RUN   TestRegistry_ShutdownRacingWithEnsureLeavesNothingRunning
+--- PASS: TestRegistry_ShutdownRacingWithEnsureLeavesNothingRunning (0.00s)
+=== RUN   TestRegistry_StopIsIdempotent
+--- PASS: TestRegistry_StopIsIdempotent (0.00s)
+=== RUN   TestRegistry_ShutdownGraceIsEnforced
+--- PASS: TestRegistry_ShutdownGraceIsEnforced (0.04s)
+=== RUN   TestRegistry_BuildFailureIsReported
+--- PASS: TestRegistry_BuildFailureIsReported (0.00s)
+=== RUN   TestRegistry_TheRealBuilderIsCheckNew
+--- PASS: TestRegistry_TheRealBuilderIsCheckNew (0.00s)
+=== RUN   TestSpecHash_IsStableAndSensitive
+--- PASS: TestSpecHash_IsStableAndSensitive (0.00s)
+=== RUN   TestSpecHash_CoversTheResolvedSecrets
+--- PASS: TestSpecHash_CoversTheResolvedSecrets (0.00s)
+=== RUN   TestSpecHash_DoesNotDependOnMapIterationOrder
+--- PASS: TestSpecHash_DoesNotDependOnMapIterationOrder (0.01s)
+=== RUN   TestSpecHash_LeaksNothing
+--- PASS: TestSpecHash_LeaksNothing (0.00s)
+=== RUN   TestAction_String
+--- PASS: TestAction_String (0.00s)
+PASS
+ok  	github.com/nabrahma/driftwatch/internal/controller	13.197s
+```

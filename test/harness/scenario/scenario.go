@@ -288,8 +288,7 @@ func (b *Builder) Run(fn func(s *Session)) {
 	if b.targetFailure > 0 {
 		spec.Target.Settings = map[string]string{}
 		if b.targetFailure > 0 {
-			spec.Target.Settings["failureRate"] =
-				strconv.FormatFloat(b.targetFailure, 'f', -1, 64)
+			spec.Target.Settings["failureRate"] = strconv.FormatFloat(b.targetFailure, 'f', -1, 64)
 		}
 	}
 

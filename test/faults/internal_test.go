@@ -206,7 +206,6 @@ func (r *rig) settle() { r.clk.Advance(faultWindow + time.Second) }
 // ---------------------------------------------------------------------------
 
 func TestFault47_DroppedEventsMakeKeysSuspectRatherThanWrong(t *testing.T) {
-
 	// The full row — publishing ten times faster than the decoder and watching
 	// events_dropped_total rise — needs pkg/source, which is Phase 4. What is
 	// testable now is the half that matters for correctness: once driftwatch
@@ -236,7 +235,6 @@ func TestFault47_DroppedEventsMakeKeysSuspectRatherThanWrong(t *testing.T) {
 }
 
 func TestFault48_OracleSaturationDegradesCoverageRatherThanReporting(t *testing.T) {
-
 	// The oracle is bounded, so a keyspace larger than expected costs coverage.
 	// What it must never cost is correctness: an evicted key is one driftwatch
 	// has no expectation for, and a key with no expectation cannot be drift.
@@ -260,7 +258,6 @@ func TestFault48_OracleSaturationDegradesCoverageRatherThanReporting(t *testing.
 }
 
 func TestFault49_ConfirmQueueFullDropsCandidatesAndKeepsFindings(t *testing.T) {
-
 	// Under mass divergence, individually confirming every key is not useful:
 	// the operator needs the magnitude, which the report already carries. What
 	// must not happen is losing the findings already established.
@@ -293,7 +290,6 @@ func TestFault49_ConfirmQueueFullDropsCandidatesAndKeepsFindings(t *testing.T) {
 }
 
 func TestFault50_ASweepThatOverrunsIsSkippedNotStacked(t *testing.T) {
-
 	// A sweeper that cannot keep up must shed load rather than accumulate it.
 	// Stacking sweeps behind a slow one turns a performance problem into an
 	// unbounded queue, and two sweeps running at once would double-count every
@@ -348,7 +344,6 @@ func TestFault50_ASweepThatOverrunsIsSkippedNotStacked(t *testing.T) {
 }
 
 func TestFault51_AHotKeyIsEventuallyComparedRatherThanSkippedForever(t *testing.T) {
-
 	// §5.3's blind spot. A key updated every 100ms against a 5s window is
 	// permanently in flight, and a hot key is exactly the key most worth
 	// auditing — it would be the one key driftwatch silently never looked at.
@@ -381,7 +376,6 @@ func TestFault51_AHotKeyIsEventuallyComparedRatherThanSkippedForever(t *testing.
 }
 
 func TestFault52_AdaptiveWindowClampsAtItsMaximumAndSaysSo(t *testing.T) {
-
 	// A window that grew without bound would mean never asserting anything.
 	// Clamping is right, but past the clamp driftwatch is knowingly using a
 	// window it has measured to be too small, and that has to be visible.
@@ -455,7 +449,6 @@ func TestFault52_AdaptiveWindowClampsAtItsMaximumAndSaysSo(t *testing.T) {
 }
 
 func TestFault53_NoObservationsMeansTheFloorAndNoBusyLoop(t *testing.T) {
-
 	// Before any measurement exists, W sits on its floor and the status says
 	// the window is not being driven by data. Adapting to three samples would
 	// be adapting to noise, and a busy loop looking for samples that are not
@@ -486,7 +479,6 @@ func TestFault53_NoObservationsMeansTheFloorAndNoBusyLoop(t *testing.T) {
 }
 
 func TestFault54_ContextCancellationAbortsASweepPromptly(t *testing.T) {
-
 	// Shutdown must not wait for a sweep over a million keys. The abort has to
 	// be visible mid-walk, not only between sweeps.
 	r := newRig(t, oracle.Config{}, sweeper.Config{ReadBatchSize: 10})

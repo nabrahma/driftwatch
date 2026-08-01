@@ -246,8 +246,10 @@ func TestOutputJSON_StaysOneDocumentForEveryCommand(t *testing.T) {
 	}{
 		{"version", []string{"version", "-o", "json"}},
 		{"diff", []string{"diff", "-f", spec, "-o", "json", "--warmup", "50ms"}},
-		{"explain", []string{"explain", "-f", spec, "-o", "json",
-			"--key", "block:9f3a", "--wait", "10ms"}},
+		{"explain", []string{
+			"explain", "-f", spec, "-o", "json",
+			"--key", "block:9f3a", "--wait", "10ms",
+		}},
 	}
 
 	for _, tc := range tests {

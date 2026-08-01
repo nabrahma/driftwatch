@@ -1,0 +1,315 @@
+# Phase 7 — Kind cluster evidence
+
+Captured against a Kind cluster (kind v0.26.0, Kubernetes v1.32) on 2026-08-01.
+Reproduce with: make kind-up && make kind-load && make deploy
+
+## kubectl explain driftcheck.spec
+
+```
+GROUP:      driftwatch.io
+KIND:       DriftCheck
+VERSION:    v1alpha1
+
+FIELD: spec <Object>
+
+
+DESCRIPTION:
+    Spec describes the audit to run.
+    
+FIELDS:
+  alert	<Object>
+    Alert configures the thresholds a PrometheusRule reads. driftwatch does
+    not page anyone itself; these values describe when it believes it should.
+
+  codec	<Object>
+    Codec decodes the transport's frames into events. Use fieldMapping and
+    opMapping when the producer's wire format is not driftwatch's own.
+    
+    The empty-object default is what makes the fields inside it default at
+    all: structural-schema defaulting does not descend into a field that is
+    absent, so a spec with no codec block would come back from the API server
+    with no codec block, and `kubectl get driftcheck -o yaml` would show
+    nothing about how events are being decoded.
+
+  policy	<Object>
+    Policy decides when a disagreement counts as drift, and bounds every
+    queue and map so the check degrades rather than exhausting memory.
+
+  projection	<Object> -required-
+    Projection folds the event stream into the expected state of each key.
+    It is immutable: the oracle holds values in this shape and the sweeper
+    reads the store in it, so changing it under a running check would make
+    every tracked key unreadable at once.
+
+  source	<Object> -required-
+    Source is the event transport driftwatch subscribes to. This is the
+    stream the audited store is itself built from — driftwatch is a second,
+    independent consumer of it.
+
+  target	<Object> -required-
+    Target is the store being audited. driftwatch never writes to it; the
+    client refuses any command outside a read-only allowlist. Immutable, for
+    the same reason as projection.
+
+
+```
+
+## kubectl explain driftcheck.spec.policy
+
+```
+GROUP:      driftwatch.io
+KIND:       DriftCheck
+VERSION:    v1alpha1
+
+FIELD: policy <Object>
+
+
+DESCRIPTION:
+    Policy decides when a disagreement counts as drift, and bounds every
+    queue and map so the check degrades rather than exhausting memory.
+    
+FIELDS:
+  assumedTTL	<string>
+    AssumedTTL is the age past which the Ignore policy stops reporting a
+    missing key. Required when expiryPolicy is Ignore.
+
+  bootstrap	<string>
+  enum: Adopt, Strict, Wait
+    Bootstrap decides what driftwatch believes about keys that existed before
+    it attached. Adopt reads them in as a baseline and never asserts on them;
+    Wait ignores them until an event proves they exist; Strict asserts
+    nothing at all until a publisher retransmits its whole state.
+
+  expiryPolicy	<string>
+  enum: Ignore, Model, Strict
+    ExpiryPolicy decides whether a key missing from the store is drift.
+    Strict reports every absence, which is correct for an index with no TTLs.
+    Ignore suppresses absences once the oracle's copy is older than
+    assumedTTL. Model expects the events to carry TTLs so the oracle expires
+    keys itself.
+
+  extraScanInterval	<string>
+    ExtraScanInterval is how often the target-to-oracle scan runs, looking
+    for keys no event created. It is slower than the sweep because extras
+    move slowly and the scan is the expensive half.
+
+  maxConfirmQueue	<integer>
+    MaxConfirmQueue bounds the candidates awaiting a second read. Under mass
+    divergence the magnitude matters more than the per-key detail.
+
+  maxExtrasTracked	<integer>
+    MaxExtrasTracked bounds the first pass of the target-to-oracle scan.
+
+  maxFindings	<integer>
+    MaxFindings caps the finding list in a report. The counts stay complete
+    past the cap, so magnitude is never lost even when detail is.
+
+  maxPublishers	<integer>
+    MaxPublishers bounds the per-publisher sequence state. Past it the oldest
+    publishers are evicted rather than memory growing without limit.
+
+  maxTrackedKeys	<integer>
+    MaxTrackedKeys bounds the oracle. On reaching it driftwatch evicts rather
+    than growing: a keyspace larger than expected degrades coverage instead
+    of killing the process. Budget roughly 700 bytes per key.
+
+  neverSettledThreshold	<integer>
+    NeverSettledThreshold is how many multiples of the settlement window a
+    permanently busy key may stay in flight before the stability check
+    rescues it. Without it a hot key would never be compared at all.
+
+  oracleShards	<integer>
+    OracleShards is how many independent lock domains the oracle uses. Must
+    be a power of two.
+
+  paused	<boolean>
+    Paused stops sweeping while continuing to ingest. It exists so alerting
+    can be silenced without discarding the oracle: stopping ingestion instead
+    would mean every key is suspect for as long as it takes to refill.
+
+  reorderWindow	<string>
+    ReorderWindow is how long an event waits for its predecessor before
+    driftwatch concludes the predecessor was genuinely lost. Transports
+    reorder adjacent messages routinely, and folding them in arrival order
+    leaves the expectation permanently wrong for an order-dependent
+    projection.
+
+  requirePrimary	<boolean>
+    RequirePrimary refuses to compare against a replica. A replica is
+    legitimately behind its primary, so comparing against one manufactures
+    drift that does not exist.
+
+  ringSize	<integer>
+    RingSize is how many recent events are retained per key for
+    `driftwatch explain`. Larger histories explain more and cost memory on
+    every tracked key.
+
+  settlementWindow	<Object>
+    SettlementWindow is how long a key must go unchanged before driftwatch
+    will compare it. It is the single most important setting here: too short
+    and a materializer that is merely behind is reported as broken, too long
+    and real drift takes longer to surface.
+
+  sweepInterval	<string>
+    SweepInterval is how often the oracle-to-target comparison runs.
+
+  ttlTolerance	<string>
+    TTLTolerance is how far two expiries may differ before it is a finding.
+
+
+```
+
+## kubectl explain driftcheck.spec.policy.settlementWindow
+
+```
+GROUP:      driftwatch.io
+KIND:       DriftCheck
+VERSION:    v1alpha1
+
+FIELD: settlementWindow <Object>
+
+
+DESCRIPTION:
+    SettlementWindow is how long a key must go unchanged before driftwatch
+    will compare it. It is the single most important setting here: too short
+    and a materializer that is merely behind is reported as broken, too long
+    and real drift takes longer to surface.
+    
+FIELDS:
+  max	<string>
+    Max ceilings the adaptive window. Reaching it means the materializer is
+    slower than driftwatch can meaningfully audit, and the condition says so.
+
+  min	<string>
+    Min floors the adaptive window. An adaptive check starts here, because
+    with no measurements yet a window that widens as evidence arrives is
+    safer than one that narrows from a guess.
+
+  mode	<string>
+  enum: static, adaptive
+    Mode selects a fixed window or one derived from measured convergence.
+    Adaptive is preferable when the materializer's latency varies, because a
+    static window has to be set for the worst case and then reports late.
+
+  safetyFactor	<string>
+    SafetyFactor multiplies the measured p99 convergence to give the window.
+    Must be at least 1.0; below that the window would be narrower than the
+    lag it was derived from, which reports normal operation as drift.
+
+  static	<string>
+    Static is the window used in static mode, and the starting point in
+    adaptive mode.
+
+
+```
+
+## kubectl explain driftcheck.status
+
+```
+GROUP:      driftwatch.io
+KIND:       DriftCheck
+VERSION:    v1alpha1
+
+FIELD: status <Object>
+
+
+DESCRIPTION:
+    Status reports what the check is doing and what it has found.
+    
+FIELDS:
+  conditions	<[]Object>
+    Conditions carry the standard Kubernetes condition set. Ready is the one
+    to gate on; the others explain why it is what it is.
+
+  convergenceP99Seconds	<string>
+    ConvergenceP99Seconds is the measured 99th-percentile delay between the
+    oracle learning a value and the store holding it. The adaptive window is
+    derived from it.
+
+  coverageRatio	<string>
+    CoverageRatio is the fraction of tracked keys the last sweep compared. A
+    high divergence count under a low coverage ratio is not what it looks
+    like.
+
+  divergenceByCategory	<map[string]integer>
+    DivergenceByCategory breaks the confirmed count down by kind of
+    disagreement, which is usually enough to guess the cause before opening
+    `driftwatch explain`.
+
+  divergentKeys	<integer>
+    DivergentKeys is the number of confirmed divergent keys driftwatch will
+    stand behind. This is the number to alert on.
+
+  driftDurationSeconds	<string>
+    DriftDurationSeconds is the age of the oldest unresolved drift episode.
+
+  eventsApplied	<integer>
+    EventsApplied counts events folded into the oracle.
+
+  eventsDropped	<integer>
+    EventsDropped counts events that never reached the oracle. Every
+    increment is a hole in driftwatch's own view.
+
+  inFlightKeys	<integer>
+    InFlightKeys is how many changed inside the settlement window.
+    Disagreement on these is expected rather than meaningful.
+
+  lastSweepDurationSeconds	<string>
+    LastSweepDurationSeconds is how long it took. Approaching sweepInterval
+    means sweeps are about to start being skipped.
+
+  lastSweepKeysCompared	<integer>
+    LastSweepKeysCompared is how many keys that sweep actually read.
+
+  lastSweepTime	<string>
+    LastSweepTime is when the last comparison finished.
+
+  message	<string>
+    Message explains the current phase in one sentence.
+
+  observedGeneration	<integer>
+    ObservedGeneration is the spec generation this status describes. A status
+    older than metadata.generation has not caught up with the last edit.
+
+  phase	<string>
+  enum: Pending, Bootstrapping, AwaitingSnapshot, Watching, ....
+    Phase is the check's lifecycle state. Degraded means it is running and
+    honest about not seeing everything, which is different from Failed and
+    must not page anyone the same way.
+
+  publishers	<[]Object>
+    Publishers reports each publisher's sequence position, which is how an
+    operator sees whether driftwatch's own view is complete.
+
+  settledKeys	<integer>
+    SettledKeys is how many of those are quiet enough to compare.
+
+  settlementWindowSeconds	<string>
+    SettlementWindowSeconds is the window currently in force, which in
+    adaptive mode moves as convergence is measured.
+
+  suspectDivergentKeys	<integer>
+    SuspectDivergentKeys is the number of divergent keys whose event stream
+    driftwatch knows it partly missed. Never alert on it: it measures
+    driftwatch, not the store.
+
+  sweepsSkipped	<integer>
+    SweepsSkipped counts sweeps skipped because the previous one was still
+    running.
+
+  targetKeyspaceSize	<integer>
+    TargetKeyspaceSize is how many keys the store reports holding.
+
+  targetReachable	<boolean>
+    TargetReachable reports whether the last health probe reached the store.
+    While it is false driftwatch reports no new findings at all, because
+    absence of data is not evidence of divergence.
+
+  targetRole	<string>
+    TargetRole is the store's replication role, master or replica.
+
+  trackedKeys	<integer>
+    TrackedKeys is how many keys the oracle currently holds.
+
+
+```

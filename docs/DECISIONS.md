@@ -762,3 +762,84 @@ would look. §7's file list predates the matrix having sixty rows.
 - `hack/verify-fault-matrix.sh` enforces the sixty rows from outside the
   compiler and `TestFaultMatrix_Coverage` from inside, so neither a renamed test
   nor a deleted one can leave a row silently uncovered.
+
+---
+
+## ADR-0011 — Phase 7: the webhook delegates, the schema defaults, and the operator opts in
+
+**Status:** Accepted
+**Date:** 2026-08-01
+**Phase:** 7
+**PRD reference:** §10.1, §10.2, §10.3, §18
+
+### Context
+
+Four decisions in Phase 7 went against the obvious reading of the PRD, or
+against what kubebuilder's scaffolding would have produced. Each is written down
+because the alternative is defensible and somebody will otherwise change it back.
+
+**1. The validating webhook reimplements nothing.** §10.2 lists twenty rules and
+asks for a unit test per rule in `api/v1alpha1/driftcheck_webhook_test.go`, which
+reads as an instruction to write the rules there. Every one of them is already
+implemented in `pkg/check`, because §11 requires the CLI to reject the same files
+without a cluster.
+
+Two implementations of one rule set diverge, and which one an operator hits
+depends on whether they ran `driftwatch watch -f` or `kubectl apply`. So the
+webhook converts the CRD spec to a `check.Spec` and delegates, translating field
+paths into the API's form. It adds exactly two things that have no meaning
+outside Kubernetes: parsing the string-encoded decimals the API convention
+requires instead of floats, and comparing against a stored object for the
+immutability rule.
+
+The twenty tests are still there, each asserting the exact sentence — the rule is
+what is under test, not where it lives.
+
+**2. `codec`, `policy`, `alert` and `settlementWindow` default to `{}`.**
+Structural-schema defaulting does not descend into an absent field, so a spec
+that omitted `policy` came back from the API server with no `policy` at all and
+none of its twenty defaults applied. §10.2 asks that
+`kubectl get driftcheck -o yaml` show what is actually running; without the
+empty-object default it showed the sparse thing the operator typed. See
+docs/DISCOVERIES.md D-018.
+
+The cost is that these four blocks are always present in the stored object, even
+when the operator set nothing in them. That is the point.
+
+**3. Leader-election leases are not in the generated ClusterRole.** §10.3 lists
+`leases` alongside the rest of the RBAC, and kubebuilder's scaffold puts them in
+the same ClusterRole. The manager needs exactly one lease, in its own namespace.
+Cluster-wide lease write would let a compromised driftwatch evict the leader of
+every other operator in the cluster — a far more interesting capability to
+obtain than read access to an event stream.
+
+So the marker is removed and `config/rbac/leader_election_role.yaml` grants it as
+a namespaced Role. The generated `role.yaml` is correspondingly smaller, which
+is the whole idea of committing it: what it contains is what the manager can do.
+
+**4. The webhook and the Prometheus resources are opt-in, and `config/default`
+has neither.** Both need something the cluster may not have — a certificate
+source, and the Prometheus operator's CRDs — and a base that assumes them fails
+on exactly the clusters people try first. `kubectl apply -k config/default`
+against a bare Kind cluster has to work, or the first five minutes are spent
+debugging driftwatch's packaging rather than driftwatch.
+
+The manager therefore runs with `--enable-webhooks=false` in that base, and the
+CRD schema carries the enums, ranges and per-field defaults so a malformed spec
+is still rejected without admission. What is lost is §10.2's cross-field
+validation, and `NOTES.txt` and the base's own comments say so plainly — the
+`ingestBufferSize >= recvHWM` rule in particular, whose whole point is that
+violating it is silent.
+
+### Consequences
+
+- A rule added to `pkg/check` is enforced by the webhook with no change here,
+  and a rule that only makes sense in the cluster has to be added deliberately.
+- The four defaulted blocks always appear in a stored `DriftCheck`. Anything
+  diffing specs must expect them.
+- A Helm install and a kustomize install grant the same permissions, and
+  `hack/verify-helm-rbac.sh` fails CI if they stop agreeing — the chart cannot
+  include a file from outside itself, so its copy of the rules is real
+  duplication that needs guarding.
+- Production installs should turn the webhook on. `values-prod.yaml` does, with
+  cert-manager.

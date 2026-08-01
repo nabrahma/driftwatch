@@ -1,0 +1,146 @@
+# Phase 7 — a DriftCheck running in a real cluster
+
+Captured on 2026-08-01 against Kind, with the manager built from
+this tree and loaded with 'kind load docker-image'.
+
+## kubectl get driftchecks
+
+```
+NAME          PHASE      DRIFT   SUSPECT   KEYS   WINDOW   AGE
+live-memory   Watching                            2        18s
+```
+
+## The effective configuration, defaulted by the CRD schema alone
+
+The webhook is not installed here. Everything below was filled in by the
+API server from the schema's own defaults.
+
+```yaml
+spec:
+  alert:
+    divergentKeysThreshold: 10
+    divergentRatioThreshold: "0.001"
+    forDuration: 60s
+  codec:
+    maxPayloadBytes: 1048576
+    type: json
+  policy:
+    bootstrap: Adopt
+    expiryPolicy: Strict
+    extraScanInterval: 5m
+    maxConfirmQueue: 10000
+    maxExtrasTracked: 100000
+    maxFindings: 10000
+    maxPublishers: 1024
+    maxTrackedKeys: 1000000
+    neverSettledThreshold: 10
+    oracleShards: 64
+    reorderWindow: 2s
+    ringSize: 16
+    settlementWindow:
+      max: 120s
+      min: 1s
+      mode: static
+      safetyFactor: "3.0"
+      static: 2s
+    sweepInterval: 5s
+    ttlTolerance: 5s
+  projection:
+    keyTemplate: '{{.Key}}'
+    maxMembersPerKey: 100000
+    memberTemplate: '{{.Member}}'
+    type: scalar
+  source:
+    ingestBufferSize: 200000
+    type: memory
+  target:
+    type: memory
+```
+
+## Status and conditions
+
+```yaml
+status:
+  conditions:
+  - lastTransitionTime: "2026-08-01T09:05:56Z"
+    message: comparing the oracle against the target
+    observedGeneration: 1
+    reason: Watching
+    status: "True"
+    type: Ready
+  - lastTransitionTime: "2026-08-01T09:05:56Z"
+    message: subscribed; 0 events applied
+    observedGeneration: 1
+    reason: Connected
+    status: "True"
+    type: SourceConnected
+  - lastTransitionTime: "2026-08-01T09:06:11Z"
+    message: reachable, role master, 0 keys
+    observedGeneration: 1
+    reason: Reachable
+    status: "True"
+    type: TargetAvailable
+  - lastTransitionTime: "2026-08-01T09:05:56Z"
+    message: no divergence
+    observedGeneration: 1
+    reason: NoDrift
+    status: "False"
+    type: DriftDetected
+  - lastTransitionTime: "2026-08-01T09:05:56Z"
+    message: 0 keys tracked
+    observedGeneration: 1
+    reason: WithinBudget
+    status: "False"
+    type: OracleSaturated
+  - lastTransitionTime: "2026-08-01T09:05:56Z"
+    message: no gaps across 0 publishers
+    observedGeneration: 1
+    reason: Complete
+    status: "True"
+    type: SequenceIntegrity
+  - lastTransitionTime: "2026-08-01T09:05:56Z"
+    message: 0 snapshot cycles seen
+    observedGeneration: 1
+    reason: SnapshotSeen
+    status: "False"
+    type: AwaitingSnapshot
+  - lastTransitionTime: "2026-08-01T09:05:56Z"
+    message: each key is written by one publisher
+    observedGeneration: 1
+    reason: SingleWriterPerKey
+    status: "False"
+    type: MultiWriterUnsafe
+  - lastTransitionTime: "2026-08-01T09:05:56Z"
+    message: the projection's fold is order-independent
+    observedGeneration: 1
+    reason: Commutative
+    status: "False"
+    type: ProjectionNotCommutative
+  - lastTransitionTime: "2026-08-01T09:05:56Z"
+    message: sweeping every 5s against a 2.0s window
+    observedGeneration: 1
+    reason: SweepIntervalAdequate
+    status: "False"
+    type: SweepIntervalTight
+  convergenceP99Seconds: "0"
+  coverageRatio: "1"
+  driftDurationSeconds: "0"
+  lastSweepDurationSeconds: "0"
+  lastSweepTime: "2026-08-01T09:06:11Z"
+  message: steady state
+  observedGeneration: 1
+  phase: Watching
+  settlementWindowSeconds: "2"
+  targetReachable: true
+  targetRole: master
+```
+
+## Events
+
+```
+Events:
+  Type    Reason             Age   From        Message
+  ----    ------             ----  ----        -------
+  Normal  BootstrapComplete  19s   driftwatch  oracle ready: 0 keys tracked, comparing against the target
+  Normal  TargetAvailable    4s    driftwatch  target reachable again; comparison resumed
+```

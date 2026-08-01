@@ -30,6 +30,140 @@ written here in anticipation.
 
 ---
 
+## D-019 — The manager panicked at startup on a registry every test built differently
+
+**Found:** Phase 7, the first time the real image ran in a Kind cluster.
+
+**What happened:** `cmd/driftwatch-manager` puts driftwatch's metrics on
+controller-runtime's registry, so that one scrape of one port returns both the
+check metrics and the controller's. Alongside that it registered the Go and
+process collectors, which is what every Prometheus program does.
+
+controller-runtime registers those two itself. The second registration is not a
+duplicate-metric warning; `MustRegister` panics. The manager died before its
+first reconcile, in a binary that had just passed every unit test, the whole
+envtest suite and `go vet`:
+
+```text
+panic: duplicate metrics collector registration attempted
+  main.buildMetrics cmd/driftwatch-manager/main.go:245
+```
+
+**Why it matters:** Nothing in the test suite could have caught it. The unit
+tests build a fresh `prometheus.NewRegistry()`, and the envtest suite builds a
+manager without ever calling `buildMetrics` — both are testing a registry that
+does not exist in production. The only place the two registrations meet is the
+real entrypoint against controller-runtime's package-level registry, and the
+only way to reach that is to run the binary.
+
+It also fails in the least useful way: a `CrashLoopBackOff` with a panic about
+metrics, on a deployment whose actual problem has nothing to do with metrics.
+
+**Fix:** Drop the two registrations. controller-runtime already provides them,
+so the metrics an operator gets are unchanged.
+
+The broader conclusion is about the phase rather than the bug: §20 Phase 7 makes
+`make deploy` against Kind an exit criterion, and this is why. Three other
+defects in this phase were found the same way and nowhere else — the image's
+pull policy, the webhook's missing certificate, and the Prometheus operator CRDs
+in the default overlay. All four are startup failures, which is the class of bug
+a test suite is structurally worst at reaching.
+
+**Evidence:** `docs/evidence/phase7-live-check.txt` — the manager running
+afterwards, with the status and events it produces.
+
+**Regression test:** None that is honest. A test asserting `buildMetrics` does
+not panic would pass against a registry the test itself made, which is exactly
+the mistake that caused this. The CI `image` job runs
+`docker run --rm driftwatch:ci --version`, which starts the real binary and is
+the cheapest thing that would actually have caught it.
+
+---
+
+## D-018 — Defaults do not reach a field the operator did not mention
+
+**Found:** Phase 7, applying `config/samples/` to Kind and reading it back.
+
+**What happened:** Every field in the CRD carries a `+kubebuilder:default`, and
+§10.2 asks that `kubectl get driftcheck -o yaml` show the configuration that is
+actually running rather than the sparse thing the operator typed. Applying the
+minimal sample and reading it back gave defaults for `source`, `projection` and
+`target` — and nothing at all for `codec`, `policy` or `alert`.
+
+Structural-schema defaulting descends into a field only if that field is
+present. `policy` was absent from the submitted YAML, so the API server never
+looked inside it, and none of the twenty defaults on its children applied.
+
+**Why it matters:** The check still ran correctly — `check.ApplyDefaults` fills
+the same values at construction — so nothing failed. What broke was the thing
+the status block exists for. An operator reading the object saw no
+`sweepInterval`, no `settlementWindow`, no `maxTrackedKeys`, and had no way to
+tell whether the check was using the documented defaults or something else. The
+one honest source of what a check is doing had a hole in it, silently.
+
+It is also the difference between the CRD being useful on its own and needing
+the webhook. Without this, `kubectl apply -f config/crd/` gives a schema whose
+defaults mostly do not fire.
+
+**Fix:** `+kubebuilder:default={}` on `codec`, `policy`, `alert` and
+`policy.settlementWindow`. An empty object is enough to make the API server
+descend, and the children default from there.
+
+**Evidence:** `docs/evidence/phase7-live-check.txt` — the effective
+configuration read back from a cluster with no webhook installed, showing all
+six blocks filled in.
+
+**Regression test:** `api/v1alpha1: TestWebhook_DefaultingFillsEveryOptionalField`
+covers the webhook's half. The schema's half is covered by
+`hack/verify-crd-docs.sh`, which regenerates the CRD and diffs it against the
+committed one, so the markers cannot be dropped without CI noticing.
+
+---
+
+## D-017 — Cancelling the leader-elected runnables does not order them
+
+**Found:** Phase 7, running the manager test under `-race`.
+
+**What happened:** §10.3 requires that all runners stop when the manager stops
+leading, and `RunnerStopper` implements it: a leader-elected runnable that waits
+on its context and then calls `StopAll`. The test creates two checks, cancels the
+manager's context, waits for `Start` to return, and asserts the registry is
+empty.
+
+It was not. Four runnables had been built and only two closed, and the registry
+still held two.
+
+controller-runtime cancels every leader-elected runnable together rather than in
+any order, so the stopper's `StopAll` ran while a reconcile was still in flight.
+That reconcile then called `Ensure` and started a runner — after the only thing
+that would ever have stopped it had already finished.
+
+**Why it matters:** The runner left behind has no path back to it. The manager
+is gone, so no further reconcile arrives; the process may hold the lease no
+longer, so another replica is auditing the same store. Two oracles sweep one
+target and both write metrics under the same `check` label, which presents as a
+divergent-key count alternating between two values — the same symptom §10.3's
+per-key mutex exists to prevent, arriving through a completely different door.
+
+Under `-race` it reproduced roughly one run in four. Without the race detector
+it did not reproduce at all in ten runs, which is how it would have shipped.
+
+**Fix:** `RunnerRegistry.Shutdown` latches the registry closed before it
+enumerates, and `Ensure` re-checks that latch under the same per-key lock it
+started the runner under. Either the re-check sees the latch and undoes its own
+start, or the latch came afterwards — in which case the entry was already in the
+map when `Shutdown` enumerated. `StopAll` alone cannot close that window,
+whatever order the runnables are cancelled in.
+
+**Evidence:** `docs/evidence/phase7-controller-suite.txt`
+
+**Regression test:** `internal/controller: TestRegistry_ShutdownRefusesLateStarts`
+and `TestRegistry_ShutdownRacingWithEnsureLeavesNothingRunning` — the second runs
+eight concurrent `Ensure` calls against a `Shutdown`, which is the interleaving
+that produced it.
+
+---
+
 ## D-016 — Fifty idle checks held 640 MB, essentially all of it an empty channel
 
 **Found:** Phase 6, writing §15 row 60.
