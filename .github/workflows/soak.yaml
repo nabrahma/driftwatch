@@ -1,0 +1,84 @@
+name: soak
+
+# Nightly, and on demand. Not on pull requests: an hour of wall time per PR
+# would be the slowest thing in CI by an order of magnitude, and what it catches
+# — slow leaks, goroutines that accumulate one per sweep, detection that quietly
+# stops working after half an hour — does not appear in the time a PR check is
+# willing to wait.
+on:
+  schedule:
+    # 03:00 UTC. Late enough that a failure is waiting in the morning rather
+    # than interrupting the day.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: How long to soak for
+        required: false
+        default: 60m
+      keys:
+        description: Distinct keys
+        required: false
+        default: "500000"
+      rate:
+        description: Events per second
+        required: false
+        default: "5000"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: soak-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  soak:
+    runs-on: ubuntu-latest
+    # 90 minutes, per §17.3. The test's own context is duration + 10m, so this
+    # only fires if something has hung below that — which is itself the finding.
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+
+      - name: soak
+        env:
+          DRIFTWATCH_SOAK_DURATION: ${{ github.event.inputs.duration || '60m' }}
+          DRIFTWATCH_SOAK_KEYS: ${{ github.event.inputs.keys || '500000' }}
+          DRIFTWATCH_SOAK_RATE: ${{ github.event.inputs.rate || '5000' }}
+        run: |
+          go test -tags=soak -timeout=100m -v -run TestSoak ./test/soak/ \
+            2>&1 | tee soak.log
+
+      # Always, not just on failure. A successful run's profiles are what the
+      # next failure gets compared against, and without a baseline a heap
+      # profile only says what is allocated rather than what changed.
+      - name: upload profiles and the run log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soak-${{ github.run_number }}
+          path: |
+            soak.log
+            docs/evidence/S2-soak-*.pprof
+            docs/evidence/S2-soak-60min-zero-drift.txt
+          retention-days: 30
+          if-no-files-found: warn
+
+      # The one line worth reading in an hour of output.
+      - name: summary
+        if: always()
+        run: |
+          {
+            echo '## Soak'
+            echo ''
+            echo '```'
+            grep -E 'midpoint fault|RSS:|goroutines:|asserting over' soak.log || true
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"

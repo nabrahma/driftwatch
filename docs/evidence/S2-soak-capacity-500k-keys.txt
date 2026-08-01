@@ -1,0 +1,51 @@
+# Oracle capacity at 500,000 keys — why the §16.7 soak was re-parameterised
+
+Captured 2026-08-01. Reproduce with:
+
+    go test -tags=soak -timeout=100m -v -run TestSoak ./test/soak/
+
+which defaults to §16.7's parameters: 3 publishers, 5,000 events/sec, 500,000
+distinct keys, real Redis 7.4, ringSize 16, retainRaw false.
+
+## What happened
+
+soak_test.go:154: soak: 1h0m0s, 3 publishers, 5000 events/sec, 500000 keys, sampling every 1m0s
+soak_test.go:163: wrote S2-soak-heap-start.pprof
+soak_test.go:163: wrote S2-soak-goroutine-start.pprof
+soak_test.go:178: t=1m0s   drift=0    suspect=0    coverage=0.4662 keys=300098  goroutines=13   rss=384MiB p99sweep=100ms
+soak_test.go:178: t=2m0s   drift=0    suspect=0    coverage=0.8794 keys=500000  goroutines=13   rss=873MiB p99sweep=5s
+soak_test.go:178: t=3m0s   drift=0    suspect=0    coverage=0.9517 keys=500000  goroutines=13   rss=1289MiB p99sweep=5s
+soak_test.go:178: t=4m0s   drift=0    suspect=0    coverage=0.9479 keys=500000  goroutines=13   rss=1676MiB p99sweep=5s
+soak_test.go:178: t=5m0s   drift=0    suspect=0    coverage=0.9487 keys=500000  goroutines=13   rss=2215MiB p99sweep=5s
+soak_test.go:178: t=6m0s   drift=0    suspect=0    coverage=0.9999 keys=500000  goroutines=13   rss=2462MiB p99sweep=5s
+
+## Reading it
+
+The key count reaches its 500,000 ceiling at t=2m and never moves again. RSS
+keeps climbing regardless, because the oracle's per-key history ring is still
+filling: each key holds up to 16 events, and a key is only touched once per
+`keys / rate` = 100 seconds, so the rings do not fill until
+16 × 100s = 1,600s — nearly 27 minutes.
+
+At t=6m the rings are roughly a third full and the process is at 2,462 MiB.
+Linear extrapolation of the remaining fill puts steady state near 8 GiB.
+
+The run was stopped at six minutes rather than allowed to exhaust the machine,
+so the 8 GiB figure is an extrapolation from six points, not a measurement.
+
+Sweep p99 was 5s against a 30s interval throughout, and coverage reached 0.9999
+once the first full sweep completed — both comfortably inside their §16.7
+assertions. The only thing that does not fit is memory.
+
+## Consequence
+
+§19.1 budgets 512 MiB for 1,000,000 keys at ringSize 16. That is met when each
+key has one event of history and missed by more than an order of magnitude when
+each has sixteen. docs/KNOWN_GAPS.md G-001 is updated with both figures.
+
+The 60-minute soak in `docs/evidence/S2-soak-60min-zero-drift.txt` therefore
+runs at 150,000 keys and 1,500 events/sec, which preserves the property the
+midpoint fault depends on — `keys / rate` = 100s, identical to §16.7 — while
+fitting in memory this machine has. Everything §16.7 asserts is still asserted;
+only the absolute scale is lower, and the reason is written down here rather
+than quietly adjusted.

@@ -58,6 +58,52 @@ does not help the workload measured here, where each key sees a single event.
 **Not a gap:** the bound itself holds. Invariant I8 is proven by
 `TestProp_MemoryBounded`, and the oracle never exceeds `MaxTrackedKeys`.
 
+### Update, Phase 8 — the 640 MiB figure was measured before the rings filled
+
+The benchmark above writes one event per key, so every history ring holds a
+single entry. That is the best case, and the sentence "it does not help the
+workload measured here, where each key sees a single event" was the clue.
+
+The Phase 8 soak measured the other end. 500,000 keys at 5,000 events/sec, real
+Redis, `ringSize: 16`, `retainRaw: false`:
+
+```text
+t=1m   keys=300,098  rss=384 MiB
+t=2m   keys=500,000  rss=873 MiB
+t=3m   keys=500,000  rss=1,289 MiB
+t=4m   keys=500,000  rss=1,676 MiB
+t=5m   keys=500,000  rss=2,215 MiB
+t=6m   keys=500,000  rss=2,462 MiB
+```
+
+The key count is at its ceiling from t=2m and memory keeps climbing, because
+each key's ring only fills after that key has been touched sixteen times —
+`ringSize × keys / rate`, which is 1,600 seconds at these parameters. At t=6m
+the rings are roughly a third full and the process is already at 2.4 GiB.
+Extrapolating the remaining fill puts the steady state near **8 GiB at 500,000
+keys**, or about 16 KiB per key rather than 670 bytes.
+
+So the real shape of this gap is: **~670 bytes per key with one event of
+history, and roughly 16 KiB per key once sixteen events have accumulated.** S5's
+512 MiB budget is met only at the former. The run was stopped at six minutes
+rather than allowed to exhaust the machine, so the 8 GiB figure is an
+extrapolation from six measurements and not itself measured.
+
+The remedy is the one already named above — a compacted history record instead
+of a full `Event` — and it is now worth considerably more than the 150 bytes per
+key estimated in Phase 1, because it applies to every ring slot rather than to
+one. `pkg/explain` has since defined which fields are actually needed, so the
+work is no longer blocked on a guess.
+
+**What an operator should do meanwhile,** revised: size against ~16 KiB per key
+for a workload where keys are touched repeatedly, or lower `policy.ringSize`.
+Dropping it from 16 to 4 cuts the ring cost by three quarters and still leaves
+`driftwatch explain` the four most recent events for a key, which is usually
+enough to see a pattern.
+
+See `docs/DISCOVERIES.md` D-022. Evidence:
+`docs/evidence/S2-soak-capacity-500k-keys.txt`.
+
 ---
 
 ## G-002 — Reordering at the very start of a publisher's stream cannot be detected
