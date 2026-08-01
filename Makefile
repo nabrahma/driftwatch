@@ -11,6 +11,25 @@ MODULE      := github.com/nabrahma/driftwatch
 BIN_DIR     := bin
 GOLANGCI_VERSION := v1.64.8
 
+# Kubernetes toolchain. Pinned, because a controller-gen upgrade rewrites every
+# generated manifest and hack/verify-crd-docs.sh would then fail CI for a reason
+# that has nothing to do with the change under review.
+CONTROLLER_GEN_VERSION := v0.17.2
+ENVTEST_VERSION        := release-0.20
+ENVTEST_K8S_VERSION    := 1.31.0
+KIND_VERSION           := v0.26.0
+
+# Resolved from PATH first, then from GOPATH/bin. Two lookups rather than one
+# because on Windows the installed binaries are controller-gen.exe, so a bare
+# `test -x $(GOPATH)/bin/controller-gen` finds nothing and reinstalls on every
+# invocation.
+GOPATH_BIN     := $(shell go env GOPATH)/bin
+CONTROLLER_GEN ?= $(shell command -v controller-gen 2>/dev/null || echo $(GOPATH_BIN)/controller-gen)
+ENVTEST        ?= $(shell command -v setup-envtest 2>/dev/null || echo $(GOPATH_BIN)/setup-envtest)
+
+IMG        ?= ghcr.io/nabrahma/driftwatch:latest
+KIND_CLUSTER ?= driftwatch
+
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -44,7 +63,7 @@ lint: ## Run golangci-lint and check formatting with gofumpt
 	golangci-lint run --timeout 5m
 	@command -v gofumpt >/dev/null 2>&1 || { \
 		echo "gofumpt not found — run 'make install-tools'"; exit 1; }
-	@out=$$(gofumpt -l -d .); \
+	@out=$$(gofumpt -l -d . | grep -v 'zz_generated' || true); \
 	if [ -n "$$out" ]; then \
 		echo "$$out"; \
 		echo ''; \
@@ -53,11 +72,16 @@ lint: ## Run golangci-lint and check formatting with gofumpt
 	fi
 	@echo 'lint: ok'
 
+# Generated files are excluded, and not as a convenience. gofumpt strips the
+# redundant import alias controller-gen emits, controller-gen puts it back on
+# the next `make generate`, and the two would take turns failing CI forever.
+# Generated code is the generator's output, not ours to format.
 .PHONY: fmt
-fmt: ## Format all Go files with gofumpt
+fmt: ## Format all Go files with gofumpt, except generated ones
 	@command -v gofumpt >/dev/null 2>&1 || { \
 		echo "gofumpt not found — run 'make install-tools'"; exit 1; }
-	gofumpt -w .
+	@find . -name '*.go' -not -name 'zz_generated.*' -not -path './.git/*' \
+		-exec gofumpt -w {} +
 
 .PHONY: vet
 vet: ## Run go vet
@@ -66,6 +90,17 @@ vet: ## Run go vet
 .PHONY: test
 test: ## Run the unit suite with the race detector and coverage
 	CGO_ENABLED=1 go test -race -covermode=atomic -coverprofile=cover.out ./...
+
+.PHONY: cover
+cover: ## Report coverage per package, excluding generated code
+	@test -f cover.out || { echo "run 'make test' first"; exit 1; }
+	@# zz_generated.deepcopy.go is controller-gen's output: 400 lines of
+	@# mechanical DeepCopyInto that no meaningful test exercises directly. Left
+	@# in, it drags api/v1alpha1 from 94% to 56% and the number stops carrying
+	@# information about the code anyone wrote.
+	@grep -v 'zz_generated' cover.out >cover.filtered.out
+	@go tool cover -func=cover.filtered.out | tail -1
+	@rm -f cover.filtered.out
 
 .PHONY: test-fault
 test-fault: ## Run the fault scenario matrix (PRD section 15), all 60 rows
@@ -83,8 +118,91 @@ test-integration: ## Run the integration suite against real Redis 6 and 7 (needs
 	@echo "Docker $$(docker version --format '{{.Server.Version}}')"
 	CGO_ENABLED=1 go test -tags=integration -race -timeout=25m ./pkg/target/...
 
+.PHONY: test-controller
+test-controller: envtest ## Run the CRD and controller suites against envtest
+	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" \
+		CGO_ENABLED=1 go test -race -count=1 -timeout=10m ./api/... ./internal/controller/...
+
+.PHONY: manifests
+manifests: controller-gen ## Regenerate the CRD, RBAC and webhook manifests
+	@CONTROLLER_GEN=$(CONTROLLER_GEN) bash hack/verify-crd-docs.sh --write
+	@bash hack/sync-helm-crd.sh --write
+
+.PHONY: generate
+generate: controller-gen ## Regenerate deepcopy functions
+	$(CONTROLLER_GEN) object paths=./api/v1alpha1/...
+
+.PHONY: verify-manifests
+verify-manifests: controller-gen ## Fail if the committed manifests drift from the Go types
+	@CONTROLLER_GEN=$(CONTROLLER_GEN) bash hack/verify-codegen.sh
+	@CONTROLLER_GEN=$(CONTROLLER_GEN) bash hack/verify-crd-docs.sh
+	@bash hack/sync-helm-crd.sh
+	@bash hack/verify-helm-rbac.sh
+
+.PHONY: helm-lint
+helm-lint: ## Lint and render the chart with the default, dev and prod values
+	@command -v helm >/dev/null 2>&1 || { echo "helm not found"; exit 1; }
+	helm lint deploy/helm/driftwatch
+	helm lint deploy/helm/driftwatch -f deploy/helm/driftwatch/values-dev.yaml
+	helm lint deploy/helm/driftwatch -f deploy/helm/driftwatch/values-prod.yaml
+	@# Linting only parses; templating is what proves the manifests come out.
+	@helm template driftwatch deploy/helm/driftwatch >/dev/null
+	@helm template driftwatch deploy/helm/driftwatch \
+		-f deploy/helm/driftwatch/values-dev.yaml >/dev/null
+	@helm template driftwatch deploy/helm/driftwatch -n driftwatch-system \
+		-f deploy/helm/driftwatch/values-prod.yaml >/dev/null
+	@echo 'helm-lint: ok'
+
+.PHONY: docker-build
+docker-build: ## Build the container image
+	docker build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg COMMIT=$(COMMIT) \
+		--build-arg DATE=$(DATE) \
+		-t $(IMG) .
+
+.PHONY: install
+install: manifests ## Install the CRD into the current cluster
+	kubectl apply -k config/crd
+
+.PHONY: uninstall
+uninstall: ## Remove the CRD from the current cluster
+	kubectl delete -k config/crd --ignore-not-found
+
+.PHONY: deploy
+deploy: manifests ## Deploy the manager into the current cluster
+	kubectl apply -k config/default
+
+.PHONY: undeploy
+undeploy: ## Remove the manager from the current cluster
+	kubectl delete -k config/default --ignore-not-found
+
+.PHONY: kind-up
+kind-up: ## Create a Kind cluster and install the CRD
+	kind create cluster --name $(KIND_CLUSTER)
+	$(MAKE) install
+
+.PHONY: kind-load
+kind-load: docker-build ## Build the image and load it into the Kind cluster
+	kind load docker-image $(IMG) --name $(KIND_CLUSTER)
+
+.PHONY: kind-down
+kind-down: ## Delete the Kind cluster
+	kind delete cluster --name $(KIND_CLUSTER)
+
+.PHONY: controller-gen
+controller-gen: ## Install the pinned controller-gen
+	@command -v controller-gen >/dev/null 2>&1 || test -x "$(CONTROLLER_GEN)" || \
+		go install sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_GEN_VERSION)
+
+.PHONY: envtest
+envtest: ## Install setup-envtest and fetch the API server binaries
+	@command -v setup-envtest >/dev/null 2>&1 || test -x "$(ENVTEST)" || \
+		go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$(ENVTEST_VERSION)
+	@"$(ENVTEST)" use $(ENVTEST_K8S_VERSION) -p path >/dev/null
+
 .PHONY: install-tools
-install-tools: ## Install the pinned development tools into $(go env GOPATH)/bin
+install-tools: controller-gen envtest ## Install the pinned development tools into $(go env GOPATH)/bin
 	GOLANGCI_VERSION=$(GOLANGCI_VERSION) ./hack/install-tools.sh
 
 .PHONY: clean

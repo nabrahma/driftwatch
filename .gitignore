@@ -10,6 +10,11 @@ bench.txt
 /test/e2e/_artifacts/
 *.pb.gz
 
+# hack/verify-crd-docs.sh generates into the repo rather than the system temp
+# directory, because controller-gen's colon-separated output markers cannot
+# express a Windows path with a drive letter in it.
+/.verify-crd-docs/
+
 # Editor / OS
 .idea/
 .vscode/
@@ -21,3 +26,7 @@ Thumbs.db
 # local reproduction aid for the run that failed, not a fixture: the failing
 # input is pinned as a named test instead.
 testdata/rapid/
+
+# hack/verify-codegen.sh moves the generated deepcopy files aside while it
+# regenerates, and puts them back.
+/.verify-codegen/

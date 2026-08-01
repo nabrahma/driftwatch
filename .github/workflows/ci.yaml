@@ -34,10 +34,13 @@ jobs:
           version: ${{ env.GOLANGCI_VERSION }}
           args: --timeout 5m
 
+      # Generated files are excluded: gofumpt strips the redundant import alias
+      # controller-gen emits, controller-gen puts it back, and the two would
+      # take turns failing CI forever.
       - name: gofumpt
         run: |
           go install mvdan.cc/gofumpt@v0.7.0
-          out=$(gofumpt -l -d .)
+          out=$(gofumpt -l -d . | grep -v 'zz_generated' || true)
           if [ -n "$out" ]; then
             echo "$out"
             echo '::error::gofumpt found unformatted files; run make fmt'
@@ -55,6 +58,20 @@ jobs:
 
       - name: verify metrics documentation
         run: ./hack/verify-metrics-docs.sh
+
+      # The CRD's descriptions are its documentation: `kubectl explain
+      # driftcheck.spec.policy` renders them and nothing else. A field added
+      # without a doc comment is one an operator has to read Go source to
+      # configure, and nobody would notice until they tried.
+      - name: verify CRD documentation and generated manifests
+        run: |
+          go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.17.2
+          ./hack/verify-crd-docs.sh
+
+      - name: verify the Helm chart carries the generated CRD and RBAC
+        run: |
+          ./hack/sync-helm-crd.sh
+          ./hack/verify-helm-rbac.sh
 
       - name: verify fault matrix coverage
         run: ./hack/verify-fault-matrix.sh
@@ -112,6 +129,93 @@ jobs:
           name: coverage
           path: cover.out
           if-no-files-found: warn
+
+  # The controller suite runs against a real API server and a real etcd, because
+  # a fake client would let every one of its tests pass while the controller was
+  # broken: fake clients do not enforce optimistic concurrency, do not run
+  # finalizers, and do not validate against the CRD schema — which are three of
+  # the things §10.3 asks that suite to prove.
+  controller:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: envtest binaries
+        run: |
+          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.20
+          echo "KUBEBUILDER_ASSETS=$(setup-envtest use 1.31.0 -p path)" >>"$GITHUB_ENV"
+
+      - name: controller and CRD suites
+        run: go test -race -count=1 -timeout=10m ./api/... ./internal/controller/...
+
+  # The chart is deployment surface: it renders the RBAC, the security context
+  # and the CRD. All three are things that install cleanly and then misbehave if
+  # they are wrong, so rendering them in CI is the only place a mistake is cheap.
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+
+      - name: lint and render the chart
+        run: |
+          helm lint deploy/helm/driftwatch
+          helm lint deploy/helm/driftwatch -f deploy/helm/driftwatch/values-dev.yaml
+          helm lint deploy/helm/driftwatch -f deploy/helm/driftwatch/values-prod.yaml
+          helm template driftwatch deploy/helm/driftwatch >/dev/null
+          helm template driftwatch deploy/helm/driftwatch \
+            -f deploy/helm/driftwatch/values-dev.yaml >/dev/null
+          helm template driftwatch deploy/helm/driftwatch -n driftwatch-system \
+            -f deploy/helm/driftwatch/values-prod.yaml >/dev/null
+
+      # The chart refuses configurations that install cleanly and then run every
+      # check twice, or serve admission without a certificate. A guard nothing
+      # exercises is a guard that stops working.
+      - name: the chart rejects the configurations it should
+        run: |
+          set +e
+          helm template x deploy/helm/driftwatch \
+            --set replicaCount=3 --set manager.leaderElect=false >/dev/null 2>&1
+          [ $? -eq 0 ] && { echo '::error::replicas without leader election was accepted'; exit 1; }
+          helm template x deploy/helm/driftwatch --set webhook.enabled=true >/dev/null 2>&1
+          [ $? -eq 0 ] && { echo '::error::the webhook without a certificate was accepted'; exit 1; }
+          helm template x deploy/helm/driftwatch --set rbac.scope=namespace >/dev/null 2>&1
+          [ $? -eq 0 ] && { echo '::error::namespaced RBAC without a namespace was accepted'; exit 1; }
+          echo 'the chart rejected all three'
+
+  # §18: the image must have no shell, run as 65532, and hold no secret. The
+  # manifests declare all of that; this is what proves the image agrees with
+  # them, and it is much cheaper to catch here than in a CrashLoopBackOff.
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: build the image
+        run: docker build -t driftwatch:ci .
+
+      - name: the image runs as 65532 with no shell
+        run: |
+          user=$(docker image inspect driftwatch:ci --format '{{.Config.User}}')
+          [ "$user" = "65532:65532" ] || {
+            echo "::error::image user is '$user', expected 65532:65532"; exit 1; }
+
+          if docker run --rm --entrypoint /bin/sh driftwatch:ci -c 'echo reachable' 2>/dev/null; then
+            echo '::error::the image has a shell in it'
+            exit 1
+          fi
+          echo "image runs as $user with no shell"
+
+      - name: the binary starts
+        run: docker run --rm driftwatch:ci --version
 
   # The `inject` command sits behind a `dev` build tag so the release binary
   # cannot write to the event stream it audits (§11). Nothing else compiles it,
