@@ -1545,6 +1545,24 @@ type Status struct {
 	TargetReachable    bool   `json:"targetReachable"`
 	TargetRole         string `json:"targetRole,omitempty"`
 	TargetKeyspaceSize int64  `json:"targetKeyspaceSize"`
+
+	// SourceConnected reports whether the transport currently has its
+	// subscription. It is separate from TargetReachable because the two
+	// failures mean opposite things: an unreachable target means driftwatch
+	// cannot check, while a disconnected source means driftwatch is missing
+	// events and every key it does check is becoming stale.
+	SourceConnected bool `json:"sourceConnected"`
+	// SourceReconnects counts how many times the transport has re-established
+	// its subscription. A number that climbs is a flapping endpoint, which
+	// produces gaps that look like publisher loss.
+	SourceReconnects uint64 `json:"sourceReconnects"`
+	// SourceLastError is the transport's last error, if any.
+	SourceLastError string `json:"sourceLastError,omitempty"`
+
+	// Bootstrapped reports that the oracle is ready to be swept against. The
+	// CRD controller turns the transition into a Kubernetes Event, which is
+	// what an operator sees first in `kubectl describe` (§10.3).
+	Bootstrapped bool `json:"bootstrapped"`
 }
 
 // PublisherStatus is one publisher's sequence position.
@@ -1616,6 +1634,19 @@ func (c *Check) Status() Status {
 
 	if key := c.multiWriterKey.Load(); key != nil {
 		st.MultiWriterKey = *key
+	}
+
+	if c.src != nil {
+		srcStats := c.src.Stats()
+		st.SourceConnected = srcStats.Connected
+		st.SourceReconnects = srcStats.Reconnects
+		st.SourceLastError = srcStats.LastError
+	}
+
+	select {
+	case <-c.bootstrapped:
+		st.Bootstrapped = true
+	default:
 	}
 
 	for _, ps := range c.tracker.Publishers() {
