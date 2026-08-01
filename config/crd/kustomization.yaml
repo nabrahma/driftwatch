@@ -1,0 +1,10 @@
+# The CRD on its own, so `kubectl apply -k config/crd` installs the API without
+# installing a manager. That order matters more than it sounds: a cluster that
+# has the CRD can hold DriftCheck objects before anything is running to act on
+# them, which is what lets a team commit their checks to git ahead of the
+# rollout.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - bases/driftwatch.io_driftchecks.yaml

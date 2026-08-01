@@ -311,6 +311,25 @@ func (d Decimal) Float() float64 { return float64(d) }
 // String renders the value without a trailing zero run.
 func (d Decimal) String() string { return strconv.FormatFloat(float64(d), 'g', -1, 64) }
 
+// ParseDecimal reads a Decimal from its string form.
+//
+// The CRD carries these as strings, so the webhook needs the same parse the
+// YAML loader performs — and needs it to fail loudly, because a safetyFactor of
+// "3.O" silently becoming zero would be reported as a bound violation on a
+// number the operator never wrote.
+func ParseDecimal(raw string) (Decimal, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return 0, nil
+	}
+
+	v, err := strconv.ParseFloat(trimmed, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%q is not a number", raw)
+	}
+	return Decimal(v), nil
+}
+
 // UnmarshalYAML accepts a number or a quoted number.
 func (d *Decimal) UnmarshalYAML(node *yaml.Node) error {
 	var raw string
