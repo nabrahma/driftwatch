@@ -1,0 +1,150 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: system
+  labels:
+    app.kubernetes.io/name: driftwatch
+    app.kubernetes.io/component: manager
+    # driftwatch runs unprivileged, with no capabilities and a read-only root.
+    # The restricted PSS level is the one it is built for, so declaring it here
+    # means a cluster that enforces it rejects any future manifest that quietly
+    # loosens the pod security context.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: driftwatch-manager
+  namespace: system
+  labels:
+    app.kubernetes.io/name: driftwatch
+    app.kubernetes.io/component: manager
+spec:
+  # Two replicas, one leader. The standby exists so a node drain does not stop
+  # auditing for as long as a scheduler takes to place a new pod — and because
+  # --leader-elect with LeaderElectionReleaseOnCancel hands the lease over in
+  # seconds rather than waiting for it to expire.
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: driftwatch
+      app.kubernetes.io/component: manager
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: driftwatch
+        app.kubernetes.io/component: manager
+    spec:
+      serviceAccountName: driftwatch-manager
+      # §18. Every one of these is load-bearing rather than boilerplate:
+      # driftwatch runs as an unprivileged user, out of a read-only filesystem,
+      # with no capabilities, in an image with no shell to drop into.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: manager
+          image: ghcr.io/nabrahma/driftwatch:latest
+          # Explicit, because Kubernetes infers Always from a `latest` tag and
+          # that breaks the first thing anybody does with this: `kind load
+          # docker-image` puts the image on the node, and an Always policy then
+          # ignores it and tries to pull from a registry the image was never
+          # pushed to. Pin the tag with `kustomize edit set image` for a real
+          # deployment and this stays correct.
+          imagePullPolicy: IfNotPresent
+          args:
+            - --leader-elect
+            - --metrics-bind-address=:8080
+            - --health-probe-bind-address=:8081
+            - --log-format=json
+            - --shutdown-grace=30s
+            # Off in this base, because serving admission needs a certificate
+            # and config/default has no way to produce one — the manager would
+            # start, fail to read tls.crt, and crash-loop. The CRD's schema
+            # still carries the enums, ranges and defaults, so a malformed spec
+            # is still rejected; what is lost is §10.2's cross-field validation.
+            #
+            # Flip it with config/webhook once a certificate source exists, or
+            # use the Helm chart, which wires cert-manager for you.
+            - --enable-webhooks=false
+          ports:
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+            - name: probes
+              containerPort: 8081
+              protocol: TCP
+            - name: webhook
+              containerPort: 9443
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: probes
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: probes
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            # Sized for the default policy.maxTrackedKeys of 1,000,000 at
+            # roughly 700 bytes per key, plus headroom for a sweep's read
+            # batches. §19.1 budgets 512 MiB RSS for that, and §21's known gap
+            # G-001 records that the real figure measured closer to 640 MiB —
+            # so the limit is set above the budget rather than at it, because a
+            # limit that OOM-kills the manager takes every check down with it.
+            #
+            # Multiply the memory by the number of DriftChecks the manager runs
+            # and by maxTrackedKeys / 1,000,000. See docs/OPERATIONS.md.
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          volumeMounts:
+            - name: webhook-certs
+              mountPath: /tmp/k8s-webhook-server/serving-certs
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: webhook-certs
+          secret:
+            secretName: webhook-server-cert
+            optional: true
+        # readOnlyRootFilesystem means /tmp has to come from somewhere. An
+        # emptyDir with a size limit rather than an unbounded one: a writable
+        # path with no cap is a way to fill a node's disk.
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+      # Keep the two replicas off one node, or the standby dies with the leader.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: driftwatch
+              app.kubernetes.io/component: manager

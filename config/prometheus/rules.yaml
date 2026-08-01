@@ -1,0 +1,195 @@
+# The ten alerts from §12.2.
+#
+# One rule runs through all of them, and it is §23 A7: nothing here alerts on
+# driftwatch_suspect_divergent_keys. A suspect finding measures driftwatch's own
+# event loss rather than the store's correctness, so paging on it teaches an
+# operator that driftwatch's alerts are noise — and the next one, the real one,
+# gets the same treatment. Suspect keys surface through DriftwatchEventLoss and
+# DriftwatchLowCoverage instead, which say what is actually wrong: driftwatch
+# cannot see the whole stream.
+#
+# Every alert carries a runbook_url anchored in docs/OPERATIONS.md. An alert
+# without one is a page that starts with somebody reading source code.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: driftwatch
+  namespace: system
+  labels:
+    app.kubernetes.io/name: driftwatch
+    app.kubernetes.io/component: manager
+spec:
+  groups:
+    - name: driftwatch.drift
+      rules:
+        - alert: DriftwatchDriftDetected
+          expr: driftwatch_divergent_keys > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              {{ $value }} confirmed divergent keys on {{ $labels.check }}
+            description: >-
+              driftwatch has confirmed, across two reads separated by a
+              settlement window, that the target disagrees with what the event
+              stream says it should hold. These are keys it will stand behind:
+              suspect keys are counted separately and are not in this number.
+              Run `driftwatch explain --key <key>` for the per-key history.
+            runbook_url: https://github.com/nabrahma/driftwatch/blob/main/docs/OPERATIONS.md#driftwatchdriftdetected
+
+        - alert: DriftwatchDriftSevere
+          expr: >-
+            driftwatch_divergent_keys
+              / (driftwatch_oracle_keys{trust="complete"} > 0) > 0.01
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: >-
+              Over 1% of tracked keys have diverged on {{ $labels.check }}
+            description: >-
+              A ratio rather than a count, because an absolute threshold that
+              suits a 10,000-key store is meaningless at ten million. At this
+              scale the cause is usually systemic — a materializer that stopped,
+              a failover to a stale replica, or a flush — rather than a handful
+              of individually broken keys.
+            runbook_url: https://github.com/nabrahma/driftwatch/blob/main/docs/OPERATIONS.md#driftwatchdriftsevere
+
+    - name: driftwatch.integrity
+      rules:
+        - alert: DriftwatchEventLoss
+          expr: rate(driftwatch_seq_gaps_total[10m]) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              driftwatch is missing events on {{ $labels.check }}
+            description: >-
+              A gap in a publisher's sequence numbers means driftwatch's own view
+              of the stream is incomplete, so the affected keys are marked
+              suspect and excluded from the alertable count. This is not drift.
+              It is driftwatch telling you it cannot currently vouch for part of
+              the keyspace, which is a different and more urgent problem: the
+              audit has a hole in it.
+            runbook_url: https://github.com/nabrahma/driftwatch/blob/main/docs/OPERATIONS.md#driftwatcheventloss
+
+        - alert: DriftwatchIngestBackpressure
+          expr: >-
+            rate(driftwatch_events_dropped_total{reason="buffer_full"}[5m]) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: >-
+              driftwatch is dropping events on {{ $labels.check }}
+            description: >-
+              The applier cannot keep up with the stream and the ingest buffer is
+              full. Critical rather than warning because it is self-inflicted:
+              every dropped event makes more of the keyspace suspect, so the
+              audit degrades under exactly the load it is most needed at. Raise
+              policy.ingestBufferSize, give the manager more CPU, or split the
+              check.
+            runbook_url: https://github.com/nabrahma/driftwatch/blob/main/docs/OPERATIONS.md#driftwatchingestbackpressure
+
+        - alert: DriftwatchOracleSaturated
+          expr: rate(driftwatch_oracle_evictions_total[5m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              The keyspace does not fit in the oracle on {{ $labels.check }}
+            description: >-
+              The oracle is evicting keys to stay inside policy.maxTrackedKeys,
+              which means every finding now covers only part of the store and
+              every clean report is a statement about a subset. Raise
+              maxTrackedKeys — budget roughly 700 bytes per key — or narrow
+              target.redis.keyPattern to the keyspace this check owns.
+            runbook_url: https://github.com/nabrahma/driftwatch/blob/main/docs/OPERATIONS.md#driftwatchoraclesaturated
+
+        - alert: DriftwatchLowCoverage
+          expr: driftwatch_coverage_ratio < 0.8
+          for: 15m
+          labels:
+            severity: info
+          annotations:
+            summary: >-
+              Only {{ $value | humanizePercentage }} of keys are being compared
+              on {{ $labels.check }}
+            description: >-
+              Most tracked keys are not being compared, usually because they are
+              in flight inside the settlement window or were adopted at bootstrap
+              and are never asserted on. Informational rather than a page, but it
+              is the number that tells you how much a clean report is worth: a
+              low divergence count under low coverage is not the reassurance it
+              looks like.
+            runbook_url: https://github.com/nabrahma/driftwatch/blob/main/docs/OPERATIONS.md#driftwatchlowcoverage
+
+    - name: driftwatch.connectivity
+      rules:
+        - alert: DriftwatchTargetUnavailable
+          expr: driftwatch_target_reachable == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: >-
+              driftwatch cannot reach the target on {{ $labels.check }}
+            description: >-
+              No comparison is running, so no new findings are being reported and
+              the divergence counts are frozen at the last thing driftwatch
+              actually knew. Absence of data is not evidence of divergence — but
+              it is not evidence of health either, and while this is firing the
+              other alerts here mean nothing.
+            runbook_url: https://github.com/nabrahma/driftwatch/blob/main/docs/OPERATIONS.md#driftwatchtargetunavailable
+
+        - alert: DriftwatchSourceDisconnected
+          expr: min(driftwatch_source_connected) by (check) == 0
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              driftwatch has lost its event subscription on {{ $labels.check }}
+            description: >-
+              The oracle is no longer being updated, so it drifts further from
+              the truth for as long as this lasts and every key it holds becomes
+              progressively more stale. Findings raised during a disconnection
+              are about driftwatch's stale copy, not about the store.
+            runbook_url: https://github.com/nabrahma/driftwatch/blob/main/docs/OPERATIONS.md#driftwatchsourcedisconnected
+
+    - name: driftwatch.capacity
+      rules:
+        - alert: DriftwatchSettlementWindowAtMax
+          expr: driftwatch_settlement_window_seconds >= 120
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              The settlement window has reached its ceiling on {{ $labels.check }}
+            description: >-
+              The adaptive window has widened to policy.settlementWindow.max,
+              which means measured convergence is slower than driftwatch was
+              configured to tolerate. Real drift now takes at least this long to
+              surface. Either the materializer has become slow, or the ceiling
+              was set for a system that no longer exists.
+            runbook_url: https://github.com/nabrahma/driftwatch/blob/main/docs/OPERATIONS.md#driftwatchsettlementwindowatmax
+
+        - alert: DriftwatchSweepsSkipped
+          expr: rate(driftwatch_sweeps_skipped_total[10m]) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              Sweeps are overrunning their interval on {{ $labels.check }}
+            description: >-
+              A sweep was still running when the next one was due, so it was
+              skipped. Detection latency is now the sweep duration rather than
+              policy.sweepInterval, and the gap widens as the keyspace grows.
+              Raise sweepInterval, raise target.redis.readBatchSize, or accept
+              that this check has outgrown one sweeper.
+            runbook_url: https://github.com/nabrahma/driftwatch/blob/main/docs/OPERATIONS.md#driftwatchsweepsskipped

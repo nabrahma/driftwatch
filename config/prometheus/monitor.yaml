@@ -1,0 +1,21 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: driftwatch-manager
+  namespace: system
+  labels:
+    app.kubernetes.io/name: driftwatch
+    app.kubernetes.io/component: manager
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: driftwatch
+      app.kubernetes.io/component: manager
+  endpoints:
+    - port: metrics
+      # One endpoint carries both the check metrics and controller-runtime's,
+      # because they share a registry. Two would mean two ServiceMonitors and an
+      # operator working out which of them has the drift count on it.
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s

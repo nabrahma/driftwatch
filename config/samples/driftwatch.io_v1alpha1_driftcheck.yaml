@@ -1,0 +1,114 @@
+# The §10.1 example, as a working object: a vLLM KV-cache index audited against
+# the Redis the materializer writes it into.
+#
+# Everything here is spelled out rather than left to defaults, so it doubles as
+# the reference an operator copies from. `kubectl explain driftcheck.spec` says
+# what each field means; this says what a real one looks like.
+apiVersion: driftwatch.io/v1alpha1
+kind: DriftCheck
+metadata:
+  name: kvcache-index
+  namespace: inference
+spec:
+  source:
+    type: zmq
+    zmq:
+      endpoints:
+        - tcp://vllm-0.vllm.inference.svc:5557
+        - tcp://vllm-1.vllm.inference.svc:5557
+      topics: ["kv_events"]
+      recvHWM: 100000
+      connectTimeout: 5s
+      reconnectIntervalMax: 30s
+      multipart: auto
+    # At least recvHWM, or frames are discarded inside the socket where nothing
+    # can count them. The webhook rejects a smaller value.
+    ingestBufferSize: 200000
+
+  codec:
+    type: json
+    maxPayloadBytes: 1048576
+    # Payloads are never retained by default. driftwatch reads potentially
+    # sensitive values, and holding them in memory it does not need is a
+    # liability rather than a feature (§18).
+    retainRaw: false
+    fieldMapping:
+      publisher: replica_id
+      epoch: incarnation
+      seq: event_id
+      timestamp: ts
+      op: event_type
+      key: block_hash
+      member: replica_id
+    opMapping:
+      BLOCK_STORED: add
+      BLOCK_EVICTED: remove
+      ALL_BLOCKS_CLEARED: delete
+      SNAPSHOT_START: snapshotBegin
+      SNAPSHOT_END: snapshotEnd
+      PING: heartbeat
+
+  projection:
+    type: keysetOwnership
+    keyTemplate: "block:{{.Key}}"
+    memberTemplate: "{{.Member}}"
+    maxMembersPerKey: 100000
+
+  target:
+    type: redis
+    redis:
+      mode: standalone
+      addr: redis.inference.svc:6379
+      db: 0
+      passwordSecretRef:
+        name: redis-creds
+        key: password
+      # Narrow to the keyspace this check owns. A pattern matching keys no event
+      # produces reports every one of them as an extra.
+      keyPattern: "block:*"
+      readBatchSize: 500
+      scanCount: 1000
+      dialTimeout: 5s
+      readTimeout: 3s
+      poolSize: 10
+
+  policy:
+    settlementWindow:
+      # Adaptive, because a static window has to be set for the worst case and
+      # then reports late for the other 99% of the time.
+      mode: adaptive
+      static: 5s
+      min: 1s
+      max: 120s
+      safetyFactor: "3.0"
+    sweepInterval: 30s
+    extraScanInterval: 5m
+    reorderWindow: 2s
+    bootstrap: Adopt
+    expiryPolicy: Strict
+    ttlTolerance: 5s
+    requirePrimary: true
+    maxTrackedKeys: 1000000
+    ringSize: 16
+    oracleShards: 64
+    paused: false
+
+  alert:
+    divergentKeysThreshold: 10
+    divergentRatioThreshold: "0.001"
+    forDuration: 60s
+    # Leave this false. Suspect keys measure driftwatch's own event loss rather
+    # than the store's correctness, and paging on them trains an operator to
+    # ignore the alert (§23 A7).
+    includeSuspect: false
+---
+# The secret the check above refers to. Committed as a placeholder so the sample
+# applies cleanly; replace it before pointing this at a real Redis.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: redis-creds
+  namespace: inference
+type: Opaque
+stringData:
+  password: "replace-me"

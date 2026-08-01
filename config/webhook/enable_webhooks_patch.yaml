@@ -1,0 +1,32 @@
+# Turns the admission webhook on, for an overlay that also supplies a
+# certificate.
+#
+# config/manager runs with --enable-webhooks=false, because a manager that
+# starts the webhook server without a certificate fails to read tls.crt and
+# crash-loops. An overlay that adds config/webhook and a certificate source —
+# cert-manager, or a Secret named webhook-server-cert — applies this patch to
+# flip it back on:
+#
+#   resources:
+#     - ../default
+#     - ../webhook
+#   patches:
+#     - path: ../webhook/enable_webhooks_patch.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: driftwatch-manager
+  namespace: system
+spec:
+  template:
+    spec:
+      containers:
+        - name: manager
+          args:
+            - --leader-elect
+            - --metrics-bind-address=:8080
+            - --health-probe-bind-address=:8081
+            - --log-format=json
+            - --shutdown-grace=30s
+            - --enable-webhooks=true
+            - --webhook-port=9443

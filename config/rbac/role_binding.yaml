@@ -1,0 +1,25 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: driftwatch-manager
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: driftwatch-manager
+subjects:
+  - kind: ServiceAccount
+    name: driftwatch-manager
+    namespace: system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: driftwatch-leader-election
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: driftwatch-leader-election
+subjects:
+  - kind: ServiceAccount
+    name: driftwatch-manager
+    namespace: system

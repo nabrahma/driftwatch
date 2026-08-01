@@ -1,0 +1,25 @@
+# Leader election, scoped to the manager's own namespace.
+#
+# This is a Role rather than part of the ClusterRole on purpose. The manager
+# needs exactly one lease, in the namespace it runs in. Granting lease write
+# cluster-wide would let a compromised driftwatch evict the leader of every
+# other operator in the cluster — a much more interesting thing to obtain than
+# read access to an event stream, and completely unnecessary for what driftwatch
+# does. §18 asks for the same treatment of secrets, and the argument is the same.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: driftwatch-leader-election
+rules:
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete

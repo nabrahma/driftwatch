@@ -1,0 +1,25 @@
+# The smallest DriftCheck that does something useful.
+#
+# Everything the full sample spells out is left to the defaults here, which is
+# the point: `kubectl get driftcheck kvcache-minimal -o yaml` after applying
+# this shows the whole effective configuration, because the defaulting webhook
+# fills every optional field (§10.2).
+apiVersion: driftwatch.io/v1alpha1
+kind: DriftCheck
+metadata:
+  name: kvcache-minimal
+  namespace: inference
+spec:
+  source:
+    type: zmq
+    zmq:
+      endpoints:
+        - tcp://vllm-0.vllm.inference.svc:5557
+  projection:
+    type: keysetOwnership
+    keyTemplate: "block:{{.Key}}"
+  target:
+    type: redis
+    redis:
+      addr: redis.inference.svc:6379
+      keyPattern: "block:*"

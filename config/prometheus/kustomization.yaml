@@ -1,0 +1,14 @@
+# Opt-in: both resources here are Prometheus operator CRDs, so applying this to
+# a cluster without the operator fails with "no matches for kind ServiceMonitor".
+# The metrics Service itself lives in config/manager, so metrics are served and
+# scrapeable by anything that can reach the pod whether or not this is applied.
+#
+#   kubectl apply -k config/prometheus
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: driftwatch-system
+
+resources:
+  - monitor.yaml
+  - rules.yaml

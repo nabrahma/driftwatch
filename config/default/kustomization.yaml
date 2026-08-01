@@ -1,0 +1,34 @@
+# The overlay `make deploy` applies: the CRD, the RBAC, the manager and the
+# metrics wiring, all in the driftwatch-system namespace.
+#
+# The webhook is deliberately not here. Serving admission needs a certificate,
+# and the two ways to get one — cert-manager, or a hand-rolled CA — are both
+# opinions about the cluster rather than about driftwatch. The CRD's own schema
+# carries the enums, ranges and defaults, so `kubectl apply` of a bad spec is
+# still rejected without it; what is lost without the webhook is the
+# cross-field validation (§10.2) and the sub-object defaulting. Overlay
+# config/webhook when a certificate source exists.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: driftwatch-system
+
+resources:
+  - ../crd
+  - ../rbac
+  - ../manager
+
+# config/prometheus is deliberately not here. Its two resources are Prometheus
+# operator CRDs, so including them would make `kubectl apply -k config/default`
+# fail on any cluster without that operator — which is every Kind cluster, and
+# therefore the first cluster anybody tries this on. The metrics Service is in
+# config/manager, so metrics are served either way.
+#
+#   kubectl apply -k config/prometheus   # once the operator is installed
+
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/name: driftwatch
+      app.kubernetes.io/part-of: driftwatch
+      app.kubernetes.io/managed-by: kustomize

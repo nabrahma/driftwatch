@@ -1,0 +1,23 @@
+# Teaches kustomize where the webhook configurations name a Service, so the
+# namespace transformer in config/default rewrites them rather than leaving
+# them pointing at a namespace called "system" that does not exist.
+nameReference:
+  - kind: Service
+    version: v1
+    fieldSpecs:
+      - kind: MutatingWebhookConfiguration
+        group: admissionregistration.k8s.io
+        path: webhooks/clientConfig/service/name
+      - kind: ValidatingWebhookConfiguration
+        group: admissionregistration.k8s.io
+        path: webhooks/clientConfig/service/name
+
+namespace:
+  - kind: MutatingWebhookConfiguration
+    group: admissionregistration.k8s.io
+    path: webhooks/clientConfig/service/namespace
+    create: true
+  - kind: ValidatingWebhookConfiguration
+    group: admissionregistration.k8s.io
+    path: webhooks/clientConfig/service/namespace
+    create: true

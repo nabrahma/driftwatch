@@ -1,0 +1,43 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: driftwatch-manager
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+- apiGroups:
+  - driftwatch.io
+  resources:
+  - driftchecks
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - driftwatch.io
+  resources:
+  - driftchecks/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - driftwatch.io
+  resources:
+  - driftchecks/status
+  verbs:
+  - get
+  - patch
+  - update

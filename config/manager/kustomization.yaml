@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - manager.yaml
+  # The Service is here rather than in config/prometheus because it needs no
+  # operator CRD. Only the ServiceMonitor and the PrometheusRule do, and a base
+  # that could not be applied to a cluster without the Prometheus operator would
+  # make `make deploy` fail on exactly the clusters people try it on first.
+  - metrics_service.yaml
+
+images:
+  - name: ghcr.io/nabrahma/driftwatch
+    newTag: latest
