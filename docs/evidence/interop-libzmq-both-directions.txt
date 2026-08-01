@@ -1,0 +1,45 @@
+# ZMQ interop — pure-Go zmq4 against real libzmq (§16.6)
+
+Captured 2026-08-01. Reproduce with: make test-interop
+
+libzmq 4.3.5 via pyzmq 27.1.0, over real TCP loopback sockets.
+
+```
+=== RUN   TestInterop_LibzmqPublisherToGoSubscriber
+    interop_test.go:106: python: libzmq 4.3.5 publishing on tcp://127.0.0.1:5599
+    interop_test.go:225: received 6667 messages from libzmq
+--- PASS: TestInterop_LibzmqPublisherToGoSubscriber (0.72s)
+=== RUN   TestInterop_GoPublisherToLibzmqSubscriber
+    interop_test.go:106: python: libzmq 4.3.5 subscribed to tcp://127.0.0.1:5601 topic 'kv-events'
+    interop_test.go:106: python: received 5000 messages, binary_identical=True
+    interop_test.go:351: libzmq 4.3.5 / pyzmq 27.1.0 received 5000 of 5000 messages
+--- PASS: TestInterop_GoPublisherToLibzmqSubscriber (1.04s)
+PASS
+ok  	github.com/nabrahma/driftwatch/test/interop	3.121s
+```
+
+## Direction 1 — libzmq PUB to Go SUB
+
+10,000 messages across three topics, alternating between the two framing
+conventions, each carrying a binary payload with a null byte, a newline, high
+bytes and a UTF-8 sequence in it.
+
+6,667 arrived, which is exactly right. The subscription is to `kv-events`, ZMQ
+subscription filtering is a prefix match, and two of the three topics
+(`kv-events` and `kv-events-secondary`) carry that prefix. The test asserts the
+exact set of sequence numbers rather than the count, so a filter that dropped
+the right number of the wrong messages would fail.
+
+Both framing conventions parsed. Every binary payload arrived byte-identical.
+
+## Direction 2 — Go PUB to libzmq SUB
+
+5,000 messages, one topic, no filtering. All 5,000 arrived, contiguous, with
+binary payloads intact.
+
+## What this proves
+
+ADR-0001 chose a pure-Go ZMTP implementation over a cgo binding to libzmq, which
+buys static binaries and a distroless image and costs a guarantee: wire
+compatibility becomes a claim rather than something the linker enforces. These
+two tests are what makes it a measurement instead.
