@@ -29,4 +29,8 @@ maintainers:
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/operator: "true"
-  artifacthub.io/operatorCapabilities: Seamless Upgrades
+  # ArtifactHub's capability ladder. Basic Install is the honest rung: the
+  # chart installs and configures the operator, and nothing automates upgrades,
+  # backup or scaling. Claiming a higher level would be an unbacked assertion of
+  # exactly the kind hack/verify-no-superlatives.sh exists to catch.
+  artifacthub.io/operatorCapabilities: Basic Install

@@ -164,6 +164,12 @@ func (c *fakeClock) Since(t time.Time) time.Duration {
 	return c.Now().Sub(t)
 }
 
+// NewTicker returns a ticker driven by this clock.
+//
+// It panics on a non-positive interval, matching time.NewTicker. That is a
+// programmer error rather than a runtime condition: a ticker that fires every
+// zero seconds has no meaningful behaviour, and returning a broken one would
+// surface as a test that hangs rather than as the mistake it is.
 func (c *fakeClock) NewTicker(d time.Duration) Ticker {
 	if d <= 0 {
 		panic("clock: NewTicker requires a positive interval")
@@ -197,6 +203,10 @@ func (c *fakeClock) Sleep(ctx context.Context, d time.Duration) error {
 }
 
 func (c *fakeClock) Advance(d time.Duration) {
+	// A programmer error. A fake clock that can go backwards produces tests
+	// that pass for the wrong reason — a settlement window that "elapsed"
+	// because time reversed under it — and those are far more expensive to
+	// find later than a panic here.
 	if d < 0 {
 		panic("clock: Fake.Advance requires a non-negative duration")
 	}
@@ -333,6 +343,7 @@ func (f *fakeTicker) C() <-chan time.Time { return f.w.ch }
 func (f *fakeTicker) Stop() { f.w.stop() }
 
 func (f *fakeTicker) Reset(d time.Duration) {
+	// A programmer error, as in NewTicker above and for the same reason.
 	if d <= 0 {
 		panic("clock: Ticker.Reset requires a positive interval")
 	}

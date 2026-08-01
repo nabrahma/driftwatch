@@ -1313,7 +1313,21 @@ func (c *Check) recordExtrasScanMetrics(rep *differ.Report, err error) {
 // onReport records a sweep's outcome in the status and the metrics.
 func (c *Check) onReport(rep *differ.Report, err error) {
 	c.mu.Lock()
-	if rep != nil {
+	// Only a sweep updates lastReport, and this is the same defect D-020
+	// records in the metrics path, hiding in the status path as well.
+	//
+	// Status derives coverageRatio, lastSweepKeysCompared and the target
+	// keyspace size from lastReport. The extras scan walks the store rather
+	// than the oracle, so letting it land here made `kubectl get driftcheck`
+	// report `coverageRatio: 0` and `targetKeyspaceSize: 0` every
+	// extraScanInterval — on a check that had applied 129,000 events and was
+	// tracking 3,000 keys perfectly well.
+	//
+	// Fixing the metrics and leaving this was worse than fixing neither: the
+	// dashboard and the CRD status disagreed, and the CRD is what an operator
+	// reads first. Found by e2e E1, which asserts coverage above 0.90 and got
+	// exactly zero.
+	if rep != nil && rep.Pass == differ.PassOracleToTarget {
 		c.lastReport = rep
 		c.lastSweep = rep.FinishedAt
 	}

@@ -66,8 +66,10 @@ and the result is less convincing.
 benchmark number is pasted without the run that produced it. Every claim traces
 to a real file in `docs/evidence/`.
 
-**No unbacked superlatives.** Not "production-grade", not "enterprise", not
-"blazing-fast". Write the measured number instead.
+**No unbacked superlatives.** The marketing adjectives that promise maturity or
+speed without a number behind them do not appear anywhere in this repository —
+`hack/verify-no-superlatives.sh` enforces the list and CI runs it. Write the
+measured number instead, or write nothing.
 
 ## Dependencies
 
