@@ -190,12 +190,20 @@ type SecretKeyRef struct {
 
 // CodecSpec configures how transport frames become events.
 type CodecSpec struct {
-	// Type selects the decoder. Only json is implemented; msgpack and template
-	// are named in the design but not registered, so the enum lists what the
-	// binary can actually decode rather than what it may one day decode. An
-	// operator who sets an unimplemented codec should be told at apply time,
-	// not by a runner that fails to start after the rollout.
-	// +kubebuilder:validation:Enum=json
+	// Type selects the decoder.
+	//
+	// The enum lists what the binary can actually decode rather than what the
+	// design names, because an operator who sets an unregistered codec should
+	// be told at apply time and not by a runner that fails to start after the
+	// rollout has already begun.
+	//
+	// json is the fast path: a hand-written scanner, no allocation per event on
+	// the happy path. msgpack takes the same field mapping and configuration
+	// and costs one map allocation per event. template is a regular expression
+	// with named capture groups, for line-oriented formats — a compatibility
+	// escape hatch roughly an order of magnitude slower than json, and not
+	// something to run at high throughput.
+	// +kubebuilder:validation:Enum=json;msgpack;template
 	// +kubebuilder:default=json
 	// +optional
 	Type string `json:"type,omitempty"`

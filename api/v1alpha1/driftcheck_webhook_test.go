@@ -194,7 +194,7 @@ func TestWebhookRule05_UnknownCodecTypeAndFieldMapping(t *testing.T) {
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(),
-			`spec.codec.type: Invalid value: "": unknown codec type "protobuf", valid: [json]`)
+			`spec.codec.type: Invalid value: "": unknown codec type "protobuf", valid: [json msgpack template]`)
 	})
 
 	t.Run("field mapping key", func(t *testing.T) {
