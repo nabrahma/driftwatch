@@ -15,6 +15,15 @@ import (
 
 func epoch() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) }
 
+// The Eventually budget for the external test package. Declared again rather
+// than shared with the internal one next door because `package source` and
+// `package source_test` cannot see each other's identifiers; see
+// pkg/check/check_test.go for why the numbers are what they are.
+const (
+	eventuallyFor  = 30 * time.Second
+	eventuallyPoll = 10 * time.Millisecond
+)
+
 // runMemory starts a memory source and returns its output channel.
 func runMemory(t *testing.T, src *source.MemorySource) (chan source.RawMessage, context.CancelFunc) {
 	t.Helper()
@@ -96,7 +105,7 @@ func TestMemory_BacklogReportsWhatHasNotBeenDelivered(t *testing.T) {
 		<-out
 	}
 	assert.Eventually(t, func() bool { return src.Backlog() == 0 },
-		5*time.Second, time.Millisecond)
+		eventuallyFor, eventuallyPoll)
 }
 
 func TestMemory_AFullBacklogRefusesRatherThanBlocking(t *testing.T) {

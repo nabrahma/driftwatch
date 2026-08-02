@@ -33,6 +33,17 @@ func TestMain(m *testing.M) {
 		// None of driftwatch's own goroutines is ignored here, and one of those
 		// outliving a test would be a bug to fix rather than an entry to add.
 		goleak.IgnoreAnyFunction("github.com/redis/go-redis/v9/internal/pool.startGlobalTimeCache.func1"),
+
+		// go-winio's IO completion processor, started once by the Docker client
+		// and never stopped. Reachable only from testcontainers, so it appears
+		// under the integration build tag — BenchmarkFullSweep1M — on Windows,
+		// and the matcher finds nothing in a normal unit run.
+		//
+		// Same reasoning and same wording as pkg/target/recording_test.go,
+		// where it was first needed. IgnoreAnyFunction rather than
+		// IgnoreTopFunction because the goroutine parks in syscall.syscalln and
+		// the name worth matching is several frames down.
+		goleak.IgnoreAnyFunction("github.com/Microsoft/go-winio.ioCompletionProcessor"),
 	)
 }
 

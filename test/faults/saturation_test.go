@@ -22,6 +22,16 @@ import (
 	"github.com/nabrahma/driftwatch/test/harness/scenario"
 )
 
+// How long an Eventually here waits, and how often it looks. See the same pair
+// in pkg/check/check_test.go for why they are not 5s and 1ms: coverage
+// instrumentation roughly halves throughput, and a 1ms poll contends with the
+// goroutine it is waiting on. Generous budgets cost nothing when the condition
+// is met promptly.
+const (
+	eventuallyFor  = 30 * time.Second
+	eventuallyPoll = 10 * time.Millisecond
+)
+
 // §15.3 rows 55 to 60 — driftwatch's own lifecycle.
 //
 // Rows 47 to 54 live in internal_test.go, where Phase 3 put them. These six are
@@ -80,7 +90,7 @@ func TestFault55_PanicInTheApplierIsContained(t *testing.T) {
 		`"op":"set","key":"a","value":"v1"}`))
 
 	require.Eventually(t, func() bool { return healthy.Status().EventsApplied == 1 },
-		5*time.Second, time.Millisecond,
+		eventuallyFor, eventuallyPoll,
 		"one check dying must not stop another in the same process")
 
 	cancel()

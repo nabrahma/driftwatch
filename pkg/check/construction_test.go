@@ -134,7 +134,7 @@ policy:
 	go func() { done <- c.Run(ctx) }()
 
 	require.Eventually(t, func() bool { return c.Status().Phase == check.PhaseDegraded },
-		5*time.Second, time.Millisecond, "an unreadable source should degrade the check")
+		eventuallyFor, eventuallyPoll, "an unreadable source should degrade the check")
 
 	assert.Contains(t, c.Status().Message, "capture.ndjson",
 		"the status says which dependency is missing")

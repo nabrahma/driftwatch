@@ -64,7 +64,7 @@ func publish(t *testing.T, c *check.Check, payloads ...string) {
 		s := c.Status()
 		return s.EventsApplied+s.EventsDropped+uint64(s.ReorderHeld) >=
 			before+uint64(len(payloads))
-	}, 5*time.Second, time.Millisecond, "the applier never drained the source")
+	}, eventuallyFor, eventuallyPoll, "the applier never drained the source")
 }
 
 func setEvent(pub string, seq uint64, key, value string) string {
@@ -111,6 +111,7 @@ func TestIngest_ASequenceGapMakesTheAffectedKeysSuspect(t *testing.T) {
 	// The jump to seq 40 waits for seq 2 before it counts as a gap: a hole is
 	// only genuinely missing once nothing is going to fill it.
 	clk.Advance(5 * time.Second)
+	waitForGap(t, c, 1)
 	_, err := c.SweepNow(context.Background())
 	require.NoError(t, err)
 
@@ -154,6 +155,7 @@ policy:
 	// genuinely a gap once nothing is going to fill it. Advancing past the
 	// reorder window and sweeping is what ends that wait.
 	clk.Advance(5 * time.Second)
+	waitForGap(t, c, 1)
 	_, err := c.SweepNow(context.Background())
 	require.NoError(t, err)
 
@@ -263,13 +265,13 @@ func TestIngest_ASourceGapSignalMarksEverythingSuspect(t *testing.T) {
 
 	src.publish(setEvent("replica-0", 1, "a", "v1"))
 	require.Eventually(t, func() bool { return c.Status().EventsApplied == 1 },
-		5*time.Second, time.Millisecond)
+		eventuallyFor, eventuallyPoll)
 	assertTrust(t, c, "a", oracle.TrustComplete)
 
 	src.signalGap()
 
 	require.Eventually(t, func() bool { return c.Status().GapSignals > 0 },
-		5*time.Second, time.Millisecond, "the gap signal never reached the pipeline")
+		eventuallyFor, eventuallyPoll, "the gap signal never reached the pipeline")
 	assertTrust(t, c, "a", oracle.TrustSuspect)
 }
 
@@ -319,7 +321,7 @@ func TestCheck_ConfirmDueDrainsTheQueue(t *testing.T) {
 	c.ConfirmDue(context.Background())
 
 	require.Eventually(t, func() bool { return len(c.Sweeper().Confirmed()) == 1 },
-		5*time.Second, time.Millisecond, "the candidate was never confirmed")
+		eventuallyFor, eventuallyPoll, "the candidate was never confirmed")
 }
 
 func TestCheck_ExposesTheEffectiveSpecAndOracle(t *testing.T) {
@@ -360,6 +362,25 @@ func assertTrust(t *testing.T, c *check.Check, key string, want oracle.TrustStat
 	entry, ok := c.Oracle().Get(key)
 	require.True(t, ok, "the oracle has no entry for %q", key)
 	assert.Equal(t, want, entry.Trust, msg...)
+}
+
+// waitForGap blocks until the check has registered at least n gap signals.
+//
+// Advancing the clock past the reorder window releases a held event into the
+// applier's channel; it does not mean the applier goroutine has run. A test
+// that advanced and then immediately swept would usually see the gap and
+// occasionally not — passing alone and failing under a full-package run, which
+// is the most expensive way for a test to be wrong.
+//
+// The clock's own documentation says this outright: "assert on a channel the
+// woken goroutine writes to, never on a variable it sets."
+func waitForGap(t *testing.T, c *check.Check, n uint64) {
+	t.Helper()
+
+	require.Eventually(t, func() bool { return c.Status().GapSignals >= n },
+		eventuallyFor, eventuallyPoll,
+		"the applier never registered %d gap signal(s); got %d",
+		n, c.Status().GapSignals)
 }
 
 // ---------------------------------------------------------------------------

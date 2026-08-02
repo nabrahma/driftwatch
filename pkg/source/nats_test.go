@@ -15,6 +15,16 @@ import (
 	"github.com/nabrahma/driftwatch/pkg/clock"
 )
 
+// How long an Eventually here waits, and how often it looks. See the same pair
+// in pkg/check/check_test.go for why they are not 5s and 1ms: coverage
+// instrumentation roughly halves throughput, and a 1ms poll contends with the
+// goroutine it is waiting on. Generous budgets cost nothing when the condition
+// is met promptly.
+const (
+	eventuallyFor  = 30 * time.Second
+	eventuallyPoll = 10 * time.Millisecond
+)
+
 // In-package because these drive the connect seam directly rather than standing
 // up a NATS server for behavior that is entirely about this source's own
 // logic. The one thing that genuinely needs a server — that core NATS drops for
@@ -183,7 +193,7 @@ func TestNATS_DeliversMessagesWithTheSubjectAsTopic(t *testing.T) {
 		conn.mu.Lock()
 		defer conn.mu.Unlock()
 		return len(conn.subs) == 2
-	}, 5*time.Second, time.Millisecond, "every configured subject is subscribed")
+	}, eventuallyFor, eventuallyPoll, "every configured subject is subscribed")
 
 	conn.deliver("events.orders", []byte(`{"seq":1}`))
 	conn.deliver("events.shipments", []byte(`{"seq":2}`))
@@ -216,7 +226,7 @@ func TestNATS_ClientSideDropsBecomeGapSignals(t *testing.T) {
 		conn.mu.Lock()
 		defer conn.mu.Unlock()
 		return len(conn.subs) == 1
-	}, 5*time.Second, time.Millisecond)
+	}, eventuallyFor, eventuallyPoll)
 
 	conn.setDropped(17)
 	conn.deliver("events", []byte(`{"seq":1}`))
@@ -247,14 +257,14 @@ func TestNATS_AFullIngestBufferDropsRatherThanBlocking(t *testing.T) {
 		conn.mu.Lock()
 		defer conn.mu.Unlock()
 		return len(conn.subs) == 1
-	}, 5*time.Second, time.Millisecond)
+	}, eventuallyFor, eventuallyPoll)
 
 	for i := 0; i < 10; i++ {
 		conn.deliver("events", []byte(`{"seq":`+strconv.Itoa(i)+`}`))
 	}
 
 	assert.Eventually(t, func() bool { return n.Stats().Dropped > 0 },
-		5*time.Second, time.Millisecond,
+		eventuallyFor, eventuallyPoll,
 		"a full ingest buffer drops and counts rather than stalling the subscription")
 
 	select {
@@ -278,12 +288,12 @@ func TestNATS_RefusesAnOversizedMessage(t *testing.T) {
 		conn.mu.Lock()
 		defer conn.mu.Unlock()
 		return len(conn.subs) == 1
-	}, 5*time.Second, time.Millisecond)
+	}, eventuallyFor, eventuallyPoll)
 
 	conn.deliver("events", []byte("a payload well beyond the limit"))
 
 	assert.Eventually(t, func() bool { return n.Stats().Dropped == 1 },
-		5*time.Second, time.Millisecond)
+		eventuallyFor, eventuallyPoll)
 	assert.Empty(t, out, "an oversized message is not delivered")
 
 	select {
@@ -325,7 +335,7 @@ func TestNATS_CloseIsIdempotentAndClosesTheConnection(t *testing.T) {
 	go func() { done <- n.Run(ctx, out) }()
 
 	assert.Eventually(t, func() bool { return n.Stats().Connected },
-		5*time.Second, time.Millisecond)
+		eventuallyFor, eventuallyPoll)
 
 	require.NoError(t, n.Close())
 	require.NoError(t, n.Close(), "Close is idempotent")

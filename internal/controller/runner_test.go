@@ -254,13 +254,31 @@ func TestRegistry_ConcurrentEnsuresNeverLeaveTwoRunners(t *testing.T) {
 
 	assert.Equal(t, 1, reg.Len())
 
-	running := 0
-	for _, stub := range reg.stubs() {
-		if stub.started.Load() > 0 && stub.finished.Load() == 0 {
-			running++
+	// Eventually, not immediately.
+	//
+	// Ensure returns once the replacement is installed and the old runner has
+	// been canceled; it does not wait for the canceled goroutine to observe
+	// that and set `finished`. Reading the flag on the next line therefore
+	// counts a runner that is already stopping as still running — which passes
+	// on an idle machine and fails under a loaded full-package run, for a
+	// reason that has nothing to do with the mutex being tested.
+	//
+	// The eventual form is not weaker here. The property is that the registry
+	// converges to exactly one live runner; if two genuinely survived, no
+	// amount of waiting would make this pass.
+	countRunning := func() int {
+		n := 0
+		for _, stub := range reg.stubs() {
+			if stub.started.Load() > 0 && stub.finished.Load() == 0 {
+				n++
+			}
 		}
+		return n
 	}
-	assert.Equal(t, 1, running, "exactly one runner is still executing")
+
+	require.Eventually(t, func() bool { return countRunning() == 1 },
+		30*time.Second, 10*time.Millisecond,
+		"exactly one runner should still be executing; %d are", countRunning())
 }
 
 // --- Deleting a check mid-bootstrap -----------------------------------------

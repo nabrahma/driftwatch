@@ -67,7 +67,7 @@ policy:
 
 	require.Eventually(t, func() bool {
 		return strings.Contains(c.Status().Message, "adopt scan failed")
-	}, 5*time.Second, time.Millisecond, "the first failure should be reported, not swallowed")
+	}, eventuallyFor, eventuallyPoll, "the first failure should be reported, not swallowed")
 
 	assert.Equal(t, check.PhaseBootstrapping, c.Status().Phase,
 		"a store that cannot be read yet is not a check that has failed")

@@ -6,6 +6,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -320,6 +321,18 @@ func TestGoldenOutput(t *testing.T) {
 
 // normalize removes the parts of the output that legitimately differ between
 // machines, so a golden file compares the shape rather than the environment.
+// timestampRE matches an RFC 3339 instant anywhere in a line.
+//
+// Needed for the per-finding "last event <ts>" line. The capture files in these
+// tests carry no `ts` field, so each event's timestamp is driftwatch's own
+// receive time — correct behavior, and a clock reading rather than a property
+// of the replay, exactly like the report's `started` line.
+//
+// Without this, two replays that reach identical conclusions differ whenever
+// the second one happens to start in the next wall-clock second, and a test
+// named IsDeterministic fails for being run at the wrong moment.
+var timestampRE = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z`)
+
 func normalize(s string) string {
 	lines := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
 
@@ -327,6 +340,8 @@ func normalize(s string) string {
 		switch {
 		case strings.HasPrefix(line, "started "):
 			lines[i] = "started    <timestamp>"
+		case strings.Contains(line, "last event "):
+			lines[i] = timestampRE.ReplaceAllString(line, "<timestamp>")
 		case strings.HasPrefix(line, "duration "):
 			lines[i] = "duration   <duration>"
 		case strings.HasPrefix(line, "  go  "):

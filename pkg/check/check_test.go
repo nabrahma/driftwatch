@@ -3,6 +3,7 @@ package check_test
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +33,68 @@ func TestMain(m *testing.M) {
 }
 
 func epoch() time.Time { return time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC) }
+
+// How long an Eventually in this package waits, and how often it looks.
+//
+// Both numbers were originally 5s and 1ms, and both were wrong in the same
+// direction. `go test -covermode=atomic ./...` adds an atomic increment to
+// every basic block and roughly halves throughput, and under that load
+// TestCheck_EndToEnd_InProcess failed at exactly 5.00s waiting for a
+// confirmation that takes microseconds when the machine is idle — a failure
+// that never reproduced when the test was re-run on its own, which is the
+// worst kind.
+//
+// A 1ms poll made it worse rather than better: the condition is read under the
+// sweeper's own mutex, so polling it a thousand times a second contends with
+// the goroutine being waited on.
+//
+// The generous budget costs nothing when the condition is met promptly, which
+// is the normal case. It is not a substitute for synchronization — nothing here
+// sleeps, and hack/verify-no-sleep.sh would catch it if it did.
+const (
+	eventuallyFor  = 30 * time.Second
+	eventuallyPoll = 10 * time.Millisecond
+)
+
+// advanceUntil steps the fake clock until cond holds, or fails the test.
+//
+// One step at a time, and that is the whole point. A fake tick carries the
+// deadline it was scheduled for, and a tick the consumer has not drained is
+// dropped rather than queued — the same behavior as time.Ticker. So a single
+// Advance of 3s across a 1s ticker fires three ticks, delivers whichever one or
+// two the runner goroutine happened to be ready for, and drops the rest. If the
+// only one delivered carries T+1s and the candidate is not due until T+2s,
+// nothing is ever confirmed and the test hangs on a condition that can no
+// longer become true.
+//
+// Stepping by exactly one interval means at most one tick is in flight at a
+// time, so a dropped tick is retried by the next step rather than lost.
+//
+// This is not a sleep and not a substitute for synchronization: the condition
+// is the thing being waited on, and the clock is fake, so the loop costs
+// nothing but scheduler turns.
+func advanceUntil(t *testing.T, clk clock.FakeClock, step time.Duration, cond func() bool, msg string) {
+	t.Helper()
+
+	const maxSteps = 60
+	for i := 0; i < maxSteps; i++ {
+		if cond() {
+			return
+		}
+		clk.Advance(step)
+
+		// A short poll after each step, so the runner goroutine gets a chance to
+		// act on the tick before the next one is fired at it.
+		deadline := time.Now().Add(200 * time.Millisecond)
+		for time.Now().Before(deadline) {
+			if cond() {
+				return
+			}
+			runtime.Gosched()
+		}
+	}
+	require.True(t, cond(), "%s (after %d steps of %s)", msg, maxSteps, step)
+}
 
 // inProcessSpec is the whole system with nothing outside the process: a memory
 // source, a memory target and a static settlement window.
@@ -73,6 +136,7 @@ policy:
 //	repair               the key is put back
 //	sweep                the finding is withdrawn and drift_resolved_total moves
 func TestCheck_EndToEnd_InProcess(t *testing.T) {
+	realStart := time.Now()
 	clk := clock.Fake(epoch())
 	reg := prometheus.NewRegistry()
 	met := metrics.New(metrics.Options{Registry: reg})
@@ -107,7 +171,7 @@ func TestCheck_EndToEnd_InProcess(t *testing.T) {
 	}
 
 	require.Eventually(t, func() bool { return c.EventsApplied() == uint64(blocks*2) },
-		5*time.Second, time.Millisecond, "the applier never drained the source")
+		eventuallyFor, eventuallyPoll, "the applier never drained the source")
 
 	status := c.Status()
 	assert.Equal(t, blocks, status.TrackedKeys)
@@ -161,10 +225,8 @@ func TestCheck_EndToEnd_InProcess(t *testing.T) {
 	// the sweeper's own confirm ticker inside Run, which is the path that runs
 	// in production. The candidate becomes a finding because a second read,
 	// taken a settlement window after the first, still disagreed.
-	clk.Advance(3 * time.Second)
-
-	require.Eventually(t, func() bool { return len(c.Sweeper().Confirmed()) == 1 },
-		5*time.Second, time.Millisecond,
+	advanceUntil(t, clk, time.Second,
+		func() bool { return len(c.Sweeper().Confirmed()) == 1 },
 		"the sweeper's confirm cycle never promoted the candidate")
 
 	confirmed := c.Sweeper().Confirmed()
@@ -220,8 +282,28 @@ func TestCheck_EndToEnd_InProcess(t *testing.T) {
 		t.Fatal("Run did not return after cancellation")
 	}
 
-	assert.Equal(t, 9*time.Second, clk.Now().Sub(epoch()),
-		"the whole lifecycle ran on the fake clock: nine simulated seconds, no real sleeps")
+	// Two numbers, and the second is the one that matters.
+	//
+	// This used to assert an exact simulated total, which reads like a strong
+	// check and is not: it would pass unchanged if the test slept ten real
+	// seconds, because it never looked at the wall clock at all. It also broke
+	// whenever the confirmation happened to need one fewer clock step than the
+	// last time, which is a property of the scheduler rather than of the code.
+	//
+	// What the comment above has always claimed is "no real sleeps", so that is
+	// what is asserted: several simulated seconds elapsed, and almost no real
+	// ones did.
+	simulated := clk.Now().Sub(epoch())
+	assert.GreaterOrEqual(t, simulated, 5*time.Second,
+		"the lifecycle needs a settlement window and a confirmation delay to "+
+			"have passed, and only %s of simulated time did", simulated)
+
+	elapsed := time.Since(realStart)
+	assert.Less(t, elapsed, 20*time.Second,
+		"the whole lifecycle ran on a fake clock, so %s of simulated time cost "+
+			"%s of real time; anything approaching the simulated figure means "+
+			"something is sleeping rather than advancing the clock",
+		simulated, elapsed)
 }
 
 // addEvent renders one `add` event in the canonical driftwatch JSON format.
