@@ -7,9 +7,18 @@ name: soak
 # willing to wait.
 on:
   schedule:
-    # 03:00 UTC. Late enough that a failure is waiting in the morning rather
-    # than interrupting the day.
-    - cron: "0 3 * * *"
+    # Weekly rather than nightly, at 03:00 UTC on Sunday.
+    #
+    # Nightly was the original choice and it is the wrong trade for a project
+    # this size: an hour of hosted-runner time every night, forever, for a run
+    # that is green essentially always and that nobody reads on a green morning.
+    # What it catches — slow leaks, goroutines accumulating one per sweep,
+    # detection that quietly stops after half an hour — does not appear or
+    # disappear within a day.
+    #
+    # Weekly keeps the signal and costs a seventh as much. Anything suspected
+    # sooner runs on demand below.
+    - cron: "0 3 * * 0"
   workflow_dispatch:
     inputs:
       duration:
