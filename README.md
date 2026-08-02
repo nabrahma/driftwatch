@@ -26,7 +26,7 @@ p99 nobody can explain.
 
 ---
 
-## Diftwatch watches the same stream. Independently.
+## Driftwatch watches the same stream, independently
 
 **It builds its own answer.** Same events, folded through a pure function. No
 shared memory, no shared connection, no shared code with the thing it checks.
@@ -70,10 +70,25 @@ HISTORY (last 2)
 Read the last line of the diagnosis again.
 
 Driftwatch doesn't just say the key is missing. It says it watched replica-0's
-sequence from 8801 to 8847 without a gap — so *its own* view was complete. That
-is what makes the store the party that lost something.
+sequence from 8801 to 8847 without a gap, so *its own* view was complete. That is
+what makes the store the party that lost something.
 
 And it hands you `seq 8847` to grep for.
+
+---
+
+## Watch it happen
+
+<!-- SCREENSHOT SLOT
+     Drop the image at docs/evidence/dashboard-drift-detected.png and delete
+     these comment markers. Capture instructions are in docs/OPERATIONS.md.
+-->
+
+![The driftwatch dashboard during an injected fault](docs/evidence/dashboard-drift-detected.png)
+
+Row one answers the only question that matters first: can driftwatch see enough
+of the keyspace for its verdict to mean anything? Coverage leads, because zero
+divergence at 3% coverage is a statement about 3% of your store.
 
 ---
 
@@ -89,8 +104,8 @@ open http://localhost:3000
 ```
 
 392 keys deleted behind driftwatch's back. 360 confirmed in seven seconds. Back
-to zero over the next three minutes as the stream rewrote them, coverage never
-dropping below 0.997.
+to zero over the next three minutes as the stream rewrote them, with coverage
+never dropping below 0.997.
 
 That's a [real capture](docs/evidence/demo-drift-detected-and-resolved.txt), not
 an illustration.
@@ -110,15 +125,15 @@ A **settlement window** derived from measured propagation lag, not guessed.
 finding raised against an expectation that has since changed is withdrawn.
 **Trust states**, so events driftwatch itself missed become *suspect*, never
 drift. **Eviction awareness**, so a full store isn't a broken one. And
-**bootstrap honesty** — it reports partial coverage rather than pretending.
+**bootstrap honesty**, so it reports partial coverage rather than pretending.
 
 The fourth one is the hard one. When driftwatch loses events, the store looks
 wrong and *is right*. Saying so costs coverage and takes discipline.
 
-So it's tested directly: one scenario severs driftwatch's own subscription and
+So it's tested directly. One scenario severs driftwatch's own subscription and
 asserts `suspectDivergentKeys > 0` while `divergentKeys == 0`.
 
-[The full argument →](docs/CORRECTNESS.md)
+[The full argument](docs/CORRECTNESS.md)
 
 ---
 
@@ -131,11 +146,11 @@ keys, a fault injected at the halfway mark and resolved one minute later.
 
 **13 goroutines** at the start. 13 at the end.
 
-**1.03 microseconds** to mark a million keys suspect — because the oracle uses a
+**1.03 microseconds** to mark a million keys suspect, because the oracle uses a
 generation counter instead of touching them.
 
-AMD Ryzen 7 6800HS. [Raw output →](docs/benchmarks/) ·
-[Soak capture →](docs/evidence/S2-soak-60min-zero-drift.txt)
+AMD Ryzen 7 6800HS. [Raw output](docs/benchmarks/) ·
+[Soak capture](docs/evidence/S2-soak-60min-zero-drift.txt)
 
 ---
 
@@ -162,9 +177,9 @@ spec:
       keyPattern: "block:*"
 ```
 
-Everything else has a default, and the webhook writes them back — so
-`kubectl get driftcheck kvcache -o yaml` shows the whole configuration, not the
-fourteen lines you typed.
+Everything else has a default, and the webhook writes them back, so
+`kubectl get driftcheck kvcache -o yaml` shows the whole configuration rather
+than the fourteen lines you typed.
 
 > Use fully-qualified service names. Endpoints resolve from the manager's
 > namespace, and getting it wrong fails as a DNS timeout rather than an error.
@@ -176,18 +191,18 @@ fourteen lines you typed.
 
 **It won't repair anything.** Auto-repair needs domain knowledge it doesn't have.
 
-**It can't check itself.** If its own subscription is lossy it says so — coverage
-drops, findings become suspect — but it cannot tell "the store is wrong" from "I
-missed the event that would have made it right." That distinction is the entire
-reason the suspect category exists.
+**It can't check itself.** If its own subscription is lossy it says so. Coverage
+drops and findings become suspect. But it cannot tell "the store is wrong" from
+"I missed the event that would have made it right." That distinction is the
+entire reason the suspect category exists.
 
-**Memory is bounded by key count, not bytes.** ~656 MiB per million keys with one
-event of history; roughly 16 KiB per key with a full ring. Size against your ring
-depth. ([G-001](docs/KNOWN_GAPS.md))
+**Memory is bounded by key count, not bytes.** Around 656 MiB per million keys
+with one event of history, and roughly 16 KiB per key with a full ring. Size
+against your ring depth. ([G-001](docs/KNOWN_GAPS.md))
 
 **Redis only.** Sentinel and cluster are routed but untested.
 
-**`make e2e` is not green.** 23 of 27 specs pass; four have committed but
+**`make e2e` is not green.** 23 of 27 specs pass. Four have committed but
 unverified fixes. Every other test level passes. ([G-003](docs/KNOWN_GAPS.md))
 
 ---
@@ -204,7 +219,7 @@ build tag, because a slow test command stops being run.
 **26 findings** are written up in [DISCOVERIES.md](docs/DISCOVERIES.md), each
 with a reproduction, an evidence file and a regression test. A sequence number
 above 2^53 silently corrupted by any float64 decoder. Discarding timed-out probes
-shrinking the settlement window 12× — during an outage, exactly when it needs to
+shrinking the settlement window 12x, during an outage, exactly when it needs to
 widen. A SUB socket whose publisher is replaced never reconnecting, while
 reporting itself healthy.
 

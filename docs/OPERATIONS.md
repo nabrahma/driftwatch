@@ -186,3 +186,85 @@ the keyspace grows.
 **Fix:** raise `sweepInterval` to something the sweep can finish inside, raise
 `target.redis.readBatchSize` so it finishes faster, or accept that this keyspace
 has outgrown one check and split it by key pattern.
+
+---
+
+## Capturing the dashboard screenshot
+
+The README shows the dashboard during an injected fault. Here is how that image
+is produced, so it can be refreshed when the panels change.
+
+### 1. Bring the stack up
+
+```sh
+make demo
+```
+
+Six containers: Redis, a publisher, a materializer, driftwatch, Prometheus and
+Grafana. The command waits until all of them are healthy, then prints the URLs.
+
+### 2. Let the oracle fill
+
+Wait about 60 seconds. driftwatch has to see each key at least once before its
+expectation means anything, and a screenshot taken too early shows a coverage
+ratio still climbing rather than a steady state.
+
+Open <http://localhost:3000>. Grafana is configured for anonymous admin with the
+login form disabled, so it opens directly on the dashboard. No credentials.
+
+Wait until row one shows coverage above 0.99 and divergent keys at zero. That is
+the "before" state, and it is worth confirming rather than assuming: a
+screenshot of drift against a half-filled oracle proves nothing.
+
+### 3. Break it
+
+```sh
+make demo-inject-drift
+```
+
+This deletes 400 keys straight out of Redis, behind driftwatch's back. Pass a
+different count as the first argument if you want a larger fault.
+
+### 4. Take the shot within about 90 seconds
+
+The drift is real and it heals. The publisher keeps running, so every deleted
+key is rewritten correctly within a few minutes and the count falls back to
+zero. That recovery is a feature and it is also a deadline for the screenshot.
+
+What the image should show:
+
+- **Row 1, "Verdict"** is the one that matters. Coverage ratio high, divergent
+  keys visibly risen. This row leads the dashboard because a divergence count
+  means nothing without the coverage it was measured over.
+- Enough of **row 2** ("Sequence integrity") to show gaps at zero. That is what
+  says the drift is the store's fault and not driftwatch's, which is the whole
+  distinction the tool exists to draw.
+
+Capture the browser viewport, not the whole screen. Two rows is enough; the
+remaining three are detail and shrink the readable part of the image.
+
+### 5. Save it
+
+```text
+docs/evidence/dashboard-drift-detected.png
+```
+
+The README already references that exact path. Once the file exists, remove the
+`SCREENSHOT SLOT` comment markers around the image in README.md.
+
+Add a row to `docs/evidence/README.md` naming what the image shows and the
+command that produced it, the same as every other artifact in that directory.
+
+### 6. Tear it down
+
+```sh
+make demo-down
+```
+
+Removes the containers and their volumes.
+
+### If the graphs stay empty
+
+Check that Prometheus is scraping: <http://localhost:9090/targets> should show
+the driftwatch target as UP. If it is not, `make demo-logs` will show why.
+Raw metrics are at <http://localhost:9091/metrics>.
