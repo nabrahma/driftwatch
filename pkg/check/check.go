@@ -1833,6 +1833,32 @@ func (c *Check) steadyPhase() (phase Phase, message string) {
 		return PhaseAwaitingSnapshot,
 			"no key is asserted on until a publisher completes a snapshot cycle"
 	}
+
+	// A source that is currently disconnected is not a steady state, even
+	// though it is not a failure either.
+	//
+	// sourceFailed is set only when Source.Run *returns* an error, and Run is
+	// designed never to return one: a transport error is retried forever,
+	// because an endpoint that is briefly unreachable is not a reason to stop
+	// auditing. The consequence is that a check whose subscription has been
+	// down for minutes — reconnecting, failing, backing off — reported
+	// Watching, which is the word an operator reads first in
+	// `kubectl get driftcheck`.
+	//
+	// And it looks clean rather than broken, for the same reason D-025 does. No
+	// events arrive, so the oracle stops changing; nothing driftwatch can see
+	// writes to the store, so it stops changing too; the two frozen answers
+	// agree and drift reads zero. The SourceConnected condition was already
+	// correct and is not what anyone looks at.
+	//
+	// Degraded rather than Failed, and not sticky: this clears by itself the
+	// moment a frame arrives.
+	if !c.sourceConnected() {
+		return PhaseDegraded,
+			"the source is not currently subscribed; no events are arriving, so " +
+				"a clean sweep says nothing about the store"
+	}
+
 	if !c.saturated.Load() && !c.sourceFailed.Load() {
 		return PhaseWatching, "steady state"
 	}
@@ -1844,6 +1870,14 @@ func (c *Check) steadyPhase() (phase Phase, message string) {
 		return PhaseDegraded, c.sourceFailure
 	}
 	return PhaseDegraded, c.saturation
+}
+
+// sourceConnected reports whether the transport currently has a subscription.
+func (c *Check) sourceConnected() bool {
+	if c.src == nil {
+		return false
+	}
+	return c.src.Stats().Connected
 }
 
 func (c *Check) phaseIs(p Phase) bool {
