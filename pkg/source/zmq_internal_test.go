@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -378,6 +379,27 @@ func TestZMQ_ASilentSocketEndsTheSessionRatherThanBlockingForever(t *testing.T) 
 		"the socket went silent and the session never ended; only %d dial(s) "+
 			"happened, so driftwatch would have stayed connected to a dead "+
 			"publisher forever", dials.Load())
+
+	// Every ended session must take its receive goroutine with it.
+	//
+	// This is the half the first version of the idle deadline got wrong, and
+	// goleak would not have caught it: the goroutines do eventually exit, when
+	// the check stops. What they do not do is exit per session, so a check
+	// reconnecting once a minute accumulates one an hour, for as long as it
+	// runs — and goleak only looks at the end.
+	//
+	// The cause was that the receiver selected on the *session* context while
+	// the deadline cancels only the *socket* context, so it parked forever on a
+	// send nobody was going to read.
+	before := runtime.NumGoroutine()
+	require.Eventually(t, func() bool { return dials.Load() >= int64(before)+20 },
+		60*time.Second, 10*time.Millisecond,
+		"not enough reconnects to make a leak visible")
+
+	after := runtime.NumGoroutine()
+	assert.Less(t, after, before+10,
+		"goroutines went from %d to %d across at least 20 reconnects: each "+
+			"ended session is leaving its receiver behind", before, after)
 
 	// Every one of those sessions is a window of possible loss, and each has to
 	// be reported as such — a reconnect that says nothing is how the pipeline

@@ -359,8 +359,27 @@ func addEventJSON(pub string, seq uint64, block, member string) string {
 func assertTrust(t *testing.T, c *check.Check, key string, want oracle.TrustState, msg ...any) {
 	t.Helper()
 
+	// The entry has to be waited for, not assumed.
+	//
+	// Every caller reaches here after publishing, and an event becomes an
+	// oracle entry on the applier's goroutine. Reading immediately is a race
+	// the test wins on an idle machine and loses on a loaded one — which is
+	// what a two-core CI runner is.
+	//
+	// waitForGap is not a substitute, and that was the actual bug: applyOrdered
+	// calls onGap *before* fold, so the gap counter this package waits on is
+	// incremented strictly earlier than the entry it is being used to wait for.
+	// The window is nanoseconds locally and a scheduling quantum under -race on
+	// two cores, where it presented as "the oracle has no entry for block:1" —
+	// which reads as the pipeline never recording the key at all.
+	require.Eventually(t, func() bool {
+		_, ok := c.Oracle().Get(key)
+		return ok
+	}, eventuallyFor, eventuallyPoll,
+		"the oracle never recorded an entry for %q", key)
+
 	entry, ok := c.Oracle().Get(key)
-	require.True(t, ok, "the oracle has no entry for %q", key)
+	require.True(t, ok)
 	assert.Equal(t, want, entry.Trust, msg...)
 }
 

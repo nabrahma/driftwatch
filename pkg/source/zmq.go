@@ -311,7 +311,7 @@ func (z *ZMQSource) session(ctx context.Context, out chan<- RawMessage) error {
 	}
 	z.c.connected(true)
 
-	return z.receive(ctx, cancel, sock, out)
+	return z.receive(ctx, sockCtx, cancel, sock, out)
 }
 
 // subscribe sets the topic prefixes.
@@ -380,6 +380,7 @@ func (z *ZMQSource) connect(ctx context.Context, sock zmqSocket) error {
 // it is still parked would be a leak, and goleak would say so.
 func (z *ZMQSource) receive(
 	ctx context.Context,
+	sockCtx context.Context,
 	releaseSocket context.CancelFunc,
 	sock zmqSocket,
 	out chan<- RawMessage,
@@ -389,7 +390,26 @@ func (z *ZMQSource) receive(
 		err error
 	}
 
-	frames := make(chan recvResult)
+	// Buffered, and the receiver watches the *socket's* context rather than the
+	// session's. Both halves of that matter, and getting them wrong leaks one
+	// goroutine per reconnect.
+	//
+	// A session used to end only when Recv returned an error, which meant the
+	// main loop had already taken that error off the channel and the goroutine
+	// had returned. The idle deadline introduced a second way out, and it ends
+	// the session while this goroutine is still mid-flight: releaseSocket
+	// unblocks Recv, Recv returns an error, and the goroutine tries to hand it
+	// over — to a main loop that is no longer reading, having moved on to
+	// waitForReceiver.
+	//
+	// Selecting on the session context does not help, because that context is
+	// still live; only the socket's was canceled. So the goroutine parks on the
+	// send forever, and the check accumulates one per reconnect for as long as
+	// it runs.
+	//
+	// sockCtx is the signal that actually corresponds to "this socket is done",
+	// and the buffer means the final result never needs a reader at all.
+	frames := make(chan recvResult, 1)
 	done := make(chan struct{})
 
 	go func() {
@@ -401,7 +421,7 @@ func (z *ZMQSource) receive(
 				if err != nil {
 					return
 				}
-			case <-ctx.Done():
+			case <-sockCtx.Done():
 				return
 			}
 		}

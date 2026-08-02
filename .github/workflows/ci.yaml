@@ -50,6 +50,34 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      # Installed once, here, rather than inline at the first step that happens
+      # to need it. hack/verify-codegen.sh runs three steps below and looks for
+      # controller-gen in $(go env GOPATH)/bin and then on PATH; neither existed,
+      # because the install was sitting further down next to verify-crd-docs.sh.
+      #
+      # go install writes to $(go env GOPATH)/bin, which is not on a runner's
+      # PATH by default. Adding it to $GITHUB_PATH is what makes the binary
+      # visible to every later step rather than only to the shell that ran the
+      # install.
+      - name: install code-generation tools
+        run: |
+          go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.17.2
+          echo "$(go env GOPATH)/bin" >>"$GITHUB_PATH"
+
+      # Eight of thirteen scripts were committed without it, because git records
+      # the mode and Windows does not have one to record. Every step that runs
+      # ./hack/something.sh fails with "Permission denied" — a message that says
+      # nothing about the cause and sends people looking at the script.
+      - name: hack scripts are executable
+        run: |
+          bad=$(git ls-files -s hack/*.sh | grep -v '^100755' || true)
+          if [ -n "$bad" ]; then
+            echo "$bad"
+            echo '::error::the scripts above lack the executable bit; run: git update-index --chmod=+x <file>'
+            exit 1
+          fi
+          echo 'all hack scripts are executable'
+
       - name: verify no time.Sleep in tests
         run: ./hack/verify-no-sleep.sh
 
@@ -64,9 +92,7 @@ jobs:
       # without a doc comment is one an operator has to read Go source to
       # configure, and nobody would notice until they tried.
       - name: verify CRD documentation and generated manifests
-        run: |
-          go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.17.2
-          ./hack/verify-crd-docs.sh
+        run: ./hack/verify-crd-docs.sh
 
       - name: verify the Helm chart carries the generated CRD and RBAC
         run: |
@@ -243,10 +269,22 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
+      # setup-envtest is installed into $(go env GOPATH)/bin, which is not on a
+      # runner's PATH. The command substitution below therefore ran a binary
+      # that could not be found, produced an empty string, and exported an empty
+      # KUBEBUILDER_ASSETS — which the suite reported as "no envtest binaries
+      # under ~/.local/share/kubebuilder-envtest/k8s". An empty assignment is
+      # not an error, so nothing failed until the tests did.
+      #
+      # The absolute path is used rather than relying on PATH, and the result is
+      # checked, so a download failure fails this step instead of the suite.
       - name: envtest binaries
         run: |
           go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.20
-          echo "KUBEBUILDER_ASSETS=$(setup-envtest use 1.31.0 -p path)" >>"$GITHUB_ENV"
+          assets="$("$(go env GOPATH)/bin/setup-envtest" use 1.31.0 -p path)"
+          test -n "$assets" || { echo "::error::setup-envtest returned no path"; exit 1; }
+          test -d "$assets" || { echo "::error::$assets is not a directory"; exit 1; }
+          echo "KUBEBUILDER_ASSETS=$assets" >>"$GITHUB_ENV"
 
       - name: controller and CRD suites
         run: go test -race -count=1 -timeout=10m ./api/... ./internal/controller/...
