@@ -79,15 +79,13 @@ And it hands you `seq 8847` to grep for.
 
 ## Watch it happen
 
-<!-- SCREENSHOT SLOT
-     Drop the image at docs/evidence/dashboard-drift-detected.png and delete
-     these comment markers. Capture instructions are in docs/OPERATIONS.md.
--->
+![The driftwatch dashboard during an injected fault: 350 confirmed divergent keys at 100% coverage](docs/evidence/dashboard-drift-detected.png)
 
-![The driftwatch dashboard during an injected fault](docs/evidence/dashboard-drift-detected.png)
+350 keys deleted out of Redis behind driftwatch's back. Confirmed, categorized,
+and counted, at 100% coverage.
 
-Row one answers the only question that matters first: can driftwatch see enough
-of the keyspace for its verdict to mean anything? Coverage leads, because zero
+Those two numbers belong together, which is why they sit side by side. A
+divergence count means nothing without the coverage it was measured over. Zero
 divergence at 3% coverage is a statement about 3% of your store.
 
 ---

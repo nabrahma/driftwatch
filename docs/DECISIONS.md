@@ -5,13 +5,13 @@ taken while blocked (PRD §1.4) is recorded here. Newest last.
 
 Each record states the **context** that forced a choice, the **options
 considered** with their real trade-offs, the **decision**, and the
-**consequences** — including the ones we would rather not have.
+**consequences**, including the ones we would rather not have.
 
 Status values: `Accepted`, `Superseded by ADR-NNNN`, `Reversed`.
 
 ---
 
-## ADR-0001 — ZeroMQ binding: pure Go, not cgo
+## ADR-0001, ZeroMQ binding: pure Go, not cgo
 
 **Status:** Accepted
 **Date:** 2026-07-30
@@ -40,11 +40,11 @@ propagates into every part of the delivery story:
   symbol error rather than a build failure.
 - **The race detector.** `go test -race` needs cgo. With a cgo dependency in the
   build graph, a broken or mismatched C toolchain breaks the *test* suite too,
-  not just the build — and the test suite is this project's primary output.
+  not just the build, and the test suite is this project's primary output.
 
 ### Options considered
 
-**Option A — `github.com/pebbe/zmq4` (cgo binding to libzmq).**
+**Option A, `github.com/pebbe/zmq4` (cgo binding to libzmq).**
 
 - *For:* wraps the reference implementation, so wire compatibility with other
   libzmq peers is not in question. Complete socket-option surface. Long track
@@ -55,7 +55,7 @@ propagates into every part of the delivery story:
   table without vendoring shared objects. Static linking against libzmq is
   possible but adds a build step that has to be maintained per platform.
 
-**Option B — `github.com/go-zeromq/zmq4` (pure Go ZMTP implementation).**
+**Option B, `github.com/go-zeromq/zmq4` (pure Go ZMTP implementation).**
 
 - *For:* `CGO_ENABLED=0` throughout. `GOOS`/`GOARCH` cross-compilation is a
   single `go build`. `FROM scratch` and distroless images work with no runtime
@@ -66,7 +66,7 @@ propagates into every part of the delivery story:
   A protocol-level incompatibility would be discovered late and would be
   expensive.
 
-**Option C — do not support ZeroMQ; ship NATS, memory and file sources only.**
+**Option C, do not support ZeroMQ; ship NATS, memory and file sources only.**
 
 - *For:* removes the problem entirely. NATS has a good pure-Go client.
 - *Against:* abandons the motivating case (§2.4). The systems this tool exists
@@ -77,8 +77,8 @@ propagates into every part of the delivery story:
 
 **Use `github.com/go-zeromq/zmq4` (Option B).**
 
-The properties Option B buys — static binaries, trivial cross-compilation,
-distroless images, no C toolchain in CI, `-race` that depends only on Go — are
+The properties Option B buys, static binaries, trivial cross-compilation,
+distroless images, no C toolchain in CI, `-race` that depends only on Go, are
 exactly the properties that make the rest of this project's delivery plan
 (§14 Kind e2e, §17 CI under ten minutes, §17.4 multi-arch release) tractable.
 Option A trades all of them for a compatibility guarantee.
@@ -88,7 +88,7 @@ another way: by **testing it**. So the decision is conditional on a mitigation
 that is not optional.
 
 **Required mitigation (binding):** §16.6 mandates an interop test in which a
-real `pyzmq` publisher — libzmq-backed — feeds the Go subscriber, run in CI
+real `pyzmq` publisher, libzmq-backed, feeds the Go subscriber, run in CI
 under the `interop` build tag. Wire compatibility is asserted by a test on every
 push, not assumed from a README. The areas most likely to break are
 subscription-prefix filtering and multipart framing conventions; the interop
@@ -98,7 +98,7 @@ test must exercise both explicitly. If a gap is found, it goes in
 **Also binding:** ZMQ PUB sockets drop messages for slow subscribers once the
 high-water mark is reached, and they do it silently. The SUB receive HWM must be
 set explicitly rather than left at the library default, and driftwatch's own
-ingest buffer must be **larger** than the socket HWM — so that when a drop
+ingest buffer must be **larger** than the socket HWM, so that when a drop
 happens it happens in driftwatch's own countable buffer
 (`driftwatch_ingest_dropped_total`) rather than invisibly inside the socket.
 A detector that silently loses its own input is worse than no detector, because
@@ -122,7 +122,7 @@ it reports the target as correct when it has simply stopped looking.
 
 ---
 
-## ADR-0002 — Redis client: `go-redis/v9`
+## ADR-0002, Redis client: `go-redis/v9`
 
 **Status:** Accepted
 **Date:** 2026-07-30
@@ -141,26 +141,26 @@ abandoned mid-flight when a `DriftCheck` is deleted (§S9).
 
 ### Options considered
 
-**Option A — `github.com/redis/go-redis/v9`.** Context-aware across the whole
+**Option A, `github.com/redis/go-redis/v9`.** Context-aware across the whole
 API. Standalone, Sentinel and Cluster clients share one interface. `Pipeline`
 and a `SCAN` iterator are first-class. Widely deployed, actively maintained,
 and the client most Kubernetes-adjacent Go projects already use.
 
-**Option B — `github.com/redis/rueidis`.** Measurably faster: RESP3, auto
+**Option B, `github.com/redis/rueidis`.** Measurably faster: RESP3, auto
 request pipelining, and opt-in client-side caching. The performance headroom is
 attractive against the §19.1 sweep targets.
 
 Its headline feature is disqualifying here, though. **Client-side caching is
 precisely wrong for driftwatch.** The tool's entire job is to report what the
 target store *actually contains right now*. A client that can serve a read from
-a local cache — even a correctly invalidated one — introduces a second possible
+a local cache, even a correctly invalidated one, introduces a second possible
 explanation for every finding, and turns "the target disagrees" into "the target
 disagrees, or my client's cache is stale." That is exactly the class of doubt
 driftwatch exists to eliminate. The feature can be left off, but building a
 correctness tool on a client whose default posture is caching means every future
 reader has to verify it is still off.
 
-**Option C — `github.com/gomodule/redigo`.** Stable and minimal, but the
+**Option C, `github.com/gomodule/redigo`.** Stable and minimal, but the
 connection-pool API predates `context.Context` in places, and Cluster support is
 not built in. Cancellation would have to be bolted on.
 
@@ -186,7 +186,7 @@ Usage rules that follow from this and are binding on `pkg/target`:
 ### Consequences
 
 - We give up rueidis's throughput. If a benchmark (§16.8) later shows the client
-  is the bottleneck in `BenchmarkFullSweep1M`, that is grounds for a new ADR —
+  is the bottleneck in `BenchmarkFullSweep1M`. That is grounds for a new ADR, 
   with the measurement attached, and with client-side caching explicitly off.
 - `INFO` output differs between Redis 6 and 7. The parser must be tested against
   both (§20 Phase 2 exit criteria) rather than written against whichever version
@@ -199,7 +199,7 @@ Usage rules that follow from this and are binding on `pkg/target`:
 
 ---
 
-## ADR-0003 — Kubernetes: kubebuilder and controller-runtime
+## ADR-0003, Kubernetes: kubebuilder and controller-runtime
 
 **Status:** Accepted
 **Date:** 2026-07-30
@@ -216,20 +216,20 @@ RBAC manifests, a defaulting/validating webhook (§10.2), leader election
 
 ### Options considered
 
-**Option A — kubebuilder v4 with `sigs.k8s.io/controller-runtime`.** The
+**Option A, kubebuilder v4 with `sigs.k8s.io/controller-runtime`.** The
 scaffolding, layout and code generation that the Kubernetes project itself uses.
 `controller-gen` produces deepcopy functions, CRD schemas and RBAC from Go
 markers, so the types stay the single source of truth. `envtest` runs a real
 API server and etcd without a cluster, which keeps controller tests in the
 seconds range and off the e2e critical path (§23 A14).
 
-**Option B — Operator SDK.** Builds on controller-runtime and adds Ansible/Helm
+**Option B, Operator SDK.** Builds on controller-runtime and adds Ansible/Helm
 operator modes plus OLM packaging. For a Go-only operator it is a layer over
 Option A that adds surface without adding capability here.
 
-**Option C — hand-written informers on `client-go`.** Maximum control and one
+**Option C, hand-written informers on `client-go`.** Maximum control and one
 fewer framework to learn. It also means writing workqueue plumbing, rate
-limiting, leader election and status patching by hand — all solved problems, all
+limiting, leader election and status patching by hand, all solved problems, all
 easy to get subtly wrong, and none of them the interesting part of this project.
 The interesting part is §5.
 
@@ -240,7 +240,7 @@ The interesting part is §5.
 
 The layout it produces (`api/v1alpha1`, `internal/controller`, `config/`) is the
 layout in PRD §7, and it is the layout a Kubernetes reviewer can navigate
-without being told where anything is — which is an explicit goal (§1.5).
+without being told where anything is, which is an explicit goal (§1.5).
 
 The envtest/Kind split matters as much as the framework choice. envtest gives a
 real API server for reconciliation, watch and status semantics in seconds. Kind
@@ -265,7 +265,7 @@ actually applied, and the full ZMQ → materializer → Redis → driftwatch pat
 
 ---
 
-## ADR-0004 — The dependency list is closed
+## ADR-0004, The dependency list is closed
 
 **Status:** Accepted
 **Date:** 2026-07-30
@@ -288,14 +288,14 @@ mode visible at the point it would happen.
 
 ### Options considered
 
-**Option A — closed list; additions require an ADR.** Every addition is a
+**Option A, closed list; additions require an ADR.** Every addition is a
 recorded, argued decision. Costs a few minutes when the addition is obvious.
 
-**Option B — open list; review dependencies periodically.** Lower friction.
+**Option B, open list; review dependencies periodically.** Lower friction.
 In practice periodic review does not happen, and the graph is discovered at
 audit time.
 
-**Option C — vendor everything.** Reproducibility and offline builds, at the
+**Option C, vendor everything.** Reproducibility and offline builds, at the
 cost of a large repository diff on every bump, which obscures review.
 
 ### Decision
@@ -307,14 +307,14 @@ pulls in transitively.
 
 The rejections in §8.4 are adopted as part of this decision:
 
-- **`github.com/pebbe/zmq4`** — cgo. See ADR-0001.
-- **Any ORM or query builder** — there is no SQL in this project.
-- **`viper`** — configuration arrives from three places: CLI flags, environment,
+- **`github.com/pebbe/zmq4`**: cgo. See ADR-0001.
+- **Any ORM or query builder**: there is no SQL in this project.
+- **`viper`**: configuration arrives from three places: CLI flags, environment,
   and the `DriftCheck` spec. Those precedences are few enough to write
   explicitly, and writing them explicitly means an operator can read the code
   and know which one wins. Viper's implicit precedence is a debugging cost paid
   later in exchange for setup convenience now.
-- **OpenTelemetry tracing** — tracing follows requests; driftwatch's subject is
+- **OpenTelemetry tracing**: tracing follows requests; driftwatch's subject is
   background state convergence (§2.3). Prometheus metrics and the per-key event
   ring answer the questions this tool exists to answer. Adding OTel is scope
   creep. It should be listed in `docs/KNOWN_GAPS.md` as a possible future
@@ -331,7 +331,7 @@ The rejections in §8.4 are adopted as part of this decision:
 
 ---
 
-## ADR-0005 — Go 1.23 minimum, `CGO_ENABLED=0`, distroless runtime
+## ADR-0005, Go 1.23 minimum, `CGO_ENABLED=0`, distroless runtime
 
 **Status:** Accepted
 **Date:** 2026-07-30
@@ -349,9 +349,9 @@ built `FROM`.
 **Minimum Go version.** Go 1.22 is more conservative and broadens the range of
 distribution toolchains that can build the project. Go 1.23 is required by two
 things the design actually uses: range-over-func iterators, which let the oracle
-expose iteration over settled keys without materializing a slice per sweep — a
+expose iteration over settled keys without materializing a slice per sweep, a
 slice of a million keys per sweep is an allocation the §19 budget does not have
-— and the `slices`/`maps` stdlib packages, which remove a category of
+,  and the `slices`/`maps` stdlib packages, which remove a category of
 hand-written helpers. A newer minimum was rejected because nothing needs it and
 each bump narrows who can build the project.
 
@@ -374,7 +374,7 @@ does not need.
 
 ### Decision
 
-- **Go 1.23 minimum**, declared as `go 1.23.0` in `go.mod`. CI builds on the
+- **Go 1.23 minimum**: declared as `go 1.23.0` in `go.mod`. CI builds on the
   declared floor so that the minimum is a tested claim rather than an assertion.
 - **`CGO_ENABLED=0` for every build.** The Makefile exports it globally; only
   the `test` target overrides it, because `-race` requires cgo.
@@ -399,7 +399,7 @@ does not need.
 
 ---
 
-## ADR-0006 — Project name and Go module path
+## ADR-0006, Project name and Go module path
 
 **Status:** Accepted
 **Date:** 2026-07-30
@@ -416,17 +416,17 @@ as `!d`, so the module path and the repository path should agree exactly.
 
 ### Options considered
 
-**Option A — module path `github.com/nabrahma/driftwatch`, repository renamed to
+**Option A, module path `github.com/nabrahma/driftwatch`, repository renamed to
 lowercase.** Matches Go convention (module paths are lowercase by near-universal
 practice), matches how the PRD spells the name throughout, and produces import
 lines that read naturally. Requires renaming the GitHub repository; GitHub keeps
 a redirect from the old name.
 
-**Option B — module path `github.com/nabrahma/Driftwatch`.** Matches the
+**Option B, module path `github.com/nabrahma/Driftwatch`.** Matches the
 repository exactly as it exists today with no action required. Every import line
 in the project then carries a capital letter, and the proxy path is `!driftwatch`.
 
-**Option C — a different name from §25.4's alternatives (`skew`, `driftguard`,
+**Option C, a different name from §25.4's alternatives (`skew`, `driftguard`,
 `statediff`).** Only worth considering if `driftwatch` were taken or wrong.
 It is neither.
 
@@ -436,7 +436,7 @@ It is neither.
 and the GitHub repository should be renamed to `driftwatch` to match.**
 
 The cost of the rename is one click plus a GitHub-maintained redirect, and it is
-at its lowest right now — Phase 0, before any published import path exists.
+at its lowest right now, Phase 0, before any published import path exists.
 The cost of Option B is a capital letter in every import statement in the
 repository, permanently, read by exactly the audience §1.5 is written for.
 
@@ -451,7 +451,7 @@ repository, permanently, read by exactly the audience §1.5 is written for.
 
 ---
 
-## ADR-0007 — Phase 0 scaffold: what is stubbed and what is deferred
+## ADR-0007, Phase 0 scaffold: what is stubbed and what is deferred
 
 **Status:** Accepted
 **Date:** 2026-07-30
@@ -473,16 +473,16 @@ Phase 0's exit criteria require CI green on the first push.
 
 ### Options considered
 
-**Option A — create every file in §7 now, with placeholder content.** The tree
+**Option A, create every file in §7 now, with placeholder content.** The tree
 matches the PRD exactly. It also means a `Dockerfile` that fails to build and a
 dashboard JSON that is a stub, both of which read as broken rather than as
 pending, and neither of which any check would catch.
 
-**Option B — create only what Phase 0 builds; add the rest in the phase that
+**Option B, create only what Phase 0 builds; add the rest in the phase that
 fills it.** Nothing in the tree is misleading. The tree does not match §7 until
-Phase 8, and the difference has to be recorded — which is what this ADR is.
+Phase 8, and the difference has to be recorded, which is what this ADR is.
 
-**Option C — create every file, and add a CI check that fails on placeholders.**
+**Option C, create every file, and add a CI check that fails on placeholders.**
 The check is itself work that Phase 0 does not need, and it exists only to guard
 against a problem Option B does not have.
 
@@ -518,14 +518,14 @@ repository from the first push.
 **Skip-guarded verify scripts.** `hack/verify-codegen.sh`,
 `hack/verify-metrics-docs.sh` and `hack/verify-fault-matrix.sh` are wired into
 CI now, and each detects whether its subject exists yet. If not, it prints an
-explicit `SKIP — ... (Phase N)` line and exits 0. If the subject *does* exist and
+explicit `SKIP... (Phase N)` line and exits 0. If the subject *does* exist and
 the check is still unimplemented, it **fails**. That inversion is the point: the
 scripts cannot rot into silent passes, because the moment the thing they guard
 appears, CI goes red until the check is written.
 
 `hack/verify-no-sleep.sh` is implemented for real now, not skip-guarded, because
 §23 A2 wants the `time.Sleep` prohibition enforced from the first test written
-in Phase 1 — not retrofitted after the habit forms. It exempts `test/e2e` and
+in Phase 1, not retrofitted after the habit forms. It exempts `test/e2e` and
 `test/soak`, where elapsed time is the subject rather than an accident.
 
 **Coverage thresholds.** §17.1's unit job is specified to enforce the §16.9
@@ -558,7 +558,7 @@ comment.
 
 ---
 
-## ADR-0008 — Publisher label limit lowered to 50 to fit the cardinality budget
+## ADR-0008, Publisher label limit lowered to 50 to fit the cardinality budget
 
 **Status:** Accepted
 **Date:** 2026-07-31
@@ -578,7 +578,7 @@ fixed budget (e.g. 500)".
 §12 defines seven metrics carrying the `publisher` label. Six of them are touched
 by an ordinary ingest workload, and each costs `limit + 1` series once the
 aggregate is counted. At a limit of 100 that is 606 series before any other
-metric is counted at all — 21% over the whole budget, from the publisher label
+metric is counted at all, 21% over the whole budget, from the publisher label
 alone.
 
 Measured, at four limits:
@@ -626,13 +626,13 @@ have it deliberately.
   excess, aggregated under `publisher="__other__"` and logged once.
 - The full-registry cardinality test is the standing guard on the relationship.
   Adding an eighth publisher-labelled metric, or raising the default back to 100,
-  moves a number that test asserts on — which forces the trade-off to be made
+  moves a number that test asserts on, which forces the trade-off to be made
   deliberately rather than discovered by a Prometheus that fell over.
 - Recorded in `docs/DISCOVERIES.md` D-012 with the measurement that produced it.
 
 ---
 
-## ADR-0009 — `Projection` grows a `TargetKey` method
+## ADR-0009, `Projection` grows a `TargetKey` method
 
 **Status:** Accepted
 **Date:** 2026-07-31
@@ -643,7 +643,7 @@ have it deliberately.
 
 §9 M6 defines the projection interface as `Apply(prev event.Value, e *event.Event)`,
 where `prev` is the key's current value. That signature requires the caller to
-fetch `prev` before calling — and gives it no way to know which key to fetch.
+fetch `prev` before calling, and gives it no way to know which key to fetch.
 
 The store key is the projection's `keyTemplate` applied to the event, and the
 event carries a raw key which the template rewrites. With the §25.2 example
@@ -651,7 +651,7 @@ configuration, `keyTemplate: "block:{{.Key}}"`, an event carrying key `9f3a`
 becomes `block:9f3a` in the store.
 
 The composition root looked up the raw key, missed on every event, and handed
-`Apply` an absent previous value — so every event overwrote rather than
+`Apply` an absent previous value, so every event overwrote rather than
 accumulated. See D-013 for the evidence.
 
 ### Options
@@ -684,7 +684,7 @@ expander `Apply` uses.
 
 ---
 
-## ADR-0010 — Phase 6 additions: a reorder buffer, an AwaitingSnapshot phase, and one extra test file
+## ADR-0010, Phase 6 additions: a reorder buffer, an AwaitingSnapshot phase, and one extra test file
 
 **Status:** Accepted
 **Date:** 2026-08-01
@@ -711,11 +711,11 @@ expects `Phase: AwaitingSnapshot`.
 `Strict` requires `codec.opMapping` to define `snapshotBegin` and
 `snapshotEnd`. But every registered codec already recognises driftwatch's own
 operation names, so with no `opMapping` at all a snapshot cycle is recognised
-perfectly well — and the rule made row 46 unconfigurable.
+perfectly well, and the rule made row 46 unconfigurable.
 
 **4. §7 lists fourteen files for `test/faults/` and the matrix has sixty rows.**
-Three of them — two publishers on one key, a heartbeat-only stream, fifteen
-hundred publishers — are about the publisher population rather than about a
+Three of them, two publishers on one key, a heartbeat-only stream, fifteen
+hundred publishers, are about the publisher population rather than about a
 fault applied to a stream.
 
 ### Decision
@@ -727,8 +727,8 @@ predecessor waits, and stops waiting on whichever comes first: the predecessor
 arriving, the window expiring, or the per-publisher buffer filling. When the
 wait times out the hole is a real gap and seqtrack records it as one.
 
-The alternative — leaving it out and testing row 7 with a pair that happens to
-commute — would have left the tool wrong on any transport that reorders, which
+The alternative, leaving it out and testing row 7 with a pair that happens to
+commute, would have left the tool wrong on any transport that reorders, which
 is all of them.
 
 **2. `PhaseAwaitingSnapshot` is added**, deviating from §10.1's list. §15 row 46
@@ -751,7 +751,7 @@ would look. §7's file list predates the matrix having sixty rows.
 ### Consequences
 
 - Out-of-order delivery no longer corrupts the oracle, at the cost of up to
-  `reorderWindow` of added latency for the events that were out of order — and
+  `reorderWindow` of added latency for the events that were out of order, and
   a gap is now declared one window later than it used to be, which is strictly
   more accurate.
 - An undecodable frame leaves a hole nothing can fill, so the events behind it
@@ -765,7 +765,7 @@ would look. §7's file list predates the matrix having sixty rows.
 
 ---
 
-## ADR-0011 — Phase 7: the webhook delegates, the schema defaults, and the operator opts in
+## ADR-0011, Phase 7: the webhook delegates, the schema defaults, and the operator opts in
 
 **Status:** Accepted
 **Date:** 2026-08-01
@@ -792,7 +792,7 @@ outside Kubernetes: parsing the string-encoded decimals the API convention
 requires instead of floats, and comparing against a stored object for the
 immutability rule.
 
-The twenty tests are still there, each asserting the exact sentence — the rule is
+The twenty tests are still there, each asserting the exact sentence, the rule is
 what is under test, not where it lives.
 
 **2. `codec`, `policy`, `alert` and `settlementWindow` default to `{}`.**
@@ -810,7 +810,7 @@ when the operator set nothing in them. That is the point.
 `leases` alongside the rest of the RBAC, and kubebuilder's scaffold puts them in
 the same ClusterRole. The manager needs exactly one lease, in its own namespace.
 Cluster-wide lease write would let a compromised driftwatch evict the leader of
-every other operator in the cluster — a far more interesting capability to
+every other operator in the cluster, a far more interesting capability to
 obtain than read access to an event stream.
 
 So the marker is removed and `config/rbac/leader_election_role.yaml` grants it as
@@ -818,8 +818,8 @@ a namespaced Role. The generated `role.yaml` is correspondingly smaller, which
 is the whole idea of committing it: what it contains is what the manager can do.
 
 **4. The webhook and the Prometheus resources are opt-in, and `config/default`
-has neither.** Both need something the cluster may not have — a certificate
-source, and the Prometheus operator's CRDs — and a base that assumes them fails
+has neither.** Both need something the cluster may not have, a certificate
+source, and the Prometheus operator's CRDs, and a base that assumes them fails
 on exactly the clusters people try first. `kubectl apply -k config/default`
 against a bare Kind cluster has to work, or the first five minutes are spent
 debugging driftwatch's packaging rather than driftwatch.
@@ -827,7 +827,7 @@ debugging driftwatch's packaging rather than driftwatch.
 The manager therefore runs with `--enable-webhooks=false` in that base, and the
 CRD schema carries the enums, ranges and per-field defaults so a malformed spec
 is still rejected without admission. What is lost is §10.2's cross-field
-validation, and `NOTES.txt` and the base's own comments say so plainly — the
+validation, and `NOTES.txt` and the base's own comments say so plainly, the
 `ingestBufferSize >= recvHWM` rule in particular, whose whole point is that
 violating it is silent.
 
@@ -838,7 +838,7 @@ violating it is silent.
 - The four defaulted blocks always appear in a stored `DriftCheck`. Anything
   diffing specs must expect them.
 - A Helm install and a kustomize install grant the same permissions, and
-  `hack/verify-helm-rbac.sh` fails CI if they stop agreeing — the chart cannot
+  `hack/verify-helm-rbac.sh` fails CI if they stop agreeing, the chart cannot
   include a file from outside itself, so its copy of the rules is real
   duplication that needs guarding.
 - Production installs should turn the webhook on. `values-prod.yaml` does, with
@@ -846,7 +846,7 @@ violating it is silent.
 
 ---
 
-## ADR-0012 — The Go floor moves from 1.23 to 1.25, because 1.23 cannot be patched
+## ADR-0012, The Go floor moves from 1.23 to 1.25, because 1.23 cannot be patched
 
 **Status:** Accepted
 **Date:** 2026-08-02
@@ -856,7 +856,7 @@ violating it is silent.
 
 ### Context
 
-Wiring `govulncheck` into CI — a §22 box that had never been ticked — turned up
+Wiring `govulncheck` into CI, a §22 box that had never been ticked, turned up
 four vulnerabilities reachable from code this project actually calls. One of
 them is reachable from the shipped manager binary:
 
@@ -890,7 +890,7 @@ the newer language floor.
 ### Options considered
 
 **Hold 1.23 and document the exposure.** ADR-0005's reasoning is still sound on
-its own terms — each bump narrows who can build the project, and 1.23 was chosen
+its own terms, each bump narrows who can build the project, and 1.23 was chosen
 because range-over-func and `slices`/`maps` are what the design needs and nothing
 more. Holding it would mean a `KNOWN_GAPS.md` entry describing a reachable DoS in
 the manager's connection to the API server, and a CI scanner set to report rather
@@ -912,12 +912,12 @@ supply chain is clean, and nothing would tell them.
 
 ### Decision
 
-- **Go 1.25 minimum**, declared as `go 1.25.0` in `go.mod`. CI, both Dockerfiles,
+- **Go 1.25 minimum**: declared as `go 1.25.0` in `go.mod`. CI, both Dockerfiles,
   the release workflow and CONTRIBUTING.md all move together, so the floor stays
   a tested claim.
-- **`golang.org/x/net` at v0.56.0 and `golang.org/x/text` at v0.39.0**, the
+- **`golang.org/x/net` at v0.56.0 and `golang.org/x/text` at v0.39.0**: the
   lowest pair that resolves together and fixes all three module vulnerabilities.
-- **`govulncheck` fails CI**, rather than reporting. A scanner set to
+- **`govulncheck` fails CI**: rather than reporting. A scanner set to
   `continue-on-error` is worse than no scanner: the badge claims the supply chain
   is checked while nothing checks it.
 
@@ -926,8 +926,8 @@ supply chain is clean, and nothing would tell them.
 - Anyone on Go 1.23 or 1.24 can no longer build from source. This is a real cost
   and the reason ADR-0005 argued against bumping; it is paid here because the
   alternative is shipping a known hang.
-- ADR-0005's other three decisions — `CGO_ENABLED=0`, ldflags version injection,
-  distroless runtime — are unaffected and still stand.
+- ADR-0005's other three decisions, `CGO_ENABLED=0`, ldflags version injection,
+  distroless runtime, are unaffected and still stand.
 - One vulnerability remains in every scan: `GO-2026-5856` in `crypto/tls`, fixed
   in go1.26.5. That is a property of the toolchain running the build rather than
   of anything declared here, and it resolves when the builder's patch release

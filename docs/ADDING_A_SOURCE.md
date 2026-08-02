@@ -1,7 +1,7 @@
 # Adding a source
 
 A source turns a transport into a stream of `RawMessage`. It is the smallest
-interface in the project, and the one with the most rules attached — because
+interface in the project, and the one with the most rules attached, because
 everything downstream depends on two claims a source makes and nothing else can
 check: *when* a message arrived, and *whether any were lost*.
 
@@ -41,8 +41,8 @@ type RawMessage struct {
 ```
 
 **`ObservedAt` is driftwatch's local receive time, and the edge is the only place
-it can honestly be set.** Every elapsed-time decision downstream is built on it —
-the settlement window above all — and §5.3 depends on it being local and
+it can honestly be set.** Every elapsed-time decision downstream is built on it, 
+the settlement window above all, and §5.3 depends on it being local and
 monotonic. Stamp it with the injected clock the instant the frame arrives, before
 any parsing.
 
@@ -66,7 +66,7 @@ and handing it a gap channel nobody writes to would suggest loss is possible whe
 it is not.
 
 A gap signal does not say how much was lost. On a PUB/SUB transport a subscriber
-cannot know that — it cannot even know whether anything was lost. What it *can*
+cannot know that, it cannot even know whether anything was lost. What it *can*
 say is that a window existed in which loss was possible, and that is enough: the
 pipeline marks the affected keys suspect and stops asserting on them until trust
 is restored.
@@ -215,7 +215,7 @@ case "mytransport":
     s.validateMyTransport(v)
 ```
 
-Then `make manifests` to regenerate the CRD, and add your field docs — they are
+Then `make manifests` to regenerate the CRD, and add your field docs, they are
 what `kubectl explain driftcheck.spec.source.mytransport` renders, and CI fails
 if any field lacks them.
 
@@ -235,7 +235,7 @@ Copy the table from an existing source's tests. The non-negotiable ones:
 
 If your transport can be run in Docker, add an integration test under the
 `integration` build tag. If it has a widely-used reference implementation in
-another language, consider an interop test as well — `test/interop/` runs
+another language, consider an interop test as well, `test/interop/` runs
 driftwatch's pure-Go ZMQ against real libzmq in both directions, and that found
 a wire-compatibility question no unit test could have.
 

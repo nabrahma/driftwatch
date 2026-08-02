@@ -3,8 +3,8 @@
 One section per alert in `config/prometheus/rules.yaml`. Every `runbook_url` in
 that file anchors here.
 
-These entries are deliberately short. The full treatment PRD §21.5 asks for —
-ranked causes with a confirmation step for each — lands in Phase 9. What is here
+These entries are deliberately short. The full treatment PRD §21.5 asks for, 
+ranked causes with a confirmation step for each, lands in Phase 9. What is here
 exists because Phase 7 shipped the alerts, and an alert whose runbook link 404s
 at three in the morning is worse than one with no link at all.
 
@@ -13,7 +13,7 @@ at three in the morning is worse than one with no link at all.
 **driftwatch reports two numbers and they are not interchangeable.**
 `divergentKeys` is what driftwatch will stand behind: confirmed across two reads
 separated by a settlement window. `suspectDivergentKeys` is divergence on keys
-whose event stream driftwatch knows it partly missed — that number measures
+whose event stream driftwatch knows it partly missed, that number measures
 driftwatch's own event loss, not the store's correctness. Nothing here pages on
 it, and nothing should.
 
@@ -54,7 +54,7 @@ kubectl -n driftwatch-system logs -l app.kubernetes.io/name=driftwatch -f
 settlement window apart both found the target disagreeing with what the event
 stream says it should hold.
 
-**Check first:** `kubectl -n <ns> describe driftcheck <name>` — the
+**Check first:** `kubectl -n <ns> describe driftcheck <name>`, the
 `divergenceByCategory` breakdown usually names the cause before you open
 anything else. `missing` on every key points at the materializer;
 `member_subset` points at partial application; `extra` points at something
@@ -75,7 +75,7 @@ because a threshold that suits ten thousand keys is meaningless at ten million.
 **Check first:** whether `coverageRatio` is high. Severe divergence under low
 coverage is a much weaker statement than severe divergence under full coverage.
 
-**Likely causes:** at this scale it is systemic rather than per-key — a
+**Likely causes:** at this scale it is systemic rather than per-key, a
 materializer that stopped entirely, a failover to a stale replica (check
 `status.targetRole`, and consider `policy.requirePrimary`), or a `FLUSHDB`.
 
@@ -85,7 +85,7 @@ materializer that stopped entirely, a failover to a stale replica (check
 driftwatch saying its own view of the stream is incomplete, so the affected keys
 are marked suspect and excluded from the alertable count.
 
-**Check first:** `status.publishers` — which publisher, and how many events. The
+**Check first:** `status.publishers`, which publisher, and how many events. The
 `SequenceIntegrity` condition names the worst one.
 
 **Likely causes:** the ingest buffer overflowing (see
@@ -109,7 +109,7 @@ the load it is most needed at.
 
 **Fix:** raise `policy.ingestBufferSize`, give the manager more CPU, or split
 the check. If `source.zmq.recvHWM` was raised without raising the buffer, the
-webhook would have rejected it — unless the webhook is not installed, which is
+webhook would have rejected it, unless the webhook is not installed, which is
 worth checking first.
 
 ## DriftwatchOracleSaturated
@@ -121,8 +121,8 @@ statement about a subset.
 **Check first:** `status.trackedKeys` against `policy.maxTrackedKeys`, and
 `status.targetKeyspaceSize` against both.
 
-**Fix:** raise `maxTrackedKeys` — budget roughly 700 bytes per key, and raise the
-memory limit with it — or narrow `target.redis.keyPattern` to the keyspace this
+**Fix:** raise `maxTrackedKeys`, budget roughly 700 bytes per key, and raise the
+memory limit with it, or narrow `target.redis.keyPattern` to the keyspace this
 check actually owns. A pattern matching more than the check is responsible for
 is the more common cause.
 
@@ -154,7 +154,7 @@ unreachable store as a store full of missing keys.
 so it drifts further from the truth for as long as this lasts.
 
 **Check first:** `status.conditions[SourceConnected].message` carries the
-transport's last error. Then whether the publisher pods moved — DNS is
+transport's last error. Then whether the publisher pods moved, DNS is
 re-resolved on every reconnect, so a rescheduled pod is found again, but only
 once it is up.
 

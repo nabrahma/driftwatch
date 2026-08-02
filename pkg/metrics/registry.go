@@ -472,7 +472,7 @@ func Markdown() string {
 	b.WriteString("except the process-level ones. No metric is ever labeled with a key name,\n")
 	b.WriteString("a member or a value: the keyspace is unbounded by construction, which is\n")
 	b.WriteString("what makes it worth auditing and what would make it catastrophic as a\n")
-	b.WriteString("label. The `publisher` label is bounded — past the configured limit,\n")
+	b.WriteString("label. The `publisher` label is bounded. Past the configured limit,\n")
 	b.WriteString("further publishers collapse into `publisher=\"" + OtherPublisher + "\"`.\n\n")
 
 	for _, section := range sectionOrder {
@@ -496,7 +496,7 @@ func Markdown() string {
 
 func writeDef(b *strings.Builder, d *Def) {
 	fmt.Fprintf(b, "### `%s`\n\n", d.Name)
-	fmt.Fprintf(b, "**%s** — %s\n\n", d.Kind, d.Help)
+	fmt.Fprintf(b, "**%s**. %s\n\n", d.Kind, d.Help)
 
 	if len(d.Labels) == 0 {
 		b.WriteString("No labels.\n\n")

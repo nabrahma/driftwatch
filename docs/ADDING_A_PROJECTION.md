@@ -23,7 +23,7 @@ type Projection interface {
 
 **`Apply` must be pure.** No I/O, no clock, no randomness, no logging, no
 package-level state. It is called on the ingest hot path, once per event, and it
-must return the same mutation for the same inputs forever — because `replay`
+must return the same mutation for the same inputs forever, because `replay`
 depends on that to turn a production incident into a regression test, and the
 property tests depend on it to compare an optimized implementation against a
 naive one.
@@ -40,14 +40,14 @@ oracle that is quietly wrong. That was a real defect: [D-013](DISCOVERIES.md).
 `Commutative()` answers: *does the order of events change the final state?*
 
 If it returns `false`, the oracle orders by sequence before applying. If it
-returns `true`, driftwatch may apply out of order — which is cheaper and, when
+returns `true`, driftwatch may apply out of order, which is cheaper and, when
 the answer is wrong, produces an oracle that disagrees with the store for reasons
 nobody will find.
 
 The interesting case is that **commutativity is often a property of the
 configured instance rather than of the type.** `counter` demonstrates it:
 addition commutes, so a stream of nothing but increments reaches the same total
-in any order. Mix in a single absolute `OpSet` and it does not — set-then-increment
+in any order. Mix in a single absolute `OpSet` and it does not: set-then-increment
 and increment-then-set differ. So `counter.Commutative()` returns `false` unless
 the operator declares `incrOnly`, which is a promise about the producer that
 driftwatch cannot verify on its own.
@@ -70,7 +70,7 @@ type OwnershipModel struct {
 ```
 
 If publishers own disjoint keyspaces, say so. When a sequence gap is detected,
-driftwatch cannot know which keys the missing events touched — but if publishers
+driftwatch cannot know which keys the missing events touched, but if publishers
 are partitioned, it knows which ones they *could not* have touched, and can leave
 those trustworthy instead of suspecting the whole keyspace.
 
@@ -152,9 +152,9 @@ func (m *myFold) Apply(prev event.Value, e *event.Event) (Mutation, error) {
 `Mutation` carries `Truncated` and `Saturated`. Both mean the same thing: *apply
 this mutation, and know the value is approximate*.
 
-- **`Truncated`** — a bound was hit while computing the value, such as a member
+- **`Truncated`**: a bound was hit while computing the value, such as a member
   set reaching `maxMembersPerKey`.
-- **`Saturated`** — a counter clamped at the limits of `int64` rather than
+- **`Saturated`**: a counter clamped at the limits of `int64` rather than
   wrapping.
 
 Setting them lets the oracle mark the key as holding an incomplete view, so the
@@ -212,7 +212,7 @@ Coverage floor for `pkg/projection` is 95%, enforced by
 2. Add the enum value in `api/v1alpha1/driftcheck_types.go`:
    `+kubebuilder:validation:Enum=keysetOwnership;scalar;counter;myfold`
 3. `make manifests` to regenerate the CRD and the Helm chart's copy of it.
-4. Document each config key in the field's doc comment — that text is what
+4. Document each config key in the field's doc comment, that text is what
    `kubectl explain driftcheck.spec.projection` renders, and CI fails if a field
    has none.
 

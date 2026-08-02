@@ -1,4 +1,4 @@
-# driftwatch — Technical Product Requirements Document
+# driftwatch, Technical Product Requirements Document
 
 **Version:** 1.0
 **Status:** Ready for implementation
@@ -23,7 +23,7 @@ Imagine a city library system with 12 branches.
 - Branches don't update the catalog directly. Instead, whenever a book moves, the branch **shouts an announcement over a city-wide PA system**: *"Riverside just received Book #4471!"* or *"Northside just discarded Book #2210!"*
 - A little program sits and listens to the PA system, and every time it hears an announcement, it updates the central catalog.
 
-This works beautifully — until it doesn't.
+This works beautifully, until it doesn't.
 
 The PA system is a **broadcast**. Nobody confirms receipt. So:
 
@@ -39,8 +39,8 @@ Here's the killer part: **nothing breaks loudly.** The catalog still returns an 
 It does three things:
 
 1. **Listens to the same PA system, independently**, and keeps its own private notebook of what the catalog *should* say. (This notebook is called the **oracle**.)
-2. **Periodically walks the shelves** — reads the actual catalog — and compares it against the notebook.
-3. **Tells you precisely what disagrees**, how long it's been wrong, and — for any specific book you ask about — replays the exact sequence of announcements it heard so you can see which one got lost or arrived in the wrong order.
+2. **Periodically walks the shelves**, reads the actual catalog, and compares it against the notebook.
+3. **Tells you precisely what disagrees**, how long it's been wrong, and, for any specific book you ask about, replays the exact sequence of announcements it heard so you can see which one got lost or arrived in the wrong order.
 
 Plus it exposes all of this as metrics and a dashboard, so instead of "the system feels flaky," you get a number: *"1,204 catalog entries are wrong, and they've been wrong for 8 minutes."*
 
@@ -71,7 +71,7 @@ In every one of these, the same failure exists and is famously hard to debug. dr
 Three reasons, in order of importance to the author:
 
 1. **It is genuinely useful and doesn't exist.** There is no general-purpose divergence detector for pub/sub-materialized state. People write one-off scripts per system.
-2. **It exercises exactly the skills that distributed-systems maintainers care about**: Go, Kubernetes operators, Kind-based end-to-end testing, Redis, ZeroMQ, Prometheus/Grafana observability, and — most of all — *reasoning correctly about lag, ordering, and partial failure*.
+2. **It exercises exactly the skills that distributed-systems maintainers care about**: Go, Kubernetes operators, Kind-based end-to-end testing, Redis, ZeroMQ, Prometheus/Grafana observability, and, most of all, *reasoning correctly about lag, ordering, and partial failure*.
 3. **The hard part is intellectually real.** Naively diffing two stores produces an avalanche of false positives, because the target legitimately lags the event stream. Solving that properly (§5) is the substance of the project and the thing worth talking about in an interview.
 
 ---
@@ -85,10 +85,10 @@ This section is a **binding working agreement**. Read it before writing any code
 1. **Test-first, always.** For every module, write the test file before the implementation file. A module is not "done" until its tests pass with `-race`.
 2. **No skipped tests. No `t.Skip()` without a linked TODO issue in `docs/KNOWN_GAPS.md`.** A skipped test is a lie.
 3. **Never mock the thing under test.** Mock only the boundaries (network, clock, store).
-4. **The clock is always injected.** No direct `time.Now()` calls anywhere except in `main()` and in the clock implementation itself. This is non-negotiable — the entire test strategy depends on controllable time.
+4. **The clock is always injected.** No direct `time.Now()` calls anywhere except in `main()` and in the clock implementation itself. This is non-negotiable, the entire test strategy depends on controllable time.
 5. **Commit at every green checkpoint**, with conventional-commit messages (`feat:`, `fix:`, `test:`, `docs:`, `refactor:`, `chore:`). Small commits. One logical change each.
 6. **Never leave a broken `main` branch.** If a phase can't complete, commit the working subset and record the gap.
-7. **Maintain `docs/DISCOVERIES.md` continuously.** Every time something surprises you — a library behaves unexpectedly, a Redis command has a subtlety, a ZMQ socket drops silently — write it down immediately with the reproducing evidence. This file is a primary deliverable, not an afterthought. See §21.3.
+7. **Maintain `docs/DISCOVERIES.md` continuously.** Every time something surprises you, a library behaves unexpectedly, a Redis command has a subtlety, a ZMQ socket drops silently, write it down immediately with the reproducing evidence. This file is a primary deliverable, not an afterthought. See §21.3.
 8. **Maintain `docs/evidence/`.** Every significant claim in the README must map to a real captured log or output file in this directory. See §21.4.
 9. **Do not add dependencies not listed in §8.4** without recording the decision in `docs/DECISIONS.md` with rationale and alternatives considered.
 10. **Prefer boring, obvious code.** This project's value is in its correctness reasoning and its test suite, not in clever Go. If a reviewer has to think hard about *how* the code works, rewrite it.
@@ -199,38 +199,38 @@ driftwatch makes that bug a number on a dashboard.
 
 ### 3.1 Goals
 
-**G1 — Detect divergence between an event-derived oracle and a target store, with a false-positive rate low enough to alert on.**
+**G1, Detect divergence between an event-derived oracle and a target store, with a false-positive rate low enough to alert on.**
 This is the primary goal and the hardest one. See §5.
 
-**G2 — Attribute divergence to a cause.** Distinguish, at minimum: dropped events (sequence gaps), reordering, duplicate delivery, out-of-band target mutation, target eviction/expiry, and publisher restart.
+**G2, Attribute divergence to a cause.** Distinguish, at minimum: dropped events (sequence gaps), reordering, duplicate delivery, out-of-band target mutation, target eviction/expiry, and publisher restart.
 
-**G3 — Explain a single key's history.** Given a key, replay every event driftwatch observed for it, with timestamps, sequence numbers, and the resulting oracle state after each — so a human can see exactly where things went wrong.
+**G3, Explain a single key's history.** Given a key, replay every event driftwatch observed for it, with timestamps, sequence numbers, and the resulting oracle state after each, so a human can see exactly where things went wrong.
 
-**G4 — Run as a Kubernetes-native operator** with a declarative `DriftCheck` custom resource, so a check is configuration rather than code.
+**G4, Run as a Kubernetes-native operator** with a declarative `DriftCheck` custom resource, so a check is configuration rather than code.
 
-**G5 — Expose everything as Prometheus metrics** with bounded cardinality, plus a ready-to-import Grafana dashboard.
+**G5, Expose everything as Prometheus metrics** with bounded cardinality, plus a ready-to-import Grafana dashboard.
 
-**G6 — Be provably correct under adversarial conditions.** A fault-injection harness that can drop, reorder, duplicate, delay, and partition; property-based tests over generated event orderings; a Kind-based end-to-end suite that exercises the whole real path.
+**G6, Be provably correct under adversarial conditions.** A fault-injection harness that can drop, reorder, duplicate, delay, and partition; property-based tests over generated event orderings; a Kind-based end-to-end suite that exercises the whole real path.
 
-**G7 — Support pluggable sources, projections, codecs, and targets** so the tool is genuinely general rather than a one-off.
+**G7, Support pluggable sources, projections, codecs, and targets** so the tool is genuinely general rather than a one-off.
 
-**G8 — Be operationally boring.** Bounded memory, no unbounded queues, deterministic cleanup, graceful shutdown, no goroutine leaks, safe under `-race`.
+**G8, Be operationally boring.** Bounded memory, no unbounded queues, deterministic cleanup, graceful shutdown, no goroutine leaks, safe under `-race`.
 
-### 3.2 Non-goals (explicit — do not build these)
+### 3.2 Non-goals (explicit, do not build these)
 
-**NG1 — Repair.** driftwatch never writes to the target store. Auto-repair requires domain knowledge driftwatch doesn't have, and a detector that can also mutate is a detector nobody will deploy. Read-only is a feature.
+**NG1, Repair.** driftwatch never writes to the target store. Auto-repair requires domain knowledge driftwatch doesn't have, and a detector that can also mutate is a detector nobody will deploy. Read-only is a feature.
 
-**NG2 — Being the materializer.** driftwatch does not replace the consumer that writes to the target. It observes alongside it.
+**NG2, Being the materializer.** driftwatch does not replace the consumer that writes to the target. It observes alongside it.
 
-**NG3 — Exactly-once delivery.** driftwatch cannot fix a lossy channel. It detects and quantifies the loss.
+**NG3, Exactly-once delivery.** driftwatch cannot fix a lossy channel. It detects and quantifies the loss.
 
-**NG4 — Distributed oracle / horizontal sharding of a single check.** One `DriftCheck` is handled by one process. Multiple checks can be spread across replicas via leader election per check, but a single keyspace is not sharded across processes. This bounds scope; note it in the README as a known limitation with a sketch of how it would be done.
+**NG4, Distributed oracle / horizontal sharding of a single check.** One `DriftCheck` is handled by one process. Multiple checks can be spread across replicas via leader election per check, but a single keyspace is not sharded across processes. This bounds scope; note it in the README as a known limitation with a sketch of how it would be done.
 
-**NG5 — A web UI.** The CLI and the Grafana dashboard are the interfaces. No React, no dashboard server.
+**NG5, A web UI.** The CLI and the Grafana dashboard are the interfaces. No React, no dashboard server.
 
-**NG6 — Supporting every event bus.** ZeroMQ and NATS plus an in-memory and a file-replay source. Kafka is explicitly deferred (it has consumer groups and offsets, which makes it a materially different and *easier* problem).
+**NG6, Supporting every event bus.** ZeroMQ and NATS plus an in-memory and a file-replay source. Kafka is explicitly deferred (it has consumer groups and offsets, which makes it a materially different and *easier* problem).
 
-**NG7 — Multi-tenancy, authn/authz for the tool's own API.** It has no API beyond metrics and a CLI.
+**NG7, Multi-tenancy, authn/authz for the tool's own API.** It has no API beyond metrics and a CLI.
 
 ### 3.3 Success criteria
 
@@ -298,25 +298,25 @@ loop:
 
 This produces a torrent of false positives. Here is every reason:
 
-**F1 — Legitimate lag.** driftwatch and the real materializer both consume the same broadcast. driftwatch is a lightweight in-memory fold; the materializer does a network round-trip to Redis. driftwatch is *always ahead*. Every key with a recent event will appear "missing in target" even though nothing is wrong.
+**F1, Legitimate lag.** driftwatch and the real materializer both consume the same broadcast. driftwatch is a lightweight in-memory fold; the materializer does a network round-trip to Redis. driftwatch is *always ahead*. Every key with a recent event will appear "missing in target" even though nothing is wrong.
 
-**F2 — The sweep is not atomic.** Redis `SCAN` is a cursor over a mutating keyspace. A full sweep of a million keys takes seconds. Keys written during the sweep may or may not appear. The "target snapshot" is a smear across time, not a point-in-time view. Comparing a smear against a point-in-time oracle is meaningless.
+**F2, The sweep is not atomic.** Redis `SCAN` is a cursor over a mutating keyspace. A full sweep of a million keys takes seconds. Keys written during the sweep may or may not appear. The "target snapshot" is a smear across time, not a point-in-time view. Comparing a smear against a point-in-time oracle is meaningless.
 
-**F3 — The oracle moves during the sweep.** Events keep arriving while sweeping. If you compare key K at sweep-time T against an oracle that has since advanced, you compare against the wrong version.
+**F3, The oracle moves during the sweep.** Events keep arriving while sweeping. If you compare key K at sweep-time T against an oracle that has since advanced, you compare against the wrong version.
 
-**F4 — driftwatch started late.** If driftwatch attaches to a running system, the target already contains state derived from events driftwatch never saw. Every single one of those keys looks like `extra_in_target`.
+**F4, driftwatch started late.** If driftwatch attaches to a running system, the target already contains state derived from events driftwatch never saw. Every single one of those keys looks like `extra_in_target`.
 
-**F5 — Wall-clock skew.** Producers stamp events with their own clocks. Comparing a producer's timestamp against driftwatch's `time.Now()` to decide "is this settled?" is unsound when clocks differ by more than W.
+**F5, Wall-clock skew.** Producers stamp events with their own clocks. Comparing a producer's timestamp against driftwatch's `time.Now()` to decide "is this settled?" is unsound when clocks differ by more than W.
 
-**F6 — Reordering within the settlement window.** Two events for the same key arriving out of order transiently produce a wrong oracle state that self-corrects. Sampling during that transient reports a phantom divergence.
+**F6, Reordering within the settlement window.** Two events for the same key arriving out of order transiently produce a wrong oracle state that self-corrects. Sampling during that transient reports a phantom divergence.
 
-**F7 — Target-side TTL and eviction.** Redis may expire or evict a key with no event. Whether that's a bug depends on whether the projection models TTL. driftwatch must not report a correctly-expired key as drift.
+**F7, Target-side TTL and eviction.** Redis may expire or evict a key with no event. Whether that's a bug depends on whether the projection models TTL. driftwatch must not report a correctly-expired key as drift.
 
-**F8 — Lossy channel means the oracle is *also* wrong.** driftwatch's own subscription drops events. When oracle and target disagree, it is not automatically the target that's wrong. driftwatch must know when *it* is the untrustworthy party.
+**F8, Lossy channel means the oracle is *also* wrong.** driftwatch's own subscription drops events. When oracle and target disagree, it is not automatically the target that's wrong. driftwatch must know when *it* is the untrustworthy party.
 
 F8 is the subtle one and the reason sequence numbers are mandatory rather than optional.
 
-### 5.2 Mechanism 1 — Sequence numbers and trust state
+### 5.2 Mechanism 1, Sequence numbers and trust state
 
 **Requirement: every event carries `(publisher, epoch, seq)` where `seq` is monotonic per `(publisher, epoch)`.**
 
@@ -378,7 +378,7 @@ on event e from publisher p:
 
 **GapSet** must be an interval set (not a per-seq bitmap) so that a 10-million-event gap costs one entry, and must be capped: if gap intervals exceed `maxGapIntervals` (default 1024), coalesce aggressively and set a `GapsTruncated` flag. Unbounded gap tracking is a memory-exhaustion vector under a flapping publisher.
 
-**Trust state per key:** when a gap is recorded for publisher `p`, every key that `p` could have touched becomes `Suspect`. driftwatch cannot know which keys those were — that information was in the lost events. Therefore:
+**Trust state per key:** when a gap is recorded for publisher `p`, every key that `p` could have touched becomes `Suspect`. driftwatch cannot know which keys those were, that information was in the lost events. Therefore:
 
 - If the projection declares **key-space partitioning by publisher** (i.e. publisher `p` only ever writes keys matching a declared pattern), only keys in that partition become `Suspect`. This is a projection-level capability: `Projection.KeyOwnership() OwnershipModel`.
 - Otherwise, **all keys become `Suspect`** until a full snapshot event resets trust.
@@ -387,13 +387,13 @@ on event e from publisher p:
 
 **Snapshot events** (`OpSnapshotBegin` / `OpSnapshotEnd`) allow a publisher to resynchronize. On `SnapshotEnd`, the publisher's gaps are cleared and its keys return to `Complete`. Producers that support periodic snapshots make driftwatch dramatically more useful; document this as a recommendation.
 
-### 5.3 Mechanism 2 — The settlement window
+### 5.3 Mechanism 2, The settlement window
 
 **Definition:** a key `k` is **settled** at time `t` if `t - lastEventObservedAt(k) > W`.
 
 Only settled keys are eligible for divergence assertion. In-flight keys are counted in `driftwatch_inflight_keys` and skipped.
 
-Note carefully: `lastEventObservedAt` is driftwatch's **local monotonic receive time**, not the publisher's timestamp. This sidesteps F5 (clock skew) entirely. Publisher timestamps are retained for `explain` output and for skew *measurement*, but never used in settlement decisions. Record observed skew as `driftwatch_publisher_clock_skew_seconds{publisher}` — it is useful diagnostic output and costs nothing.
+Note carefully: `lastEventObservedAt` is driftwatch's **local monotonic receive time**, not the publisher's timestamp. This sidesteps F5 (clock skew) entirely. Publisher timestamps are retained for `explain` output and for skew *measurement*, but never used in settlement decisions. Record observed skew as `driftwatch_publisher_clock_skew_seconds{publisher}`, it is useful diagnostic output and costs nothing.
 
 **Choosing W.** Static W is fine for a first implementation but brittle. Implement both:
 
@@ -404,9 +404,9 @@ Note carefully: `lastEventObservedAt` is driftwatch's **local monotonic receive 
 
 Emit `driftwatch_convergence_seconds` as a histogram with buckets `[.001 .0025 .005 .01 .025 .05 .1 .25 .5 1 2.5 5 10]`.
 
-**Edge case: a key that receives events continuously never settles.** A hot key updated every 100ms with W=5s is permanently in-flight and never checked. This is a real blind spot. Mitigation: track `driftwatch_never_settled_keys` and, for keys in-flight longer than `neverSettledThreshold` (default 10×W), perform a **stability-window check**: if the oracle value for that key has been *unchanged* for W despite events arriving (i.e. idempotent repeats), treat it as settled. Log the remaining permanently-unsettleable keys explicitly — an honest blind spot documented is fine; an undocumented one is not.
+**Edge case: a key that receives events continuously never settles.** A hot key updated every 100ms with W=5s is permanently in-flight and never checked. This is a real blind spot. Mitigation: track `driftwatch_never_settled_keys` and, for keys in-flight longer than `neverSettledThreshold` (default 10×W), perform a **stability-window check**: if the oracle value for that key has been *unchanged* for W despite events arriving (i.e. idempotent repeats), treat it as settled. Log the remaining permanently-unsettleable keys explicitly, an honest blind spot documented is fine; an undocumented one is not.
 
-### 5.4 Mechanism 3 — Two-phase confirmation
+### 5.4 Mechanism 3, Two-phase confirmation
 
 A single disagreeing read is never reported. The sequence is:
 
@@ -420,11 +420,11 @@ Phase 2 (confirm):      wait W, capture oracleVersion(k)
                                                                                transient_resolved
 ```
 
-This eliminates F1, F3, and F6 almost entirely, at the cost of one extra targeted read per candidate. Since confirmed divergence should be rare in a healthy system, the cost is negligible. In an unhealthy system the confirm queue is bounded (`maxConfirmQueue`, default 10,000) and overflow increments `driftwatch_confirm_queue_dropped_total` — under mass divergence you don't need to individually confirm every key, you need to know the magnitude.
+This eliminates F1, F3, and F6 almost entirely, at the cost of one extra targeted read per candidate. Since confirmed divergence should be rare in a healthy system, the cost is negligible. In an unhealthy system the confirm queue is bounded (`maxConfirmQueue`, default 10,000) and overflow increments `driftwatch_confirm_queue_dropped_total`, under mass divergence you don't need to individually confirm every key, you need to know the magnitude.
 
 Record `driftwatch_transient_divergence_total{reason}` for discarded candidates. A rising transient rate with zero confirmed drift is itself a useful signal: it means the materializer is slow relative to W.
 
-### 5.5 Mechanism 4 — Version-fenced comparison
+### 5.5 Mechanism 4, Version-fenced comparison
 
 To defeat F3, every oracle key carries a version counter incremented on each applied event:
 
@@ -450,7 +450,7 @@ if v1 != v2 { requeue(k); return }     // oracle moved mid-read; comparison inva
 compare(oracle.Value(k) @ v1, tval)
 ```
 
-This is a lightweight optimistic-read fence. It is not a substitute for the settlement window (which handles the materializer's lag) — it handles *driftwatch's own* concurrency.
+This is a lightweight optimistic-read fence. It is not a substitute for the settlement window (which handles the materializer's lag), it handles *driftwatch's own* concurrency.
 
 To defeat F2 (non-atomic sweep), the sweep must be **oracle-driven, not target-driven** wherever possible:
 
@@ -459,16 +459,16 @@ To defeat F2 (non-atomic sweep), the sweep must be **oracle-driven, not target-d
 
 Run the two directions at different cadences: `oracle→target` every `sweepInterval` (default 30s), `target→oracle` every `extraScanInterval` (default 5m, since extras are usually a slower-moving problem and the scan is the expensive half).
 
-### 5.6 Mechanism 5 — Bootstrap modes
+### 5.6 Mechanism 5, Bootstrap modes
 
 Defeats F4. Three modes, configured per `DriftCheck`:
 
 **`Adopt` (default).** At startup, perform one full target scan and load it into the oracle as baseline, marking every adopted key `Trust: Adopted`. From then on, apply events normally. Adopted keys are never reported as `extra_in_target`, but *are* checked once an event touches them (at which point they transition to `Complete` or `Suspect` per normal rules).
 - Pro: works immediately against a running system.
-- Con: cannot detect pre-existing drift. Document this clearly — `Adopt` mode's guarantee is "no *new* drift since I started."
+- Con: cannot detect pre-existing drift. Document this clearly, `Adopt` mode's guarantee is "no *new* drift since I started."
 
 **`Strict`.** Refuse to assert until a full `OpSnapshotBegin`/`OpSnapshotEnd` cycle has been received from every known publisher. Until then, status is `Phase: AwaitingSnapshot` and no divergence is reported.
-- Pro: the strongest guarantee — detects pre-existing drift.
+- Pro: the strongest guarantee, detects pre-existing drift.
 - Con: requires producer cooperation.
 
 **`Wait`.** Start with an empty oracle. Only assert on keys that have received at least one event since startup. Ignore everything else forever (until it receives an event).
@@ -477,13 +477,13 @@ Defeats F4. Three modes, configured per `DriftCheck`:
 
 Expose which mode is active and the resulting coverage: `driftwatch_oracle_keys{trust="adopted|complete|suspect"}` and `driftwatch_coverage_ratio` = (asserted keys) / (total target keys).
 
-### 5.7 Mechanism 6 — TTL and eviction handling
+### 5.7 Mechanism 6, TTL and eviction handling
 
 Three configurable target-expiry policies, since whether an expired key is drift is domain-dependent:
 
-- **`Ignore`** — a key absent from the target that the oracle expects is *not* reported if the target's keyspace has TTLs enabled and the key's oracle age exceeds the configured `assumedTTL`. Blunt but useful.
-- **`Model`** — the projection tracks TTL from events (`Event.TTL`) and the oracle expires keys itself. Divergence is then meaningful in both directions. Requires producers to emit TTL.
-- **`Strict`** — any absence is drift. Correct when the target has no TTLs, which is the common case for an index.
+- **`Ignore`**: a key absent from the target that the oracle expects is *not* reported if the target's keyspace has TTLs enabled and the key's oracle age exceeds the configured `assumedTTL`. Blunt but useful.
+- **`Model`**: the projection tracks TTL from events (`Event.TTL`) and the oracle expires keys itself. Divergence is then meaningful in both directions. Requires producers to emit TTL.
+- **`Strict`**: any absence is drift. Correct when the target has no TTLs, which is the common case for an index.
 
 Redis eviction under `maxmemory` is different from expiry and worth detecting separately: read `INFO stats` → `evicted_keys` before and after each sweep, and if it increased, annotate the sweep result with `evictionSuspected: true` and expose `driftwatch_target_evictions_observed_total`. A sweep that finds mass `missing_in_target` concurrent with rising evictions has an obvious explanation, and saying so in the output saves the operator an hour.
 
@@ -566,14 +566,14 @@ I13 deserves emphasis: implement a `RecordingTarget` wrapper used in *every* tes
 
 ### 6.2 Data flow, end to end
 
-1. **Source** yields `RawMessage{Topic, Payload, ReceivedAt}` on a channel. Bounded buffer; on overflow, drop-newest and increment `driftwatch_ingest_dropped_total{reason="buffer_full"}`. Dropping is correct here — blocking would make driftwatch a slow subscriber and cause the upstream ZMQ socket to drop instead, which is worse because it's invisible.
+1. **Source** yields `RawMessage{Topic, Payload, ReceivedAt}` on a channel. Bounded buffer; on overflow, drop-newest and increment `driftwatch_ingest_dropped_total{reason="buffer_full"}`. Dropping is correct here, blocking would make driftwatch a slow subscriber and cause the upstream ZMQ socket to drop instead, which is worse because it's invisible.
 2. **Codec** decodes to `Event`. Decode failures increment `driftwatch_events_dropped_total{reason="decode_error"}` and log the first N failures per minute with a truncated hex dump (rate-limited; never log full payloads, which may contain sensitive data).
 3. **SeqTracker** classifies (Accept / AcceptWithGap / AcceptLateFill / DropDuplicate / DropStaleEpoch / AcceptAfterRestart), updates publisher state, emits gap and restart signals.
-4. **Projection** folds accepted events into oracle mutations. Pure function — takes current entry + event, returns new entry or a delete instruction. No I/O, no clock, no randomness.
+4. **Projection** folds accepted events into oracle mutations. Pure function, takes current entry + event, returns new entry or a delete instruction. No I/O, no clock, no randomness.
 5. **Oracle** applies the mutation, bumps `Version`, updates `LastEventAt` (monotonic local), appends to the per-key event ring, updates trust state, and maintains the settled/in-flight index.
 6. **Sweeper** runs on a ticker: iterates settled keys, reads from **Target**, diffs with version fencing, pushes candidates to the confirm queue. A second, slower ticker runs the target→oracle extras scan.
 7. **Confirmer** drains the queue after W, re-reads individual keys, promotes to confirmed or discards.
-8. **Reporter** updates Prometheus metrics, writes structured logs, and — when running as an operator — patches `DriftCheck.status`.
+8. **Reporter** updates Prometheus metrics, writes structured logs, and, when running as an operator, patches `DriftCheck.status`.
 9. **LagEstimator** independently polls probe keys to build the convergence-time histogram, which feeds adaptive W.
 10. **Explain engine** serves `driftwatch explain <key>` by reading the per-key event ring plus a live target read.
 
@@ -592,7 +592,7 @@ Deliberately simple. One goroutine per role, communicating over channels:
 | `lagProbe` | 1 | convergence measurement |
 | `metricsServer` | 1 | HTTP `/metrics`, `/healthz`, `/readyz` |
 
-**The applier is single-threaded by design.** This makes ordering, sequence tracking, and version bumping trivially correct without locks on the hot path, and it is fast enough: a fold over an in-memory map at 100k+ events/sec on one core. Do not parallelize it. If throughput becomes a problem, shard by key hash into N independent appliers each owning a disjoint keyspace — but only after benchmarks prove the need, and record the decision.
+**The applier is single-threaded by design.** This makes ordering, sequence tracking, and version bumping trivially correct without locks on the hot path, and it is fast enough: a fold over an in-memory map at 100k+ events/sec on one core. Do not parallelize it. If throughput becomes a problem, shard by key hash into N independent appliers each owning a disjoint keyspace, but only after benchmarks prove the need, and record the decision.
 
 The oracle is read by the sweeper, extraScanner, confirmer, and explain engine concurrently with the applier's writes. Use a `sync.RWMutex` per shard (default 64 shards by key hash) rather than one global lock. Version fencing (§5.5) handles the read-then-compare race that a lock alone cannot.
 
@@ -861,9 +861,9 @@ Rationale:
 - No cgo means `CGO_ENABLED=0` static binaries, trivial multi-arch cross-compilation, `FROM scratch`/distroless images, and no libzmq version-matching pain in CI or Kind node images.
 - ZMTP 3.1 is a documented wire protocol; the pure-Go implementation is wire-compatible with libzmq for PUB/SUB.
 
-**Risk and required mitigation:** wire compatibility must be *proven*, not assumed. §16.6 mandates an interop test where a real `pyzmq` (libzmq-backed) publisher feeds the Go subscriber, run in CI under a build tag. If a compatibility gap is found (particularly around subscription-prefix filtering or multipart framing), record it in `DISCOVERIES.md` — that finding alone is worth the README space.
+**Risk and required mitigation:** wire compatibility must be *proven*, not assumed. §16.6 mandates an interop test where a real `pyzmq` (libzmq-backed) publisher feeds the Go subscriber, run in CI under a build tag. If a compatibility gap is found (particularly around subscription-prefix filtering or multipart framing), record it in `DISCOVERIES.md`, that finding alone is worth the README space.
 
-**Known behaviour to handle explicitly:** ZMQ PUB sockets drop messages for slow subscribers once the high-water mark is reached, silently. Set `SUB` receive HWM explicitly and document the value. driftwatch's own ingest buffer must be larger than the socket HWM so that the drop, when it happens, happens in driftwatch's own countable buffer rather than invisibly in the socket. This is a real design subtlety — put it in `DISCOVERIES.md`.
+**Known behaviour to handle explicitly:** ZMQ PUB sockets drop messages for slow subscribers once the high-water mark is reached, silently. Set `SUB` receive HWM explicitly and document the value. driftwatch's own ingest buffer must be larger than the socket HWM so that the drop, when it happens, happens in driftwatch's own countable buffer rather than invisibly in the socket. This is a real design subtlety, put it in `DISCOVERIES.md`.
 
 ### 8.2 Redis client: `go-redis/v9`
 
@@ -899,10 +899,10 @@ Pin all versions in `go.mod`. Do not add anything outside this list without an A
 | `github.com/Shopify/toxiproxy/v2` (client) | network fault injection in e2e |
 
 **Explicitly rejected:**
-- `pebbe/zmq4` — cgo (see §8.1).
-- Any ORM or query builder — there is no SQL.
-- `viper` — config comes from flags, env, and the CRD; viper's precedence magic is not worth the dependency.
-- OpenTelemetry tracing — Prometheus metrics are sufficient for this tool's purpose; adding OTel is scope creep. Note it as a possible future extension in `KNOWN_GAPS.md`.
+- `pebbe/zmq4`, cgo (see §8.1).
+- Any ORM or query builder, there is no SQL.
+- `viper`, config comes from flags, env, and the CRD; viper's precedence magic is not worth the dependency.
+- OpenTelemetry tracing, Prometheus metrics are sufficient for this tool's purpose; adding OTel is scope creep. Note it as a possible future extension in `KNOWN_GAPS.md`.
 
 ### 8.5 Go version and build
 
@@ -915,11 +915,11 @@ Pin all versions in `go.mod`. Do not add anything outside this list without an A
 
 ## 9. Module specifications
 
-Each module below gives: **responsibility**, **exact Go interface**, **required behaviours**, **edge cases that must be handled**, and **required tests**. The interfaces are normative — implement these signatures.
+Each module below gives: **responsibility**, **exact Go interface**, **required behaviours**, **edge cases that must be handled**, and **required tests**. The interfaces are normative, implement these signatures.
 
 ---
 
-### M1 — `pkg/clock`
+### M1, `pkg/clock`
 
 **Responsibility.** Inject time so every other module is testable. Build this first; nothing else can be tested properly without it.
 
@@ -979,13 +979,13 @@ type FakeClock interface {
 - `Fake.BlockUntil(n)` is essential: without it, `Advance` can fire before the code under test has registered its waiter, producing intermittent failures.
 - A ticker whose channel is not drained must drop ticks (matching `time.Ticker` semantics), not block.
 
-**Edge cases.** `Advance(0)`; `Advance` past multiple ticks of the same ticker (must fire the correct count per `time.Ticker` semantics — coalesce to one pending tick); `Stop` during `Advance`; `Reset` to a shorter interval mid-flight; concurrent `Advance` calls (serialize with a mutex).
+**Edge cases.** `Advance(0)`; `Advance` past multiple ticks of the same ticker (must fire the correct count per `time.Ticker` semantics, coalesce to one pending tick); `Stop` during `Advance`; `Reset` to a shorter interval mid-flight; concurrent `Advance` calls (serialize with a mutex).
 
 **Tests.** Table-driven for each edge case; a test proving `Advance` is deterministic across 1,000 runs of a multi-ticker scenario; `goleak` in `TestMain`.
 
 ---
 
-### M2 — `pkg/event`
+### M2, `pkg/event`
 
 **Responsibility.** The core immutable data types. No logic beyond validation and cheap accessors.
 
@@ -1064,16 +1064,16 @@ func (v Value) String() string       // truncated, safe for logs
 **Required behaviours.**
 - `Event` is treated as immutable after construction. Never mutate a received event; projections return new values.
 - `Validate` rules: `OpSet` requires non-nil `Value`; `OpAdd`/`OpRemove` require non-empty `Member`; `OpIncr` requires `Delta != 0`; `OpDelete` requires only `Key`; snapshot markers and `OpHeartbeat` must have empty `Key`; `Publisher` must be non-empty for all ops; `Seq` may be 0 only as the first event of an epoch.
-- `Value.Equal` must treat `nil` and empty `Members` map as equal (a set that has had all members removed equals an absent set — **or does it?** This is a real design decision: choose "empty set == absent" for Redis compatibility, because Redis deletes a set key when its last member is removed. Document this in a code comment and in `DISCOVERIES.md`, because it is exactly the kind of subtlety that causes false positives.)
+- `Value.Equal` must treat `nil` and empty `Members` map as equal (a set that has had all members removed equals an absent set, **or does it?** This is a real design decision: choose "empty set == absent" for Redis compatibility, because Redis deletes a set key when its last member is removed. Document this in a code comment and in `DISCOVERIES.md`, because it is exactly the kind of subtlety that causes false positives.)
 - `Value.String()` must truncate to 64 bytes and hex-encode non-UTF8 bytes. It must never be used for comparison.
 
-**Edge cases.** Empty key (`""`) — legal in Redis, must be supported; binary (non-UTF8) keys and members; keys longer than 512 MB (reject at codec level with a bounded max, default 4 KiB, configurable); very large member sets (`OpAdd` producing a set of 1M members — see M7 for the bound); `TTL` of zero vs nil (zero means "expire immediately", nil means "no TTL"); negative `Delta`.
+**Edge cases.** Empty key (`""`), legal in Redis, must be supported; binary (non-UTF8) keys and members; keys longer than 512 MB (reject at codec level with a bounded max, default 4 KiB, configurable); very large member sets (`OpAdd` producing a set of 1M members, see M7 for the bound); `TTL` of zero vs nil (zero means "expire immediately", nil means "no TTL"); negative `Delta`.
 
 **Tests.** Validation table covering every Op × every missing-field combination; `Value.Equal` symmetry and reflexivity property test; `Clone` deep-copy verification (mutate the clone, assert original unchanged); golden-file round-trip for `String()` with binary input.
 
 ---
 
-### M3 — `pkg/codec`
+### M3, `pkg/codec`
 
 **Responsibility.** Decode raw wire bytes into `Event`. Pluggable, because real producers have their own formats.
 
@@ -1102,20 +1102,20 @@ type Constructor func(cfg map[string]string) (Codec, error)
 **Built-in codecs.**
 
 1. **`json`** (default). Field names configurable via cfg so foreign formats work without code:
-   `publisherField`, `epochField`, `seqField`, `timestampField`, `opField`, `keyField`, `memberField`, `valueField`, `ttlField`, `deltaField`, plus `opMapping` (e.g. `"BLOCK_STORED=add,BLOCK_EVICTED=remove"`). Timestamp parsing must accept RFC3339, RFC3339Nano, Unix seconds, Unix millis, and Unix nanos — auto-detected by magnitude, with the detection rule documented.
+   `publisherField`, `epochField`, `seqField`, `timestampField`, `opField`, `keyField`, `memberField`, `valueField`, `ttlField`, `deltaField`, plus `opMapping` (e.g. `"BLOCK_STORED=add,BLOCK_EVICTED=remove"`). Timestamp parsing must accept RFC3339, RFC3339Nano, Unix seconds, Unix millis, and Unix nanos, auto-detected by magnitude, with the detection rule documented.
 
-2. **`msgpack`** — same configurable field mapping, msgpack encoding.
+2. **`msgpack`**, same configurable field mapping, msgpack encoding.
 
-3. **`template`** — for line-oriented or delimited formats: a regex with named capture groups mapped to fields. Slow; documented as a compatibility escape hatch, not for high throughput.
+3. **`template`**, for line-oriented or delimited formats: a regex with named capture groups mapped to fields. Slow; documented as a compatibility escape hatch, not for high throughput.
 
 **Required behaviours.**
 - Decoding must never panic on arbitrary input. Enforced by fuzzing.
 - Payloads larger than `maxPayloadBytes` (default 1 MiB) are rejected with a typed error, not truncated.
-- Unknown `op` values produce `ErrUnknownOp` (a sentinel), which the pipeline counts separately from malformed input — an unknown op is likely a version mismatch, not corruption, and deserves a different diagnosis.
+- Unknown `op` values produce `ErrUnknownOp` (a sentinel), which the pipeline counts separately from malformed input, an unknown op is likely a version mismatch, not corruption, and deserves a different diagnosis.
 - Errors must be typed sentinels (`ErrMalformed`, `ErrUnknownOp`, `ErrTooLarge`, `ErrMissingField`) so the pipeline can categorize.
 - Zero allocations on the happy path where feasible: reuse a `sync.Pool` of decode scratch buffers. Prove with a benchmark asserting `allocs/op` below a threshold.
 
-**Edge cases.** Empty payload; payload that is valid JSON but not an object; deeply nested JSON (depth-limit it — a JSON bomb is a real DoS vector); duplicate JSON keys; numeric seq sent as a string; seq sent as a float (must reject, since float64 loses precision above 2^53 — this is a genuine correctness trap and belongs in `DISCOVERIES.md`); null fields; unicode escapes; NaN/Inf in numeric fields; timestamp of 0.
+**Edge cases.** Empty payload; payload that is valid JSON but not an object; deeply nested JSON (depth-limit it, a JSON bomb is a real DoS vector); duplicate JSON keys; numeric seq sent as a string; seq sent as a float (must reject, since float64 loses precision above 2^53, this is a genuine correctness trap and belongs in `DISCOVERIES.md`); null fields; unicode escapes; NaN/Inf in numeric fields; timestamp of 0.
 
 **Tests.**
 - Table-driven decode tests with a `testdata/` golden payload per case.
@@ -1125,7 +1125,7 @@ type Constructor func(cfg map[string]string) (Codec, error)
 
 ---
 
-### M4 — `pkg/source`
+### M4, `pkg/source`
 
 **Responsibility.** Read raw frames from a transport. Reconnect. Never block the pipeline.
 
@@ -1169,28 +1169,28 @@ func New(name string, cfg Config, clk clock.Clock) (Source, error)
 
 **Implementations.**
 
-**`memory`** — in-process channel. Used by every unit test and by the fault injector. Must support `Publish(RawMessage)` and a `Backlog()` accessor.
+**`memory`**, in-process channel. Used by every unit test and by the fault injector. Must support `Publish(RawMessage)` and a `Backlog()` accessor.
 
-**`file`** — replay newline-delimited JSON from a file or stdin. Config: `path`, `speed` (`asFastAsPossible` | `realtime` | a multiplier), `loop`. This is how a captured production event stream gets replayed against a new projection — a genuinely useful feature and the backbone of `driftwatch replay`.
+**`file`**, replay newline-delimited JSON from a file or stdin. Config: `path`, `speed` (`asFastAsPossible` | `realtime` | a multiplier), `loop`. This is how a captured production event stream gets replayed against a new projection, a genuinely useful feature and the backbone of `driftwatch replay`.
 
-**`zmq`** — SUB socket. Config: `endpoints` (list), `topics` (subscription prefixes; empty means subscribe-all), `recvHWM` (default 100000), `connectTimeout`, `reconnectIntervalMax`.
+**`zmq`**, SUB socket. Config: `endpoints` (list), `topics` (subscription prefixes; empty means subscribe-all), `recvHWM` (default 100000), `connectTimeout`, `reconnectIntervalMax`.
 Required behaviours:
 - Connect to all endpoints on one SUB socket (ZMQ supports multiple connects per socket).
 - Set `SUBSCRIBE` for each topic prefix; if none given, subscribe to `""`.
-- Handle multipart frames: by convention frame 0 is the topic, frame 1 the payload. If a single-frame message arrives, treat the whole frame as payload with topic `""`. **Both conventions exist in the wild — support both and document it.**
+- Handle multipart frames: by convention frame 0 is the topic, frame 1 the payload. If a single-frame message arrives, treat the whole frame as payload with topic `""`. **Both conventions exist in the wild, support both and document it.**
 - Reconnect with exponential backoff + full jitter on any receive error.
 - **On reconnect, signal a possible gap** via a `GapSignal` channel so the pipeline can mark keys `Suspect`. This is essential and easy to forget.
 - Explicitly set and report `recvHWM`, and document the interaction with the ingest buffer (§8.1).
 
-**`nats`** — core NATS subscription (not JetStream; JetStream has durable consumers and would be a different, easier problem). Config: `url`, `subjects`, `queueGroup` (must be empty — a queue group would split events across replicas and break the oracle; **validate and reject a non-empty queue group with a clear error message**, since this is a plausible and catastrophic misconfiguration).
+**`nats`**, core NATS subscription (not JetStream; JetStream has durable consumers and would be a different, easier problem). Config: `url`, `subjects`, `queueGroup` (must be empty, a queue group would split events across replicas and break the oracle; **validate and reject a non-empty queue group with a clear error message**, since this is a plausible and catastrophic misconfiguration).
 
-**Edge cases.** Endpoint unresolvable at startup (must not fail startup; retry forever, report `Connected: false`, and let readiness reflect it); endpoint resolves but refuses connection; connection drops mid-frame; zero-length payload; frame larger than `maxPayloadBytes`; all endpoints down then one recovers; DNS re-resolution after a pod restart changes the IP (must re-resolve on reconnect, not cache the first IP — a classic Kubernetes bug worth a `DISCOVERIES.md` entry); `Close()` called twice; `Close()` called during `Run`; context cancelled while blocked in a socket receive (must unblock within `shutdownGrace` — this requires a receive timeout on the socket rather than an indefinite block).
+**Edge cases.** Endpoint unresolvable at startup (must not fail startup; retry forever, report `Connected: false`, and let readiness reflect it); endpoint resolves but refuses connection; connection drops mid-frame; zero-length payload; frame larger than `maxPayloadBytes`; all endpoints down then one recovers; DNS re-resolution after a pod restart changes the IP (must re-resolve on reconnect, not cache the first IP, a classic Kubernetes bug worth a `DISCOVERIES.md` entry); `Close()` called twice; `Close()` called during `Run`; context cancelled while blocked in a socket receive (must unblock within `shutdownGrace`, this requires a receive timeout on the socket rather than an indefinite block).
 
 **Tests.** For `memory` and `file`, full unit coverage. For `zmq`, a test that spins up a real in-process pure-Go PUB socket and asserts delivery, multipart handling, topic filtering, reconnect-after-close, and HWM drop behaviour under a deliberately slow consumer. Interop test per §16.6. A test asserting `Run` returns within `shutdownGrace` of context cancellation while blocked in receive.
 
 ---
 
-### M5 — `pkg/seqtrack`
+### M5, `pkg/seqtrack`
 
 **Responsibility.** Per-publisher sequence tracking, gap detection, epoch/restart detection, duplicate rejection. This is where §5.2 lives.
 
@@ -1265,9 +1265,9 @@ func (g *GapSet) Clear()
 **Required behaviours.** Exactly the algorithm in §5.2. Plus:
 - `MaxPublishers` exceeded → evict the publisher with the oldest `LastSeen`, increment a counter, and log at WARN. Never grow unbounded.
 - On `maxGapIntervals` exceeded: merge the two closest intervals repeatedly until under the cap, set `Truncated`, and never lose the *count* of missing seqs even when interval detail is lost.
-- `Fill` on an interior seq splits one interval into two, which can push the count over the cap — handle this (it's the non-obvious case).
+- `Fill` on an interior seq splits one interval into two, which can push the count over the cap, handle this (it's the non-obvious case).
 
-**Edge cases.** First event with `Seq == 0`; first event with `Seq == 1<<63` (a publisher that starts high); seq wraparound at `MaxUint64` (treat as an implicit restart and document); epoch going backwards then forwards again (out-of-order across a restart); two publishers with the same ID but different epochs arriving interleaved; an event with `Seq == HWM` exactly (duplicate of the newest); `Fill` of a seq not in any gap (no-op, must not corrupt); `Add(from, to)` where `from > to` (programmer error — panic in dev, but reachable from malformed input, so validate at the codec boundary and assert here).
+**Edge cases.** First event with `Seq == 0`; first event with `Seq == 1<<63` (a publisher that starts high); seq wraparound at `MaxUint64` (treat as an implicit restart and document); epoch going backwards then forwards again (out-of-order across a restart); two publishers with the same ID but different epochs arriving interleaved; an event with `Seq == HWM` exactly (duplicate of the newest); `Fill` of a seq not in any gap (no-op, must not corrupt); `Add(from, to)` where `from > to` (programmer error, panic in dev, but reachable from malformed input, so validate at the codec boundary and assert here).
 
 **Tests.**
 - Full table over every state-transition pair in the §5.2 algorithm.
@@ -1279,9 +1279,9 @@ func (g *GapSet) Clear()
 
 ---
 
-### M6 — `pkg/projection`
+### M6, `pkg/projection`
 
-**Responsibility.** The pure fold from events to expected state. **Must contain zero I/O, zero clock access, and zero randomness** — this purity is what makes property testing possible.
+**Responsibility.** The pure fold from events to expected state. **Must contain zero I/O, zero clock access, and zero randomness**, this purity is what makes property testing possible.
 
 ```go
 package projection
@@ -1331,22 +1331,22 @@ func New(name string, cfg map[string]string) (Projection, error)
 
 **Built-in projections.**
 
-**`keysetOwnership`** — the KV-cache-index shape and the flagship case. Maintains `key → set of members`. `OpAdd` adds, `OpRemove` removes, `OpDelete` clears, `OpSet` replaces the whole set from a delimited value. Config: `keyTemplate` (default `"{{.Key}}"`), `memberTemplate` (default `"{{.Member}}"`), `setDelimiter` for `OpSet`. Commutative: **false** — `add` then `remove` differs from `remove` then `add`. Shape: `ShapeSet`.
-Critical behaviour: when the last member is removed, emit `ActionDelete`, not an upsert with an empty set — because Redis deletes empty set keys. Getting this wrong produces a permanent false `extra_in_target`/`missing_in_target` pair on every key that empties. **This is the single most likely bug in the project. Write the test first.**
+**`keysetOwnership`**, the KV-cache-index shape and the flagship case. Maintains `key → set of members`. `OpAdd` adds, `OpRemove` removes, `OpDelete` clears, `OpSet` replaces the whole set from a delimited value. Config: `keyTemplate` (default `"{{.Key}}"`), `memberTemplate` (default `"{{.Member}}"`), `setDelimiter` for `OpSet`. Commutative: **false**, `add` then `remove` differs from `remove` then `add`. Shape: `ShapeSet`.
+Critical behaviour: when the last member is removed, emit `ActionDelete`, not an upsert with an empty set, because Redis deletes empty set keys. Getting this wrong produces a permanent false `extra_in_target`/`missing_in_target` pair on every key that empties. **This is the single most likely bug in the project. Write the test first.**
 
-**`scalar`** — last-write-wins `key → bytes`. `OpSet` upserts, `OpDelete` deletes, `OpAdd`/`OpRemove`/`OpIncr` are errors. Commutative: **false**. Shape: `ShapeScalar`.
+**`scalar`**, last-write-wins `key → bytes`. `OpSet` upserts, `OpDelete` deletes, `OpAdd`/`OpRemove`/`OpIncr` are errors. Commutative: **false**. Shape: `ShapeScalar`.
 
-**`counter`** — `key → int64` with `OpIncr` applying `Delta`. Commutative: **true** (addition commutes). `OpSet` sets absolutely; `OpDelete` deletes. Shape: `ShapeCounter`.
+**`counter`**, `key → int64` with `OpIncr` applying `Delta`. Commutative: **true** (addition commutes). `OpSet` sets absolutely; `OpDelete` deletes. Shape: `ShapeCounter`.
 Note the subtlety: a counter is commutative *only* if every event is `OpIncr`. A mix of `OpIncr` and `OpSet` is not commutative. Therefore `Commutative()` must return false unless config declares `incrOnly: true`. Document this; it is a good example of why the flag is per-projection-instance, not per-type.
 
-**`reference`** (test-only, in `reference.go`). A deliberately naive, obviously-correct implementation using a plain map and no optimizations, used as the differential-testing oracle in property tests. If the optimized projection and the reference ever disagree on any generated input, that is a bug in the optimized one.
+**`reference`** (test-only, in `reference.go`). A deliberately naive, obviously-correct implementation using a plain map and no optimizations, used as the differential-testing oracle in property tests. If the optimized projection and the reference ever disagree on any generated input. That is a bug in the optimized one.
 
 **Required behaviours.**
 - Template expansion is compiled once at construction, never per event (benchmark this).
 - An `Apply` that returns an error must not be silently dropped: the pipeline counts `driftwatch_projection_errors_total{projection,reason}` and logs the first N per minute.
 - `Apply` must handle `prev.Kind` mismatching the projection's shape (e.g. a scalar projection receiving a set-valued prev) by returning a typed error rather than panicking. This happens in practice when a `DriftCheck`'s projection is changed without clearing the oracle.
 
-**Edge cases.** `OpAdd` of a member already present (idempotent, no version bump needed — but bump anyway for simplicity and document why); `OpRemove` of a member not present (no-op); `OpRemove` on an absent key (no-op, must not create the key); `OpDelete` on an absent key (no-op); `OpIncr` on an absent key (creates it at `Delta`); `OpIncr` overflow (saturate at `MaxInt64`, count `driftwatch_counter_overflows_total`); a member set exceeding `maxMembersPerKey` (default 100,000 — reject the add, count it, mark the key as `Truncated`, and never grow unbounded); template expansion producing an empty key; template referencing a field the event doesn't have.
+**Edge cases.** `OpAdd` of a member already present (idempotent, no version bump needed, but bump anyway for simplicity and document why); `OpRemove` of a member not present (no-op); `OpRemove` on an absent key (no-op, must not create the key); `OpDelete` on an absent key (no-op); `OpIncr` on an absent key (creates it at `Delta`); `OpIncr` overflow (saturate at `MaxInt64`, count `driftwatch_counter_overflows_total`); a member set exceeding `maxMembersPerKey` (default 100,000, reject the add, count it, mark the key as `Truncated`, and never grow unbounded); template expansion producing an empty key; template referencing a field the event doesn't have.
 
 **Tests.**
 - Table-driven per projection covering every Op × every prev-state combination, including all the edge cases above.
@@ -1359,7 +1359,7 @@ Note the subtlety: a counter is commutative *only* if every event is `OpIncr`. A
 
 ---
 
-### M7 — `pkg/oracle`
+### M7, `pkg/oracle`
 
 **Responsibility.** Hold the expected state. Sharded, bounded, versioned, with a per-key event ring for `explain` and a settled/in-flight index.
 
@@ -1462,15 +1462,15 @@ type Entry struct {
 ```
 
 **Required behaviours.**
-- **Sharding** by `xxhash(key) % Shards`, each shard with its own `RWMutex`. Never take two shard locks at once (no cross-key operations exist, so this is easy to guarantee — assert it in review).
-- **Version** increments on every applied mutation, monotonically, per key, never reused. A deleted-then-recreated key continues from the previous version, not from zero — otherwise fencing breaks across a delete.
+- **Sharding** by `xxhash(key) % Shards`, each shard with its own `RWMutex`. Never take two shard locks at once (no cross-key operations exist, so this is easy to guarantee, assert it in review).
+- **Version** increments on every applied mutation, monotonically, per key, never reused. A deleted-then-recreated key continues from the previous version, not from zero, otherwise fencing breaks across a delete.
 - **Settled/in-flight index.** Do not scan all keys to compute this. Maintain a per-shard min-heap (or a coarse time-bucketed ring of key sets, which is cheaper) ordered by `LastEventAt`, so `SettledKeys` yields in O(settled) and `Counts` is O(1)-ish. Naive full scans at 1M keys every 30s is 
   a performance bug that will show up in the benchmark.
-- **Bounded memory.** On reaching `MaxTrackedKeys`, evict the key with the oldest `LastEventAt` from the fullest shard (approximate global LRU — exact global LRU across shards requires cross-shard coordination and is not worth it; document the approximation). Count evictions and expose the resulting coverage loss.
-- **Per-key ring** is a fixed-size circular buffer of `RingSize` entries. It must never grow. If `RetainRaw` is false, `Event.Raw` is nilled before storing, which is the difference between ~200 bytes and ~2 KB per history entry at 16 entries per key — at 1M keys that is 3 GB vs 300 MB. This matters and must be the default.
+- **Bounded memory.** On reaching `MaxTrackedKeys`, evict the key with the oldest `LastEventAt` from the fullest shard (approximate global LRU, exact global LRU across shards requires cross-shard coordination and is not worth it; document the approximation). Count evictions and expose the resulting coverage loss.
+- **Per-key ring** is a fixed-size circular buffer of `RingSize` entries. It must never grow. If `RetainRaw` is false, `Event.Raw` is nilled before storing, which is the difference between ~200 bytes and ~2 KB per history entry at 16 entries per key, at 1M keys that is 3 GB vs 300 MB. This matters and must be the default.
 - `Get` returns a **deep copy** (member maps cloned). Returning a reference into the shard is a data race waiting to happen.
 
-**Edge cases.** Apply to a key at exactly `MaxTrackedKeys` (evict then insert, must not evict the key being inserted); delete of a non-existent key; `AdoptSnapshot` with more entries than `MaxTrackedKeys`; `SetSettlementWindow` to a smaller value (keys become settled immediately — must not break the index); `SetSettlementWindow` to zero (everything settled; legal, used in tests); `History` on an evicted key (returns empty, must not error); concurrent `Get` during `Apply` on the same key (the version-fencing test must exercise this under `-race` with 100 goroutines); a key whose value is a 100,000-member set (memory and clone cost — benchmark it); `MarkSuspect("")` on 1M keys (must not take a global lock for seconds — do it per shard, and consider a generation counter instead of touching every entry: a global `suspectGeneration` incremented once, with per-entry comparison, turns an O(n) write into O(1). Prefer this. It is the kind of optimization that shows systems thinking.)
+**Edge cases.** Apply to a key at exactly `MaxTrackedKeys` (evict then insert, must not evict the key being inserted); delete of a non-existent key; `AdoptSnapshot` with more entries than `MaxTrackedKeys`; `SetSettlementWindow` to a smaller value (keys become settled immediately, must not break the index); `SetSettlementWindow` to zero (everything settled; legal, used in tests); `History` on an evicted key (returns empty, must not error); concurrent `Get` during `Apply` on the same key (the version-fencing test must exercise this under `-race` with 100 goroutines); a key whose value is a 100,000-member set (memory and clone cost, benchmark it); `MarkSuspect("")` on 1M keys (must not take a global lock for seconds, do it per shard, and consider a generation counter instead of touching every entry: a global `suspectGeneration` incremented once, with per-entry comparison, turns an O(n) write into O(1). Prefer this. It is the kind of optimization that shows systems thinking.)
 
 **Tests.**
 - Unit tests for every method and edge case above.
@@ -1482,7 +1482,7 @@ type Entry struct {
 
 ---
 
-### M8 — `pkg/target`
+### M8, `pkg/target`
 
 **Responsibility.** Read actual state from the external store. **Read-only, structurally enforced.**
 
@@ -1535,10 +1535,10 @@ type Health struct {
 ```
 
 **`redis` implementation.**
-- `go-redis/v9`, supporting standalone, sentinel, and cluster (cluster changes `SCAN` semantics — you must scan each master; handle it or explicitly reject cluster mode in v1 with a clear error. Prefer: support it, because it's a real deployment and the `ClusterClient.ForEachMaster` helper makes it tractable).
+- `go-redis/v9`, supporting standalone, sentinel, and cluster (cluster changes `SCAN` semantics, you must scan each master; handle it or explicitly reject cluster mode in v1 with a clear error. Prefer: support it, because it's a real deployment and the `ClusterClient.ForEachMaster` helper makes it tractable).
 - `GetMany` pipelines with a configurable batch size (default 500). For `ShapeSet` use `SMEMBERS`; for `ShapeScalar` use `GET`; for `ShapeCounter` use `GET` + integer parse.
-- **`WRONGTYPE` handling:** if the target key holds a different type than the shape expects, that is itself a form of drift (`value_mismatch` with reason `type_mismatch`), not an error to swallow. Surface it.
-- `Scan` uses `SCAN ... MATCH ... COUNT`, honouring the cursor contract. Document explicitly that `SCAN` guarantees only that keys present for the whole iteration are returned at least once — keys may be returned more than once, and keys added or removed mid-scan may or may not appear. Deduplicate within a scan. This guarantee is precisely why §5.5 treats extras conservatively.
+- **`WRONGTYPE` handling:** if the target key holds a different type than the shape expects. That is itself a form of drift (`value_mismatch` with reason `type_mismatch`), not an error to swallow. Surface it.
+- `Scan` uses `SCAN ... MATCH ... COUNT`, honouring the cursor contract. Document explicitly that `SCAN` guarantees only that keys present for the whole iteration are returned at least once, keys may be returned more than once, and keys added or removed mid-scan may or may not appear. Deduplicate within a scan. This guarantee is precisely why §5.5 treats extras conservatively.
 - `Health` parses `INFO stats`, `INFO memory`, `INFO replication`, and `DBSIZE`.
 - Read-only enforcement: build the client with a command hook (`redis.Hook`) that returns an error for any command outside the allowlist. Belt and braces alongside `RecordingTarget`.
 - **Replica reads:** if `Health.Role == "replica"`, log at WARN once and set a condition, because a replica can serve stale data and produce phantom drift. Optionally refuse (`policy.requirePrimary: true`).
@@ -1547,18 +1547,18 @@ type Health struct {
 
 **`recording` wrapper.** Wraps any Target, records every method call, and **fails the test immediately** if a mutating operation is attempted. Used in every test. This is the structural enforcement of NG1/I13.
 
-**Edge cases.** Key absent (must return `ValueAbsent`, not an error — this distinction drives everything downstream); empty set (Redis returns an empty array, which must map to `ValueAbsent` per the M2 decision); `WRONGTYPE`; key expires between `SCAN` and `GET` (must be treated as absent, then handled by two-phase confirm); connection lost mid-pipeline (partial results must be discarded entirely, not partially applied); `SCAN` cursor invalidated by a `FLUSHDB` mid-iteration (Redis restarts the cursor at 0 — detect the loop and abort the scan with a typed error rather than spinning forever; **this is a real trap worth a `DISCOVERIES.md` entry**); a keyspace with 10M keys (scan must be interruptible by context and must not accumulate all keys in memory); `MEMORY USAGE` unavailable on old Redis; auth failure; TLS; a key containing the pattern metacharacters `*?[]`.
+**Edge cases.** Key absent (must return `ValueAbsent`, not an error, this distinction drives everything downstream); empty set (Redis returns an empty array, which must map to `ValueAbsent` per the M2 decision); `WRONGTYPE`; key expires between `SCAN` and `GET` (must be treated as absent, then handled by two-phase confirm); connection lost mid-pipeline (partial results must be discarded entirely, not partially applied); `SCAN` cursor invalidated by a `FLUSHDB` mid-iteration (Redis restarts the cursor at 0, detect the loop and abort the scan with a typed error rather than spinning forever; **this is a real trap worth a `DISCOVERIES.md` entry**); a keyspace with 10M keys (scan must be interruptible by context and must not accumulate all keys in memory); `MEMORY USAGE` unavailable on old Redis; auth failure; TLS; a key containing the pattern metacharacters `*?[]`.
 
 **Tests.**
 - `miniredis` unit tests for every method and edge case (fast, runs everywhere).
-- **Integration tests against real Redis** via testcontainers, build-tagged `integration`, covering: `SCAN` over 100k keys, pipelining, `WRONGTYPE`, cluster mode, sentinel failover, TTL, `INFO` parsing across Redis 6/7 (version differences in `INFO` output are a genuine source of parsing bugs — test both).
+- **Integration tests against real Redis** via testcontainers, build-tagged `integration`, covering: `SCAN` over 100k keys, pipelining, `WRONGTYPE`, cluster mode, sentinel failover, TTL, `INFO` parsing across Redis 6/7 (version differences in `INFO` output are a genuine source of parsing bugs, test both).
 - `RecordingTarget` test proving it catches an attempted write.
 - A test that the redis Hook rejects `SET` even if called directly.
 - Benchmarks: `BenchmarkGetMany500`, `BenchmarkScan1M`.
 
 ---
 
-### M9 — `pkg/differ`
+### M9, `pkg/differ`
 
 **Responsibility.** Compare oracle entries against target values and categorize disagreements. Pure.
 
@@ -1626,15 +1626,15 @@ func (r *Report) JSON() ([]byte, error)
 - Member diffs must be **truncated** at `MaxMembersReported` with a count of the remainder. A key with 100,000 divergent members must not produce a 100,000-line report.
 - The `Findings` slice must be capped (`maxFindings`, default 10,000) with `Truncated` set. Mass divergence must not OOM the reporter.
 - TTL comparison uses a tolerance, because a TTL read at time T is inherently a moving target.
-- `CatExtraInTarget` requires special handling per §5.5 — the differ produces the finding, but the *sweeper* decides whether to report it based on the conservative extras rules.
+- `CatExtraInTarget` requires special handling per §5.5, the differ produces the finding, but the *sweeper* decides whether to report it based on the conservative extras rules.
 
-**Edge cases.** Both absent (return nil — not a finding); oracle absent + target present + `TrustAdopted` (suppress); scalar of length 0 vs absent (per M2 decision, these differ — document which is which); sets differing only in order (must be equal); counter mismatch of exactly 1 (real, report it — don't add a fudge factor); TTL present in oracle but not target under each `ExpiryPolicy`; a `Finding` for a key whose oracle entry was evicted between compare and report (tolerate; the sweeper re-queues).
+**Edge cases.** Both absent (return nil, not a finding); oracle absent + target present + `TrustAdopted` (suppress); scalar of length 0 vs absent (per M2 decision, these differ, document which is which); sets differing only in order (must be equal); counter mismatch of exactly 1 (real, report it, don't add a fudge factor); TTL present in oracle but not target under each `ExpiryPolicy`; a `Finding` for a key whose oracle entry was evicted between compare and report (tolerate; the sweeper re-queues).
 
-**Tests.** A comprehensive table: every `(oracleKind, targetKind, oracleValue, targetValue, trust, expiryPolicy)` combination that is reachable, with the expected `Category` or nil. **Property test (I6):** `Compare` returns nil iff `oe.Value.Equal(tv)` for `TrustComplete` settled keys — generated over random values including binary and large sets. Golden-file tests for `Text()` and `JSON()` output.
+**Tests.** A comprehensive table: every `(oracleKind, targetKind, oracleValue, targetValue, trust, expiryPolicy)` combination that is reachable, with the expected `Category` or nil. **Property test (I6):** `Compare` returns nil iff `oe.Value.Equal(tv)` for `TrustComplete` settled keys, generated over random values including binary and large sets. Golden-file tests for `Text()` and `JSON()` output.
 
 ---
 
-### M10 — `pkg/sweeper`
+### M10, `pkg/sweeper`
 
 **Responsibility.** Orchestrate §5.3, §5.4, §5.5. This is where the correctness mechanisms are composed.
 
@@ -1679,7 +1679,7 @@ func (s *Sweeper) Confirmed() map[string]differ.Finding
 func (s *Sweeper) Subscribe() <-chan differ.Finding
 ```
 
-**`SweepOnce` algorithm — implement exactly this.**
+**`SweepOnce` algorithm, implement exactly this.**
 
 ```
 1.  health := target.Health(ctx)
@@ -1749,14 +1749,14 @@ Bound `pass1` at `maxExtrasTracked` (default 100,000); beyond that, report the m
 
 **Required behaviours.**
 - **Non-overlapping sweeps.** Use a guard flag; if a tick arrives while sweeping, skip and count.
-- **Context cancellation must abort a sweep promptly**, including mid-`Scan`.
-- **A confirmed finding that later resolves must be removed** from `Confirmed()` and counted as recovered. Otherwise `driftwatch_divergent_keys` never returns to zero and the alert never clears — which makes the whole tool useless. Implement resolution detection in the next sweep: any previously-confirmed key that now compares equal is removed and `driftwatch_drift_resolved_total` incremented. Also track and export `driftwatch_drift_duration_seconds` for how long the current drift episode has lasted.
+- **Context cancellation must abort a sweep promptly**: including mid-`Scan`.
+- **A confirmed finding that later resolves must be removed** from `Confirmed()` and counted as recovered. Otherwise `driftwatch_divergent_keys` never returns to zero and the alert never clears, which makes the whole tool useless. Implement resolution detection in the next sweep: any previously-confirmed key that now compares equal is removed and `driftwatch_drift_resolved_total` incremented. Also track and export `driftwatch_drift_duration_seconds` for how long the current drift episode has lasted.
 - **Never report anything when the target is unreachable.** Absence of data is not evidence of drift. This is a correctness requirement, not a nicety.
 
-**Edge cases.** Zero settled keys (valid; report with `KeysCompared: 0`); every key in-flight; oracle empty; target empty but oracle full (mass `missing_in_target` — should correlate with `EvictionSuspected` or a `FLUSHDB`; the report must say so); `W` changing mid-sweep (capture it once at sweep start); confirm queue full; a key confirmed divergent that is then evicted from the oracle (drop it from `Confirmed`, count separately); `SweepOnce` called concurrently with `Run` (must be safe — serialize on the same guard).
+**Edge cases.** Zero settled keys (valid; report with `KeysCompared: 0`); every key in-flight; oracle empty; target empty but oracle full (mass `missing_in_target`, should correlate with `EvictionSuspected` or a `FLUSHDB`; the report must say so); `W` changing mid-sweep (capture it once at sweep start); confirm queue full; a key confirmed divergent that is then evicted from the oracle (drop it from `Confirmed`, count separately); `SweepOnce` called concurrently with `Run` (must be safe, serialize on the same guard).
 
 **Tests.**
-- Deterministic unit tests using `memory` target, `memory` source, and `FakeClock` — **no real sleeps anywhere in this package's tests.**
+- Deterministic unit tests using `memory` target, `memory` source, and `FakeClock`, **no real sleeps anywhere in this package's tests.**
 - Test each numbered step's failure mode: unreachable target, fence failure, batch partial failure.
 - Test that a transient divergence within W is never reported.
 - Test that a real divergence *is* reported after exactly one confirm cycle.
@@ -1768,7 +1768,7 @@ Bound `pass1` at `maxExtrasTracked` (default 100,000); beyond that, report the m
 
 ---
 
-### M11 — `pkg/lag`
+### M11, `pkg/lag`
 
 **Responsibility.** Measure event→target convergence latency; drive adaptive `W`.
 
@@ -1819,19 +1819,19 @@ type Stats struct {
 ```
 
 **Required behaviours.**
-- Probe keys are selected by sampling from the oracle's settled set, rotating every `ProbeRotation` so hot and cold keys are both represented. Selection must be cheap — reservoir-sample during the sweep rather than scanning separately.
-- Polling backoff: 10ms, 20ms, 40ms, … capped at 1s, giving up at `MaxPollDelay`. A timed-out probe is recorded as `MaxPollDelay` in the distribution (not discarded — discarding timeouts biases the estimate optimistically, which would shrink W and cause false positives. This is a statistics trap worth noting in `DISCOVERIES.md`.)
+- Probe keys are selected by sampling from the oracle's settled set, rotating every `ProbeRotation` so hot and cold keys are both represented. Selection must be cheap, reservoir-sample during the sweep rather than scanning separately.
+- Polling backoff: 10ms, 20ms, 40ms, … capped at 1s, giving up at `MaxPollDelay`. A timed-out probe is recorded as `MaxPollDelay` in the distribution (not discarded, discarding timeouts biases the estimate optimistically, which would shrink W and cause false positives. This is a statistics trap worth noting in `DISCOVERIES.md`.)
 - `SettlementWindow()` must be lock-free on the read path (`atomic.Int64` of nanoseconds).
 - **Hysteresis:** W must not oscillate. Only change W if the new computed value differs by more than 20%, and rate-limit changes to once per minute. Log every change at INFO with old and new values.
 - If `Static` is set, `Run` is a no-op that still records the histogram (measurement is useful even when not used for control).
 
-**Edge cases.** No probe keys available (empty oracle) — must not busy-loop; every probe times out (target is broken — W should hit `MaxWindow` and a condition should fire, not grow unbounded); a probe key deleted mid-poll (treat as converged if the target also shows absent); fewer than 100 observations (do not adapt yet; use `MinWindow` floor and report `Adaptive: false` until enough data); the histogram's p99 exceeding `MaxWindow/SafetyFactor` (clamp, log, set a condition — the materializer is slower than driftwatch can meaningfully audit).
+**Edge cases.** No probe keys available (empty oracle), must not busy-loop; every probe times out (target is broken, W should hit `MaxWindow` and a condition should fire, not grow unbounded); a probe key deleted mid-poll (treat as converged if the target also shows absent); fewer than 100 observations (do not adapt yet; use `MinWindow` floor and report `Adaptive: false` until enough data); the histogram's p99 exceeding `MaxWindow/SafetyFactor` (clamp, log, set a condition, the materializer is slower than driftwatch can meaningfully audit).
 
 **Tests.** Fake clock throughout. Test: convergence measurement accuracy against a `memory` target with injected latency; timeout accounting; hysteresis (assert W does not change for a 10% shift and does for a 30% shift); rate limiting; clamping at min and max; the "fewer than 100 observations" gate. Property test: `SettlementWindow()` always returns a value in `[MinWindow, MaxWindow]` under any generated observation stream.
 
 ---
 
-### M12 — `pkg/metrics`
+### M12, `pkg/metrics`
 
 **Responsibility.** All Prometheus instrumentation, with bounded cardinality.
 
@@ -1927,7 +1927,7 @@ driftwatch_panics_total{check,component}                              counter
 
 ---
 
-### M13 — `pkg/explain`
+### M13, `pkg/explain`
 
 **Responsibility.** Answer "what happened to this key?" This is the module that makes driftwatch a debugging tool rather than just an alarm, and it is the feature most worth demonstrating.
 
@@ -2002,7 +2002,7 @@ func (e *Explanation) Text() string
 func (e *Explanation) JSON() ([]byte, error)
 ```
 
-**Diagnosis rules — implement each as a named, individually-tested rule.**
+**Diagnosis rules, implement each as a named, individually-tested rule.**
 
 | Code | Fires when | Statement (template) |
 |---|---|---|
@@ -2015,13 +2015,13 @@ func (e *Explanation) JSON() ([]byte, error)
 | `TARGET_EVICTION_LIKELY` | missing + evictions rising | Redis reported {n} evictions since the last sweep and is at {pct}% of maxmemory; this key was probably evicted. |
 | `TTL_EXPIRED` | missing + oracle TTL elapsed | The oracle's TTL for this key expired {d} ago; absence in the target is expected. |
 | `TYPE_MISMATCH` | WRONGTYPE | Target holds type {actual} but the {proj} projection expects {expected}; the projection may be misconfigured for this keyspace. |
-| `CLOCK_SKEW_HIGH` | skew > W | Publisher {p}'s clock differs from driftwatch's by {d}, which exceeds the settlement window; publisher timestamps in this output are unreliable (settlement itself is unaffected — it uses local receive time). |
+| `CLOCK_SKEW_HIGH` | skew > W | Publisher {p}'s clock differs from driftwatch's by {d}, which exceeds the settlement window; publisher timestamps in this output are unreliable (settlement itself is unaffected, it uses local receive time). |
 | `MEMBER_SUBSET` | target members ⊂ oracle members | Target is missing {n} of {m} members ({sample}); consistent with dropped `add` events rather than a wholesale failure. |
 | `MEMBER_SUPERSET` | oracle members ⊂ target members | Target holds {n} extra members ({sample}); consistent with dropped `remove` events. |
 | `HISTORY_TRUNCATED` | ring is full | Only the last {n} events are retained; earlier history is unavailable. |
 | `NO_HISTORY` | key not in oracle at all | driftwatch has never observed an event for this key. |
 
-**Text output format.** Must be genuinely readable — this is the screenshot that goes in the README. Sketch:
+**Text output format.** Must be genuinely readable, this is the screenshot that goes in the README. Sketch:
 
 ```
 KEY  block:9f3a2c1e
@@ -2051,13 +2051,13 @@ PUBLISHERS
   replica-2   epoch 1  hwm  8847  gaps 0            last seen 47s ago
 ```
 
-**Edge cases.** Key not in oracle and not in target (`VerdictUnknownKey`); target unreachable (still show oracle state and history — a partial answer is far better than an error); history empty but key present (adopted at bootstrap); binary key (must render hex-escaped and must be accepted as a CLI argument — support `--key-hex`); a key with 100,000 members (truncate the display, show counts); multiple diagnoses firing at once (order by confidence, then by code).
+**Edge cases.** Key not in oracle and not in target (`VerdictUnknownKey`); target unreachable (still show oracle state and history, a partial answer is far better than an error); history empty but key present (adopted at bootstrap); binary key (must render hex-escaped and must be accepted as a CLI argument, support `--key-hex`); a key with 100,000 members (truncate the display, show counts); multiple diagnoses firing at once (order by confidence, then by code).
 
 **Tests.** One test per diagnosis rule, each constructing the exact state that should trigger it and asserting the `Code` appears with the right confidence. Golden-file tests for `Text()` covering: agree, in-flight, missing-with-gaps, missing-without-gaps, extra, member-subset, type-mismatch, truncated-history, unknown-key. Golden files live in `pkg/explain/testdata/`. A test asserting `Text()` never exceeds 120 columns.
 
 ---
 
-### M14 — `pkg/check`
+### M14, `pkg/check`
 
 **Responsibility.** Assemble a complete, running check from a spec. The composition root.
 
@@ -2101,7 +2101,7 @@ type Deps struct {
 - `Close()` must be safe to call after a failed `New` (partial construction cleanup) and safe to call twice.
 - Implement **bootstrap** per §5.6 before starting the sweeper: in `Adopt` mode, perform the full target scan into the oracle and only then start sweeping. Report `Phase: Bootstrapping` throughout.
 
-**Edge cases.** Spec with an unknown source/codec/projection/target name (clear error listing valid names); source that fails to connect at startup (must still start — the check is `Phase: Degraded`, not a construction failure, because the endpoint may come up later); bootstrap scan that fails (retry with backoff, stay in `Bootstrapping`); bootstrap scan that finds more keys than `MaxTrackedKeys` (adopt as many as fit, set `OracleSaturated`, log the shortfall explicitly); `Close` during bootstrap.
+**Edge cases.** Spec with an unknown source/codec/projection/target name (clear error listing valid names); source that fails to connect at startup (must still start, the check is `Phase: Degraded`, not a construction failure, because the endpoint may come up later); bootstrap scan that fails (retry with backoff, stay in `Bootstrapping`); bootstrap scan that finds more keys than `MaxTrackedKeys` (adopt as many as fit, set `OracleSaturated`, log the shortfall explicitly); `Close` during bootstrap.
 
 **Tests.** Construction table: every invalid spec variant → expected error. A full in-process integration test using memory source + memory target + fake clock that drives a complete scenario (events → oracle → sweep → clean report → inject drift → confirmed finding → repair → resolved) with zero real time elapsed. This single test is the best proof the whole system composes correctly; make it the flagship test and name it `TestCheck_EndToEnd_InProcess`.
 
@@ -2328,7 +2328,7 @@ Enforce all of these. Each gets a unit test in `api/v1alpha1/driftcheck_webhook_
 | `ringSize` between 1 and 1024 | bound error |
 | `bootstrap: Strict` requires the codec to map `snapshotBegin`/`snapshotEnd` | `policy.bootstrap=Strict requires codec.opMapping to define snapshotBegin and snapshotEnd` |
 | `expiryPolicy: Ignore` requires `assumedTTL > 0` | field error |
-| secret refs must exist in the same namespace | `target.redis.passwordSecretRef: secret %q not found` (validated by controller, not webhook — a webhook must not depend on other objects existing) |
+| secret refs must exist in the same namespace | `target.redis.passwordSecretRef: secret %q not found` (validated by controller, not webhook, a webhook must not depend on other objects existing) |
 | immutable after creation: `projection.type`, `target.type` | `field is immutable; delete and recreate the DriftCheck` |
 
 Defaulting webhook fills every optional field so `status` reflects effective config and users can `kubectl get driftcheck -o yaml` to see what is actually running.
@@ -2352,19 +2352,19 @@ type DriftCheckReconciler struct {
 3. Ensure the finalizer `driftwatch.io/cleanup` is present.
 4. Resolve secret references. On failure: set `Ready=False, reason=SecretMissing`, requeue after 30s.
 5. Compute a **spec hash**. If a runner exists with the same hash, only refresh status and return.
-6. If a runner exists with a different hash: stop it cleanly, then start a new one. Log the transition. **A spec change must never leave two runners for the same check** — hold a per-key mutex in the registry.
+6. If a runner exists with a different hash: stop it cleanly, then start a new one. Log the transition. **A spec change must never leave two runners for the same check**, hold a per-key mutex in the registry.
 7. Start the runner in a goroutine tied to the manager's context. Set `Phase: Bootstrapping`.
 8. Update `status` from `check.Status()`, including all conditions.
 9. Requeue after `statusRefreshInterval` (default 15s) so status stays fresh without watch churn.
 
 **Requirements.**
 - **Leader election enabled** (`--leader-elect`), so exactly one manager runs the checks. On leadership loss, all runners stop.
-- **Status updates must use `Status().Patch` with optimistic concurrency**, retrying on conflict. Never `Update` the whole object from a stale copy.
+- **Status updates must use `Status().Patch` with optimistic concurrency**: retrying on conflict. Never `Update` the whole object from a stale copy.
 - Emit Kubernetes **Events** for: bootstrap complete, drift detected (with count), drift resolved, source disconnected/reconnected, target unavailable, oracle saturated, publisher restart detected. Events are what an operator sees first in `kubectl describe`.
 - **RBAC: least privilege.** `driftchecks` get/list/watch/update/patch, `driftchecks/status` update/patch, `driftchecks/finalizers` update, `secrets` get (namespaced, and document that a `Role` per namespace is preferable to a `ClusterRole` for secrets), `events` create/patch, plus leader-election `leases`. **No pod/node/deployment access whatsoever.** Generate with kubebuilder markers and commit the generated `config/rbac/role.yaml`.
 - Multiple `DriftCheck`s run concurrently in one manager, each isolated: a panic or fatal error in one must not affect others (per-runner recover, per-runner context).
 
-**Edge cases.** Two `DriftCheck`s with identical source and target (legal — different projections auditing the same data; must not interfere, and metrics must be separable by the `check` label); a check deleted while its bootstrap scan is running (context cancellation must abort the scan promptly); a spec updated 10 times in 10 seconds (debounce: coalesce by comparing hash, and rate-limit restarts to once per 5s per check); manager shutdown with 50 running checks (all must stop within `shutdownGrace`; parallelize the shutdown); a `DriftCheck` in a namespace the manager can't read secrets from (clear condition, no crash-loop).
+**Edge cases.** Two `DriftCheck`s with identical source and target (legal, different projections auditing the same data; must not interfere, and metrics must be separable by the `check` label); a check deleted while its bootstrap scan is running (context cancellation must abort the scan promptly); a spec updated 10 times in 10 seconds (debounce: coalesce by comparing hash, and rate-limit restarts to once per 5s per check); manager shutdown with 50 running checks (all must stop within `shutdownGrace`; parallelize the shutdown); a `DriftCheck` in a namespace the manager can't read secrets from (clear condition, no crash-loop).
 
 **Tests.**
 - **envtest** suite: create/update/delete lifecycle, finalizer behaviour, status patching under conflict, spec-change restart, secret resolution failure and recovery, event emission (assert on the fake recorder), and `goleak` after teardown.
@@ -2375,7 +2375,7 @@ type DriftCheckReconciler struct {
 
 ## 11. CLI specification
 
-Binary: `driftwatch`. Framework: cobra. Every command must work **without Kubernetes** — the CLI reads a YAML file with the same schema as `DriftCheck.spec`. This matters: it makes the tool usable and testable standalone, and it makes the demo easy.
+Binary: `driftwatch`. Framework: cobra. Every command must work **without Kubernetes**, the CLI reads a YAML file with the same schema as `DriftCheck.spec`. This matters: it makes the tool usable and testable standalone, and it makes the demo easy.
 
 ### `driftwatch watch -f check.yaml`
 Runs a check in the foreground. Serves `/metrics` on `--metrics-addr` (default `:9090`). Prints a live status line every `--status-interval` (default 10s) and a full report on each sweep at `-v 1`.
@@ -2386,10 +2386,10 @@ Exit codes: `0` clean shutdown; `1` fatal error; `2` config invalid; `3` (with `
 Bootstraps, waits `--warmup` (default 2× W) to fill the oracle, performs one sweep plus one extras scan, prints the report, exits. `--output text|json`. Exit code 3 if drift found. **This is the command for CI pipelines**: assert your cache index is consistent as a test.
 
 ### `driftwatch explain -f check.yaml --key block:9f3a`
-Runs a check in the background, waits for the key to be observed (or `--wait` timeout), prints the explanation. `--key-hex` for binary keys. `--output text|json`. Also supports `--from-running http://localhost:9090` to query a live `watch` process via a small internal HTTP endpoint (`/explain?key=...`) — needed for the Kubernetes case where you can't easily start a second subscriber.
+Runs a check in the background, waits for the key to be observed (or `--wait` timeout), prints the explanation. `--key-hex` for binary keys. `--output text|json`. Also supports `--from-running http://localhost:9090` to query a live `watch` process via a small internal HTTP endpoint (`/explain?key=...`), needed for the Kubernetes case where you can't easily start a second subscriber.
 
 ### `driftwatch replay -f check.yaml --events events.jsonl`
-Deterministic offline replay: reads events from a file, applies them, then diffs against a target (which may be `memory` seeded from `--target-snapshot snapshot.json`). Fully hermetic — no network. This is how a captured incident gets reproduced, and it is the backbone of regression testing. `--speed`, `--stop-at-seq`, `--dump-oracle out.json`.
+Deterministic offline replay: reads events from a file, applies them, then diffs against a target (which may be `memory` seeded from `--target-snapshot snapshot.json`). Fully hermetic, no network. This is how a captured incident gets reproduced, and it is the backbone of regression testing. `--speed`, `--stop-at-seq`, `--dump-oracle out.json`.
 
 ### `driftwatch inject -f check.yaml --scenario drop-burst`
 Test-only helper (built with a `dev` tag, excluded from release binaries): publishes a synthetic event stream through the fault injector so a human can watch drift appear on the dashboard. Scenarios named identically to the fault matrix rows in §15.3. `--list-scenarios`, `--duration`, `--rate`.
@@ -2409,29 +2409,29 @@ Prints version, commit, build date, Go version. `--output json`.
 
 `deploy/grafana/driftwatch-dashboard.json`. Must be importable with a `DS_PROMETHEUS` datasource variable, and templated by a `check` variable. Rows and panels:
 
-**Row 1 — Verdict (the "is it broken" row)**
-- Stat: `sum(driftwatch_divergent_keys{check=~"$check"})` — big number, green at 0, red above threshold.
-- Stat: `driftwatch_drift_duration_seconds` — how long the current episode has lasted.
-- Stat: `driftwatch_coverage_ratio` — what fraction of the keyspace is actually being asserted on. **This panel is what stops the dashboard from lying**: 0 divergence at 3% coverage is meaningless.
+**Row 1, Verdict (the "is it broken" row)**
+- Stat: `sum(driftwatch_divergent_keys{check=~"$check"})`, big number, green at 0, red above threshold.
+- Stat: `driftwatch_drift_duration_seconds`, how long the current episode has lasted.
+- Stat: `driftwatch_coverage_ratio`, what fraction of the keyspace is actually being asserted on. **This panel is what stops the dashboard from lying**: 0 divergence at 3% coverage is meaningless.
 - Timeseries: `driftwatch_divergent_keys` by `category`.
 
-**Row 2 — Sequence integrity**
+**Row 2, Sequence integrity**
 - Timeseries: `rate(driftwatch_seq_gaps_total[5m])` by publisher.
 - Timeseries: `driftwatch_seq_missing_events` by publisher.
-- Table: publisher, epoch, HWM, missing, restarts, skew — from the gauge series.
+- Table: publisher, epoch, HWM, missing, restarts, skew, from the gauge series.
 
-**Row 3 — Lag and settlement**
+**Row 3, Lag and settlement**
 - Heatmap: `driftwatch_convergence_seconds_bucket`.
 - Timeseries: p50/p90/p99 convergence overlaid with `driftwatch_settlement_window_seconds`. **The visual point: W must sit above p99.** If they cross, false positives are coming.
 - Timeseries: `driftwatch_transient_divergence_total` rate by reason.
 
-**Row 4 — Oracle and target**
+**Row 4, Oracle and target**
 - Timeseries: `driftwatch_oracle_keys` stacked by trust.
 - Timeseries: `driftwatch_target_keyspace_size` vs `driftwatch_oracle_keys` total.
 - Timeseries: `driftwatch_oracle_inflight_keys`, `driftwatch_oracle_never_settled_keys`.
 - Timeseries: `rate(driftwatch_target_evictions_observed_total[5m])`.
 
-**Row 5 — Throughput and health**
+**Row 5, Throughput and health**
 - Timeseries: `rate(driftwatch_events_received_total[1m])` by op.
 - Timeseries: `rate(driftwatch_events_dropped_total[1m])` by reason.
 - Timeseries: `driftwatch_ingest_queue_depth` by stage.
@@ -2456,7 +2456,7 @@ Include the JSON in the repo and a **screenshot** in `docs/evidence/` taken duri
 | `DriftwatchSweepsSkipped` | `rate(driftwatch_sweeps_skipped_total[10m]) > 0` | 10m | warning |
 | `DriftwatchIngestBackpressure` | `rate(driftwatch_events_dropped_total{reason="buffer_full"}[5m]) > 0` | 5m | critical |
 
-Each alert must have `summary`, `description`, and a `runbook_url` pointing at an anchor in `docs/OPERATIONS.md`. Write that runbook — one section per alert saying what it means, what to check, and what the likely causes are. A runbook is cheap to write and is exactly the kind of thing that signals operational maturity.
+Each alert must have `summary`, `description`, and a `runbook_url` pointing at an anchor in `docs/OPERATIONS.md`. Write that runbook, one section per alert saying what it means, what to check, and what the likely causes are. A runbook is cheap to write and is exactly the kind of thing that signals operational maturity.
 
 ### 12.3 Logging
 
@@ -2471,7 +2471,7 @@ Each alert must have `summary`, `description`, and a `runbook_url` pointing at a
 
 ## 13. Fault injection framework
 
-Lives in `test/harness/faultinjector`. It is a `Source` **middleware** — it wraps any `Source` and perturbs the stream. This design means every fault scenario can be tested in-process with a fake clock, with no cluster and no flakiness.
+Lives in `test/harness/faultinjector`. It is a `Source` **middleware**, it wraps any `Source` and perturbs the stream. This design means every fault scenario can be tested in-process with a fake clock, with no cluster and no flakiness.
 
 ```go
 package faultinjector
@@ -2497,9 +2497,9 @@ type Fault interface {
 |---|---|---|
 | Drop | `Drop(rate float64, seed int64)` | drops each message with probability `rate` |
 | DropBurst | `DropBurst(after, count int)` | drops `count` consecutive messages after the first `after` |
-| DropRange | `DropSeqRange(from, to uint64)` | drops exactly the messages with seq in `[from,to]` — **the deterministic drop used by most tests** |
+| DropRange | `DropSeqRange(from, to uint64)` | drops exactly the messages with seq in `[from,to]`, **the deterministic drop used by most tests** |
 | Reorder | `Reorder(window int, seed int64)` | buffers `window` messages and emits in shuffled order |
-| ReorderSwap | `ReorderSwap(a, b uint64)` | swaps exactly two seqs — deterministic |
+| ReorderSwap | `ReorderSwap(a, b uint64)` | swaps exactly two seqs, deterministic |
 | Duplicate | `Duplicate(rate float64, delay time.Duration, seed int64)` | re-emits a copy after `delay` |
 | Delay | `Delay(min, max time.Duration, seed int64)` | holds each message a jittered interval |
 | DelayPublisher | `DelayPublisher(pub string, d time.Duration)` | delays only one publisher's stream |
@@ -2571,7 +2571,7 @@ Lifecycle in `test/e2e/kind.go`:
 
 ### 14.3 Diagnostics on failure (this is an explicit deliverable)
 
-`test/e2e/diagnostics.go` — on any failure, dump to `test/e2e/_artifacts/<test-name>/`:
+`test/e2e/diagnostics.go`, on any failure, dump to `test/e2e/_artifacts/<test-name>/`:
 
 - `kubectl get driftcheck -o yaml` (full status, all conditions)
 - `kubectl describe driftcheck` (events)
@@ -2584,7 +2584,7 @@ Lifecycle in `test/e2e/kind.go`:
 - `kubectl get pods -o wide`, node describe
 - The full `DriftCheck` spec that was applied
 
-Upload as a CI artifact. **A failing e2e test that dumps nothing costs an hour per occurrence.** Write the diagnostics collector before writing the second e2e test — you will need it immediately.
+Upload as a CI artifact. **A failing e2e test that dumps nothing costs an hour per occurrence.** Write the diagnostics collector before writing the second e2e test, you will need it immediately.
 
 ### 14.4 Scenarios
 
@@ -2595,7 +2595,7 @@ Upload as a CI artifact. **A failing e2e test that dumps nothing costs an hour p
 | E3 | `SelfLossReportsSuspect` | driftwatch's own subscription is partitioned (toxiproxy) so it misses events; asserts `suspectDivergentKeys > 0` and `divergentKeys == 0`. The honesty test. |
 | E4 | `TargetFlushAndRecover` | `FLUSHDB` mid-run → mass `missingInTarget` confirmed, `evictionSuspected` reasoning in the report; then the materializer re-syncs and drift resolves to 0 with `drift_resolved_total` incrementing. |
 | E5 | `RedisEviction` | `maxmemory` set low → real evictions → driftwatch correlates and the `explain` output produces `TARGET_EVICTION_LIKELY`. |
-| E6 | `OperatorLifecycle` | Create, update (`sweepInterval` and `settlementWindow` changed), pause, resume, delete — all mid-traffic. Exactly one runner throughout; no goroutine leak in the manager (assert via `/debug/pprof/goroutine?debug=1` count before and after). |
+| E6 | `OperatorLifecycle` | Create, update (`sweepInterval` and `settlementWindow` changed), pause, resume, delete, all mid-traffic. Exactly one runner throughout; no goroutine leak in the manager (assert via `/debug/pprof/goroutine?debug=1` count before and after). |
 | E7 | `PublisherRestart` | Publisher pod is deleted and rescheduled; seq resets; driftwatch detects the restart, does not report a spurious 900,000-event gap, and converges. |
 | E8 | `MultiCheck` | Two `DriftCheck`s on the same Redis with different projections and key patterns; metrics separate cleanly by `check` label; a failure injected into one does not affect the other. |
 
@@ -2603,8 +2603,8 @@ Upload as a CI artifact. **A failing e2e test that dumps nothing costs an hour p
 
 - **No `time.Sleep` for synchronization.** Poll with `Eventually` and explicit conditions. Timeouts are per-assertion and generous (30–90s) but bounded.
 - **Deterministic cleanup**: `AfterEach` deletes the `DriftCheck` and waits for the finalizer to clear; `AfterSuite` deletes the cluster unless `DRIFTWATCH_E2E_KEEP=1`.
-- **Namespace per scenario**, generated name, so scenarios cannot interfere.
-- **Retry only cluster-setup steps**, never assertions. Retrying an assertion hides a real bug.
+- **Namespace per scenario**: generated name, so scenarios cannot interfere.
+- **Retry only cluster-setup steps**: never assertions. Retrying an assertion hides a real bug.
 - Total wall time target: **under 8 minutes** on a 2-core GitHub runner.
 - `make e2e` must work from a clean clone with only Docker and Go installed. Test this by actually doing it in a fresh container before declaring the phase done.
 
@@ -2615,8 +2615,8 @@ Upload as a CI artifact. **A failing e2e test that dumps nothing costs an hour p
 This is the specification of correctness under failure. **Every row is one test in `test/faults/`.** The "Expected" column is the assertion; if the implementation does something else, the implementation is wrong.
 
 Column key:
-- **Fault on** — whose event stream is perturbed: `M` = the materializer's (so the target becomes genuinely wrong), `D` = driftwatch's (so the oracle becomes wrong), `T` = the target store directly.
-- **Expected** — required observable behaviour.
+- **Fault on**: whose event stream is perturbed: `M` = the materializer's (so the target becomes genuinely wrong), `D` = driftwatch's (so the oracle becomes wrong), `T` = the target store directly.
+- **Expected**: required observable behaviour.
 
 ### 15.1 Event-stream faults
 
@@ -2628,7 +2628,7 @@ Column key:
 | 4 | Burst of 100 dropped | D | All affected keys `Suspect`. `seq_missing_events` = 100. Confirmed count stays 0. |
 | 5 | Sustained 5% drop for 60s | M | Confirmed count rises monotonically; `drift_duration_seconds` grows; no memory growth beyond bounds; sweep duration stays under `sweepInterval`. |
 | 6 | Adjacent pair reordered (add,remove → remove,add) | M | Final target state is wrong (member present when it should be absent) → confirmed `memberMismatch`. This is the case that proves ordering matters. |
-| 7 | Adjacent pair reordered | D | Oracle transiently wrong, then correct once both applied. **Zero findings**, because reordering loses no information — only ordering. Assert this explicitly: it's a common false-positive source. |
+| 7 | Adjacent pair reordered | D | Oracle transiently wrong, then correct once both applied. **Zero findings**, because reordering loses no information, only ordering. Assert this explicitly: it's a common false-positive source. |
 | 8 | Window-8 shuffle over 10,000 events | D | Zero confirmed findings after settlement. Oracle final state equals the reference implementation's. |
 | 9 | Duplicate delivery, immediate | D | `events_dropped_total{reason="duplicate"}` increments. Oracle state unchanged (idempotent). Zero findings. |
 | 10 | Duplicate delivery, delayed 30s (after settlement) | D | Same as #9. The late duplicate must not re-bump the version or reset `LastEventAt`, or the key would falsely become in-flight. **Assert `LastEventAt` unchanged.** |
@@ -2639,7 +2639,7 @@ Column key:
 | 15 | Corrupt payload, 1% | D | `events_dropped_total{reason="decode_error"}` rises. No panic. `CodecMismatch` condition **does not** fire at 1% (below the 10% threshold). |
 | 16 | Corrupt payload, 50% | D | `CodecMismatch=True`. Still no panic. Process stays up. |
 | 17 | Truncated payload | D | Same as #15 with `decode_error`. |
-| 18 | Oversized payload (2 MiB, max 1 MiB) | D | `events_dropped_total{reason="too_large"}` = 1. No allocation of 2 MiB (assert via memstats delta — the payload must be rejected before full buffering where the transport allows). |
+| 18 | Oversized payload (2 MiB, max 1 MiB) | D | `events_dropped_total{reason="too_large"}` = 1. No allocation of 2 MiB (assert via memstats delta, the payload must be rejected before full buffering where the transport allows). |
 | 19 | Unknown op code | D | `events_dropped_total{reason="unknown_op"}` = 1, distinct from `decode_error`. |
 | 20 | Explicit publisher restart (epoch bump, seq → 0) | D | `publisher_restarts_total{kind="explicit"}` = 1. **No gap recorded.** HWM resets. Keys not marked Suspect (a declared restart with a snapshot is clean; without a snapshot, mark Suspect and assert that). |
 | 21 | Implicit restart (seq → 1, no epoch change) | D | `publisher_restarts_total{kind="implicit"}` = 1. Detected via the heuristic. `seq_gaps_total` **does not** jump by 900,000. This is the test that catches the naive implementation. |
@@ -2648,7 +2648,7 @@ Column key:
 | 24 | Publisher clock 5 minutes behind | D | Mirror of #23, skew ≈ −300. |
 | 25 | Two publishers writing the same key concurrently | M/D | Last-seq-wins per publisher is not globally meaningful; assert driftwatch does **not** report drift when the target reflects either valid interleaving. Document this as an inherent limitation: for `keysetOwnership`, adds/removes from different publishers commute per-member, so this is well-defined; for `scalar`, it is not, and the projection must declare it. Add a `MultiWriterUnsafe` condition when a scalar projection sees the same key from ≥2 publishers. |
 | 26 | Heartbeat-only stream (no key events) | D | Seq advances, no keys created, no findings, `oracle_keys` = 0. Must not divide by zero in `coverage_ratio`. |
-| 27 | 1,000 publishers (exceeds `maxPublishers`=1024? no — test at 1,500) | D | Oldest publishers evicted, counter increments, no unbounded memory. Metrics collapse to `publisher="__other__"` beyond 100. |
+| 27 | 1,000 publishers (exceeds `maxPublishers`=1024? no, test at 1,500) | D | Oldest publishers evicted, counter increments, no unbounded memory. Metrics collapse to `publisher="__other__"` beyond 100. |
 
 ### 15.2 Target-store faults
 
@@ -2693,7 +2693,7 @@ Column key:
 | 59 | Spec change from `keysetOwnership` to `scalar` (immutable field) | Webhook rejects. If bypassed, `Apply` returns shape-mismatch errors rather than panicking. |
 | 60 | 50 concurrent checks in one manager | All run, metrics separable, memory linear in checks, shutdown of all within `shutdownGrace`. |
 
-**Every row above must have a corresponding named test.** Add a meta-test `TestFaultMatrix_Coverage` that reflects over the test names in `test/faults/` and fails if any matrix row number lacks a test named `TestFault<NN>_<Name>`. This makes the matrix self-enforcing rather than aspirational — a documentation table that CI verifies is worth ten that it doesn't.
+**Every row above must have a corresponding named test.** Add a meta-test `TestFaultMatrix_Coverage` that reflects over the test names in `test/faults/` and fails if any matrix row number lacks a test named `TestFault<NN>_<Name>`. This makes the matrix self-enforcing rather than aspirational, a documentation table that CI verifies is worth ten that it doesn't.
 
 ---
 
@@ -2808,7 +2808,7 @@ Any ignore for driftwatch's own code is a bug to fix, not an ignore to add.
 `test/interop/`, build tag `interop`, CI job with Python + libzmq installed.
 
 1. `publisher.py` uses `pyzmq` (real libzmq) to bind a PUB socket and emit 10,000 events with known seqs across 3 topics, including multipart and single-frame variants, and payloads with binary content.
-2. The Go test subscribes with `go-zeromq/zmq4`, collects, and asserts: all 10,000 received (allowing for the documented startup race — use a synchronization handshake, not a sleep), topic filtering worked, multipart framing parsed correctly, binary payloads byte-identical.
+2. The Go test subscribes with `go-zeromq/zmq4`, collects, and asserts: all 10,000 received (allowing for the documented startup race, use a synchronization handshake, not a sleep), topic filtering worked, multipart framing parsed correctly, binary payloads byte-identical.
 3. Reverse direction too: Go PUB → `pyzmq` SUB, verified by the Python process writing results to a file the Go test reads.
 
 **Whatever this test reveals goes in `docs/DISCOVERIES.md`.** The ZMQ subscribe-before-connect race ("slow joiner") is real and will bite; documenting it with the reproduction is exactly the kind of finding that makes the repo credible.
@@ -2824,7 +2824,7 @@ Any ignore for driftwatch's own code is a bug to fix, not an ignore to add.
   - No `panics_total`.
   - Sweep p99 duration < `sweepInterval`.
   - `coverage_ratio > 0.95`.
-- At the 30-minute mark, inject a deliberate 10-event drop and assert detection and then resolution — proving the tool still *works* after 30 minutes, not just that it doesn't crash.
+- At the 30-minute mark, inject a deliberate 10-event drop and assert detection and then resolution, proving the tool still *works* after 30 minutes, not just that it doesn't crash.
 - Dump `pprof` heap and goroutine profiles at start, middle, and end as CI artifacts.
 
 ### 16.8 Benchmarks and regression gating
@@ -2858,7 +2858,7 @@ Gate with `benchstat` in CI against committed baselines in `docs/benchmarks/`: f
 | `internal/cli` | 70% |
 | **overall** | **≥ 88%** |
 
-CI fails below target. Coverage is a floor, not a goal — a 95%-covered module with no property tests is worse than an 85%-covered one with them. Do not chase coverage by testing getters.
+CI fails below target. Coverage is a floor, not a goal, a 95%-covered module with no property tests is worse than an 85%-covered one with them. Do not chase coverage by testing getters.
 
 ---
 
@@ -2900,7 +2900,7 @@ On tag `v*`: `goreleaser` → multi-arch binaries + checksums + SBOM (`syft`), m
 
 ### 17.5 `Makefile`
 
-Targets (every one must actually work — test them):
+Targets (every one must actually work, test them):
 
 ```
 make help                  # default; self-documenting via ## comments
@@ -2928,7 +2928,7 @@ make verify                # everything CI runs, locally
 make clean
 ```
 
-**`make demo` is a required deliverable, not a nicety.** One command that brings up the whole stack with Grafana at localhost:3000 showing the dashboard, plus `make demo-inject-drift` that triggers a fault so a visitor can watch the number go red and then recover. This is how you show the project in 60 seconds — in an interview, in a PR description, in a README GIF. Build it in Phase 8 and make sure it works from a clean clone.
+**`make demo` is a required deliverable, not a nicety.** One command that brings up the whole stack with Grafana at localhost:3000 showing the dashboard, plus `make demo-inject-drift` that triggers a fault so a visitor can watch the number go red and then recover. This is how you show the project in 60 seconds, in an interview, in a PR description, in a README GIF. Build it in Phase 8 and make sure it works from a clean clone.
 
 ---
 
@@ -2945,13 +2945,13 @@ make clean
 | Resource limits in manifests | requests/limits set in the sample deployment and Helm defaults; documented sizing guidance keyed to `maxTrackedKeys` |
 | Bounded resource use | every queue, map, and buffer has an explicit cap (audited in §19.2) |
 | TLS to Redis and NATS | supported with CA from a secret; `insecureSkipVerify` allowed but logged at WARN on every startup |
-| Input validation | payload size cap, JSON depth cap, key length cap, member count cap — all enforced at the boundary |
+| Input validation | payload size cap, JSON depth cap, key length cap, member count cap, all enforced at the boundary |
 | Dependency scanning | `govulncheck` + `trivy` in CI, failing on HIGH/CRITICAL |
 | Supply chain | SBOM + cosign signatures on release |
 | No network egress beyond configured endpoints | documented; no telemetry, no phone-home, no update check |
 | Fuzzing | codec fuzzed in CI; corpus committed |
 
-**Explicit note for the README:** driftwatch reads potentially sensitive key names and values. The `--redact-keys` flag hashes key names in all output, and `retainRaw: false` (the default) means payloads are never stored. State this plainly — operators will ask.
+**Explicit note for the README:** driftwatch reads potentially sensitive key names and values. The `--redact-keys` flag hashes key names in all output, and `retainRaw: false` (the default) means payloads are never stored. State this plainly, operators will ask.
 
 ---
 
@@ -3003,7 +3003,7 @@ Nine phases. **Do them in order.** Each ends with a commit, green CI, and someth
 
 ---
 
-### Phase 0 — Scaffold (target: 0.5 day)
+### Phase 0, Scaffold (target: 0.5 day)
 
 **Build:** `go mod init`; the full directory tree from §7 (empty files with package declarations are fine); `Makefile` with `help build lint test fmt vet clean`; `.golangci.yml` (enable `errcheck govet staticcheck unused gosimple ineffassign misspell revive gocritic bodyclose contextcheck errorlint nilerr prealloc unconvert`); `.github/workflows/ci.yaml` with lint + unit jobs; `LICENSE` (Apache-2.0); `CONTRIBUTING.md`; skeleton `README.md`; `docs/` skeleton with empty `DISCOVERIES.md`, `DECISIONS.md`, `KNOWN_GAPS.md`; `hack/install-tools.sh`.
 
@@ -3014,7 +3014,7 @@ Nine phases. **Do them in order.** Each ends with a commit, green CI, and someth
 
 ---
 
-### Phase 1 — Core domain (target: 2 days)
+### Phase 1, Core domain (target: 2 days)
 
 **Build:** `pkg/clock` (M1) → `pkg/event` (M2) → `pkg/codec` (M3, json only) → `pkg/seqtrack` (M5) → `pkg/projection` (M6, all three + reference) → `pkg/oracle` (M7). Plus `pkg/testgen` generators.
 
@@ -3034,7 +3034,7 @@ This is the intellectual core and it is all pure, in-memory, and fast to test. D
 
 ---
 
-### Phase 2 — Target and differ (target: 1.5 days)
+### Phase 2, Target and differ (target: 1.5 days)
 
 **Build:** `pkg/target` (M8: interface, `memory`, `recording`, `redis`) → `pkg/differ` (M9).
 
@@ -3050,7 +3050,7 @@ This is the intellectual core and it is all pure, in-memory, and fast to test. D
 
 ---
 
-### Phase 3 — Sweeper: the correctness mechanisms (target: 2.5 days)
+### Phase 3, Sweeper: the correctness mechanisms (target: 2.5 days)
 
 **Build:** `pkg/lag` (M11) → `pkg/sweeper` (M10: sweep, confirm, extras).
 
@@ -3058,17 +3058,17 @@ This phase implements §5.3–§5.5 and is the highest-risk part of the project.
 
 **Exit criteria:**
 - [ ] Settlement window (static and adaptive), two-phase confirmation, version fencing, and the two-pass extras scan all implemented exactly as specified.
-- [ ] Drift resolution implemented and tested — a repaired key **must** leave `Confirmed()` and increment `drift_resolved_total`.
+- [ ] Drift resolution implemented and tested, a repaired key **must** leave `Confirmed()` and increment `drift_resolved_total`.
 - [ ] Property tests I7, I11 passing.
 - [ ] Every §15.3 internal-fault row (47–54) tested.
 - [ ] All sweeper tests use `FakeClock` with zero real sleeps.
 - [ ] `hack/verify-no-sleep.sh` in CI and passing.
 
-**Demo:** a fully in-process test that injects drift, confirms it, repairs it, and shows resolution — with zero wall-clock time elapsed.
+**Demo:** a fully in-process test that injects drift, confirms it, repairs it, and shows resolution, with zero wall-clock time elapsed.
 
 ---
 
-### Phase 4 — Sources and the fault injector (target: 2 days)
+### Phase 4, Sources and the fault injector (target: 2 days)
 
 **Build:** `pkg/source` (M4: `memory`, `file`, `zmq`, `nats`) → `test/harness/faultinjector` (§13) → `test/harness/publisher` and `test/harness/materializer` → `test/harness/scenario` DSL.
 
@@ -3083,12 +3083,12 @@ This phase implements §5.3–§5.5 and is the highest-risk part of the project.
 
 ---
 
-### Phase 5 — Composition, metrics, CLI (target: 2 days)
+### Phase 5, Composition, metrics, CLI (target: 2 days)
 
 **Build:** `pkg/metrics` (M12) → `pkg/check` (M14) → `pkg/explain` (M13) → `internal/cli` (§11) → `cmd/driftwatch`.
 
 **Exit criteria:**
-- [ ] `TestCheck_EndToEnd_InProcess` passing — the flagship composition test.
+- [ ] `TestCheck_EndToEnd_InProcess` passing, the flagship composition test.
 - [ ] Metric name test and cardinality test passing; `docs/METRICS.md` generated and CI-verified.
 - [ ] `explain` complete with every diagnosis rule individually tested and golden-file output tests.
 - [ ] All CLI commands working with golden-file tests and correct exit codes.
@@ -3099,21 +3099,21 @@ This phase implements §5.3–§5.5 and is the highest-risk part of the project.
 
 ---
 
-### Phase 6 — The full fault matrix (target: 2 days)
+### Phase 6, The full fault matrix (target: 2 days)
 
-**Build:** `test/faults/` — every row of §15.1 and §15.2 not already covered.
+**Build:** `test/faults/`, every row of §15.1 and §15.2 not already covered.
 
 **Exit criteria:**
 - [ ] All 60 matrix rows have a passing named test.
 - [ ] `hack/verify-fault-matrix.sh` in CI, passing.
-- [ ] `TestFaults_DriftwatchOwnLoss_ReportsSuspectNotConfirmed` passing — the honesty test.
+- [ ] `TestFaults_DriftwatchOwnLoss_ReportsSuspectNotConfirmed` passing, the honesty test.
 - [ ] Full fault suite runs in under 120s with no flakes across 20 consecutive runs (**actually run it 20 times and record the result in `docs/evidence/`**).
 
 **Demo:** `make test-fault` output showing 60 green tests, captured to evidence.
 
 ---
 
-### Phase 7 — Kubernetes (target: 2.5 days)
+### Phase 7, Kubernetes (target: 2.5 days)
 
 **Build:** `api/v1alpha1` (CRD types, deepcopy, webhooks) → `internal/controller` → `cmd/driftwatch-manager` → `config/` kustomize → `deploy/helm`.
 
@@ -3128,13 +3128,13 @@ This phase implements §5.3–§5.5 and is the highest-risk part of the project.
 
 ---
 
-### Phase 8 — E2E, dashboard, demo (target: 2.5 days)
+### Phase 8, E2E, dashboard, demo (target: 2.5 days)
 
 **Build:** `test/e2e` (§14) → `deploy/grafana/driftwatch-dashboard.json` → `config/prometheus/rules.yaml` → `docs/OPERATIONS.md` runbook → `make demo`.
 
 **Exit criteria:**
 - [ ] All 8 e2e scenarios passing.
-- [ ] Diagnostics collector working — verified by deliberately breaking a test and confirming the artifact dump is complete and useful.
+- [ ] Diagnostics collector working, verified by deliberately breaking a test and confirming the artifact dump is complete and useful.
 - [ ] E2E suite under 8 minutes, passing 5 consecutive runs.
 - [ ] `make e2e` works **from a clean clone in a fresh container** with only Docker and Go. Verify this literally.
 - [ ] Grafana dashboard imports and every panel renders with data.
@@ -3145,20 +3145,20 @@ This phase implements §5.3–§5.5 and is the highest-risk part of the project.
 
 ---
 
-### Phase 9 — Polish for presentation (target: 1.5 days)
+### Phase 9, Polish for presentation (target: 1.5 days)
 
 This phase is not optional. It is the phase that converts working code into a repository that gets someone selected.
 
 **Build:**
 - [ ] **README rewrite** per §21.1. Architecture diagram, the plain-English problem statement, real measured numbers, Key Discoveries, quick start that actually works, honest limitations.
-- [ ] **`docs/CORRECTNESS.md`** — §5 rewritten as prose for a human reader. This document is the single strongest artifact in the repo for demonstrating systems thinking. Take it seriously.
+- [ ] **`docs/CORRECTNESS.md`**, §5 rewritten as prose for a human reader. This document is the single strongest artifact in the repo for demonstrating systems thinking. Take it seriously.
 - [ ] **`docs/DISCOVERIES.md`** finalized: at least 8 real findings, each with reproduction and evidence link.
-- [ ] **`docs/evidence/README.md`** — the index table mapping each evidence file to the claim it proves.
+- [ ] **`docs/evidence/README.md`**, the index table mapping each evidence file to the claim it proves.
 - [ ] **Bounded-resource audit** (§19.2) performed and recorded.
 - [ ] **Benchmark results table** in the README with the machine spec stated.
 - [ ] A short **demo GIF or asciinema** cast of `make demo` → inject drift → `explain`.
-- [ ] `docs/ADDING_A_SOURCE.md` and `docs/ADDING_A_PROJECTION.md` — extension guides, which also prove the abstractions are real.
-- [ ] `docs/KNOWN_GAPS.md` — honest list: no sharded oracle (NG4), no Kafka source, no repair, no OTel tracing, e2e coverage limits.
+- [ ] `docs/ADDING_A_SOURCE.md` and `docs/ADDING_A_PROJECTION.md`, extension guides, which also prove the abstractions are real.
+- [ ] `docs/KNOWN_GAPS.md`, honest list: no sharded oracle (NG4), no Kafka source, no repair, no OTel tracing, e2e coverage limits.
 - [ ] Grep the entire repo for "production-grade", "enterprise", "institutional", "blazing", "robust" and delete every instance. Replace with a number or nothing.
 - [ ] Grep for `TODO`, `FIXME`, `XXX`, `panic(` in non-test code; resolve or justify each.
 - [ ] Tag `v0.1.0`; release workflow produces binaries, image, SBOM, signatures.
@@ -3233,7 +3233,7 @@ Rewrite §5 as prose for a reader who has not read this PRD. Structure: the naiv
 
 This document is worth more than any single code file for the purpose of getting selected. A maintainer reading it learns in five minutes that the author reasons carefully about distributed state. Write it deliberately, not as a dump.
 
-### 21.3 `docs/DISCOVERIES.md` — format
+### 21.3 `docs/DISCOVERIES.md`, format
 
 Maintain this from Phase 0 onward. One entry per finding, newest first:
 
@@ -3260,13 +3260,13 @@ the projection emits `ActionDelete` rather than an empty upsert.
 **Regression test:** `pkg/projection: TestKeysetOwnership_LastMemberRemoval_YieldsDelete`
 ```
 
-**Target: at least 8 real entries.** Candidates the implementation will almost certainly hit — record whichever actually occur, and do not invent ones that don't:
+**Target: at least 8 real entries.** Candidates the implementation will almost certainly hit, record whichever actually occur, and do not invent ones that don't:
 
 - Redis empty-set deletion semantics (above).
 - ZMQ slow-joiner: a SUB socket connected after PUB starts misses early messages, with no error. Requires a synchronization handshake in tests.
 - ZMQ PUB drops silently at the HWM; the interaction with driftwatch's own buffer sizing.
 - Multipart vs single-frame ZMQ conventions both existing in the wild.
-- JSON numbers above 2^53 losing precision when decoded as `float64` — a sequence number silently corrupted.
+- JSON numbers above 2^53 losing precision when decoded as `float64`, a sequence number silently corrupted.
 - Redis `SCAN` cursor semantics: keys may repeat; `FLUSHDB` resets the cursor and can cause an infinite loop.
 - `INFO` output differences between Redis 6 and 7 breaking a naive parser.
 - Discarding timed-out lag probes biasing the p99 estimate downward, shrinking W, causing false positives.
@@ -3298,14 +3298,14 @@ One file per claim, named `<id>-<slug>.<ext>`. `docs/evidence/README.md` is an i
 
 ### 21.5 Other required docs
 
-- `docs/ARCHITECTURE.md` — the diagram, component responsibilities, concurrency model, why the applier is single-threaded.
-- `docs/TESTING.md` — how to run each level, the bounded-resource checklist, how to add a fault scenario.
-- `docs/OPERATIONS.md` — a runbook section per alert: what it means, what to check first, likely causes, how to confirm.
-- `docs/ADDING_A_SOURCE.md`, `docs/ADDING_A_PROJECTION.md` — with a worked example each.
-- `docs/METRICS.md` — generated, CI-verified.
-- `docs/DECISIONS.md` — ADRs.
-- `docs/KNOWN_GAPS.md` — honest limitations.
-- `CONTRIBUTING.md` — how to build, test conventions, commit format, the "no `time.Sleep`" rule.
+- `docs/ARCHITECTURE.md`, the diagram, component responsibilities, concurrency model, why the applier is single-threaded.
+- `docs/TESTING.md`, how to run each level, the bounded-resource checklist, how to add a fault scenario.
+- `docs/OPERATIONS.md`, a runbook section per alert: what it means, what to check first, likely causes, how to confirm.
+- `docs/ADDING_A_SOURCE.md`, `docs/ADDING_A_PROJECTION.md`, with a worked example each.
+- `docs/METRICS.md`, generated, CI-verified.
+- `docs/DECISIONS.md`, ADRs.
+- `docs/KNOWN_GAPS.md`, honest limitations.
+- `CONTRIBUTING.md`, how to build, test conventions, commit format, the "no `time.Sleep`" rule.
 
 ---
 
@@ -3373,37 +3373,37 @@ The project is complete when every box is checked. Do not declare completion ear
 
 ---
 
-## 23. Anti-patterns — how this project would fail
+## 23. Anti-patterns, how this project would fail
 
 Read this before starting and again at the end of each phase.
 
-**A1 — Skipping the settlement window and two-phase confirm "for now."** The tool will report thousands of false positives, and every subsequent decision will be made on the basis of noisy output. This is the failure mode that kills the project. Build §5 in Phase 3, before the fault matrix, before Kubernetes.
+**A1, Skipping the settlement window and two-phase confirm "for now."** The tool will report thousands of false positives, and every subsequent decision will be made on the basis of noisy output. This is the failure mode that kills the project. Build §5 in Phase 3, before the fault matrix, before Kubernetes.
 
-**A2 — Using `time.Sleep` in tests.** The suite becomes slow and flaky, then people stop running it, then it rots. Inject the clock from Phase 1. The `verify-no-sleep.sh` check exists to make this impossible to backslide on.
+**A2, Using `time.Sleep` in tests.** The suite becomes slow and flaky, then people stop running it, then it rots. Inject the clock from Phase 1. The `verify-no-sleep.sh` check exists to make this impossible to backslide on.
 
-**A3 — Labeling metrics with key names.** One `prometheus.Labels{"key": key}` turns driftwatch into a cardinality bomb that takes down the monitoring system it's supposed to inform. The cardinality test in §M12 exists specifically to catch this.
+**A3, Labeling metrics with key names.** One `prometheus.Labels{"key": key}` turns driftwatch into a cardinality bomb that takes down the monitoring system it's supposed to inform. The cardinality test in §M12 exists specifically to catch this.
 
-**A4 — Unbounded collections.** A `map[string]X` that grows with the keyspace, a slice of all findings, a per-key list of all events. Every one is an OOM in production. §19.2 is a checklist, not a suggestion.
+**A4, Unbounded collections.** A `map[string]X` that grows with the keyspace, a slice of all findings, a per-key list of all events. Every one is an OOM in production. §19.2 is a checklist, not a suggestion.
 
-**A5 — Reporting drift when the target is unreachable.** Absence of data is not evidence of divergence. This mistake makes the tool actively harmful during an outage — it fires a drift alert during a Redis incident, sending the operator down the wrong path.
+**A5, Reporting drift when the target is unreachable.** Absence of data is not evidence of divergence. This mistake makes the tool actively harmful during an outage, it fires a drift alert during a Redis incident, sending the operator down the wrong path.
 
-**A6 — Not implementing drift *resolution*.** If a confirmed finding never clears, `divergent_keys` never returns to zero and the alert is permanently firing. A detector that can't tell you the problem is over is a detector people silence. This is easy to forget because tests naturally focus on detection.
+**A6, Not implementing drift *resolution*.** If a confirmed finding never clears, `divergent_keys` never returns to zero and the alert is permanently firing. A detector that can't tell you the problem is over is a detector people silence. This is easy to forget because tests naturally focus on detection.
 
-**A7 — Claiming the target is wrong when driftwatch's own view has gaps.** The `Suspect` trust state is what makes driftwatch trustworthy. Without it, the tool is confidently wrong whenever its own subscription drops, which is exactly when it matters most.
+**A7, Claiming the target is wrong when driftwatch's own view has gaps.** The `Suspect` trust state is what makes driftwatch trustworthy. Without it, the tool is confidently wrong whenever its own subscription drops, which is exactly when it matters most.
 
-**A8 — Building breadth instead of depth.** Adding Kafka, etcd, PostgreSQL, and a web UI makes the repo look like a survey. The value is in one deep, correct path. Resist. `KNOWN_GAPS.md` is where extensions go to be acknowledged without being built.
+**A8, Building breadth instead of depth.** Adding Kafka, etcd, PostgreSQL, and a web UI makes the repo look like a survey. The value is in one deep, correct path. Resist. `KNOWN_GAPS.md` is where extensions go to be acknowledged without being built.
 
-**A9 — Writing the README last, in a hurry.** The README is what gets read. Budget Phase 9 properly. A brilliant codebase behind a thin README gets skimmed and closed.
+**A9, Writing the README last, in a hurry.** The README is what gets read. Budget Phase 9 properly. A brilliant codebase behind a thin README gets skimmed and closed.
 
-**A10 — Superlatives instead of numbers.** "Production-grade, blazing-fast, enterprise-ready" reads as unearned to exactly the audience you're trying to reach. "1M-key sweep in 8.3s on a 4-core M1; zero false positives over a 60-minute 5k events/sec soak" reads as real. Always the second.
+**A10, Superlatives instead of numbers.** "Production-grade, blazing-fast, enterprise-ready" reads as unearned to exactly the audience you're trying to reach. "1M-key sweep in 8.3s on a 4-core M1; zero false positives over a 60-minute 5k events/sec soak" reads as real. Always the second.
 
-**A11 — Fake evidence.** Do not write a `DISCOVERIES.md` entry for something that didn't happen, or paste invented benchmark numbers. Anyone who tries to reproduce will find out, and the cost is total. Every claim traces to a real captured file.
+**A11, Fake evidence.** Do not write a `DISCOVERIES.md` entry for something that didn't happen, or paste invented benchmark numbers. Anyone who tries to reproduce will find out, and the cost is total. Every claim traces to a real captured file.
 
-**A12 — Parallelizing the applier early.** It will introduce ordering bugs that take days to find, for throughput nobody needs. Single-threaded applier until a benchmark proves otherwise.
+**A12, Parallelizing the applier early.** It will introduce ordering bugs that take days to find, for throughput nobody needs. Single-threaded applier until a benchmark proves otherwise.
 
-**A13 — Testing implementation instead of behaviour.** Tests that assert internal call sequences break on every refactor and prove nothing. Assert on observable outputs: oracle state, report contents, metric values, exit codes.
+**A13, Testing implementation instead of behaviour.** Tests that assert internal call sequences break on every refactor and prove nothing. Assert on observable outputs: oracle state, report contents, metric values, exit codes.
 
-**A14 — Letting e2e become the primary test level.** E2E is slow and its failures are hard to localize. Every behaviour that *can* be tested in-process with a fake clock *must* be. E2E exists only for integration and packaging.
+**A14, Letting e2e become the primary test level.** E2E is slow and its failures are hard to localize. Every behaviour that *can* be tested in-process with a fake clock *must* be. E2E exists only for integration and packaging.
 
 ---
 
@@ -3419,13 +3419,13 @@ The Volcano/Kthena "KVCache-aware scheduler E2E test suite" project lists: *Go, 
 |---|---|
 | Go | ~15k lines of idiomatic Go; property tests; benchmarks with allocation gates |
 | Kubernetes | `DriftCheck` CRD, controller-runtime operator, webhooks, RBAC, Helm chart, envtest suite |
-| Kind-based E2E testing | `test/e2e/` — 8 scenarios, deterministic cleanup, diagnostic artifact collection |
-| Redis | `pkg/target/redis.go` — SCAN semantics, pipelining, cluster/sentinel, INFO parsing, eviction correlation |
-| ZMQ | `pkg/source/zmq.go` — pure-Go SUB, HWM behaviour, multipart conventions, libzmq interop test |
+| Kind-based E2E testing | `test/e2e/`, 8 scenarios, deterministic cleanup, diagnostic artifact collection |
+| Redis | `pkg/target/redis.go`, SCAN semantics, pipelining, cluster/sentinel, INFO parsing, eviction correlation |
+| ZMQ | `pkg/source/zmq.go`, pure-Go SUB, HWM behaviour, multipart conventions, libzmq interop test |
 | Observability / metrics | 40+ Prometheus metrics with a cardinality test, Grafana dashboard, 10 alerts, a runbook |
 | Distributed-system debugging | `explain` with 14 diagnosis rules; `docs/CORRECTNESS.md`; the 60-row fault matrix |
 
-The second project (*inPlace rolling update*: `go/kubernetes/markdown`) is covered by the operator work plus `docs/CORRECTNESS.md` as evidence of design-document writing — and separately by the PDB-blindness KEP discussed earlier.
+The second project (*inPlace rolling update*: `go/kubernetes/markdown`) is covered by the operator work plus `docs/CORRECTNESS.md` as evidence of design-document writing, and separately by the PDB-blindness KEP discussed earlier.
 
 ### 24.2 The sentence to use in the application
 
@@ -3433,7 +3433,7 @@ Do not say "I built a mini kthena." Say:
 
 > I built driftwatch, a general-purpose divergence detector for pub/sub-materialized caches: an independent oracle folded from a ZeroMQ event stream, compared against Redis with a settlement window and two-phase confirmation to eliminate false positives from materializer lag. It includes a 60-scenario fault-injection matrix, property-based convergence tests, and an 8-scenario Kind e2e suite with diagnostic collection.
 >
-> The KVCache-aware suite in issue #1328 is the same problem shape with vLLM block-ownership events. The reusable pieces the issue asks for — cache-state injection, observation, and assertion utilities — are exactly what I built as `test/harness/faultinjector` and the scenario DSL, and I'd bring that structure to `test/e2e/router/`.
+> The KVCache-aware suite in issue #1328 is the same problem shape with vLLM block-ownership events. The reusable pieces the issue asks for, cache-state injection, observation, and assertion utilities, are exactly what I built as `test/harness/faultinjector` and the scenario DSL, and I'd bring that structure to `test/e2e/router/`.
 
 That is a contributor describing transferable work, not an applicant who read the issue and cloned it.
 
@@ -3506,7 +3506,7 @@ See §4 for full definitions. The five terms that matter most: **oracle** (drift
 
 ### 25.4 Naming note
 
-If `driftwatch` is taken on pkg.go.dev or feels wrong, alternatives that keep the same framing: `skew`, `driftguard`, `reconcile-watch`, `oracled`, `statediff`. Pick one in Phase 0 and never change it — a rename mid-project scatters the git history and breaks every import path.
+If `driftwatch` is taken on pkg.go.dev or feels wrong, alternatives that keep the same framing: `skew`, `driftguard`, `reconcile-watch`, `oracled`, `statediff`. Pick one in Phase 0 and never change it, a rename mid-project scatters the git history and breaks every import path.
 
 ### 25.5 First commands to run
 

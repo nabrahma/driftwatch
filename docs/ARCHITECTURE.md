@@ -70,12 +70,12 @@ nothing above the projection knows what a transport is.**
 | `pkg/sweeper` | Settle → read → diff → confirm | Transports, codecs, Kubernetes. |
 | `pkg/explain` | Rendering one key's history into a diagnosis | How to fetch any of it. |
 | `pkg/metrics` | The registry, the label allow-list, cardinality | What the numbers mean. |
-| `pkg/check` | Composition. The only package that wires the others together | — |
+| `pkg/check` | Composition. The only package that wires the others together |, |
 | `internal/controller` | Reconciling `DriftCheck` objects onto running checks | The pipeline's internals. |
 | `internal/cli` | `watch`, `diff`, `explain`, `replay` | Same. |
 
 `pkg/check` is the only package importing both `pkg/source` and `pkg/target`.
-That is the point: every other package can be reasoned about — and tested —
+That is the point: every other package can be reasoned about, and tested, 
 without a network, a container, or a clock that moves on its own.
 
 ## The data flow, in ten steps
@@ -118,8 +118,8 @@ one level up, in `pkg/sweeper`, which holds both.
 ### Projections are pure, and the fold is the extension point
 
 A projection is `(previous value, event) → mutation`. No I/O, no clock, no state
-of its own. Everything that varies between deployments — what a key looks like,
-whether members accumulate or replace, whether order matters — lives there, and
+of its own. Everything that varies between deployments, what a key looks like,
+whether members accumulate or replace, whether order matters, lives there, and
 nothing else changes to support a new one.
 
 The purity is load-bearing for testing: the fault matrix drives sixty scenarios
@@ -138,7 +138,7 @@ sixty-minute behaviours, and why `hack/verify-no-sleep.sh` can forbid
 
 The fake clock has one sharp edge worth knowing before writing a test with it.
 A tick carries the deadline it was *scheduled* for, not the clock's new value,
-and a tick the consumer has not yet drained is dropped rather than queued —
+and a tick the consumer has not yet drained is dropped rather than queued, 
 exactly like `time.Ticker`. So a single `Advance(3s)` across a 1s ticker does
 not reliably deliver three ticks. See `advanceUntil` in
 `pkg/check/check_test.go`, which exists because that cost an afternoon.
@@ -147,12 +147,12 @@ not reliably deliver three ticks. See `advanceUntil` in
 
 Four things survive a single event, and each has a cap:
 
-- **The oracle's key map**, bounded by `maxTrackedKeys`, evicting per shard.
-- **Each key's event ring**, bounded by `ringSize`, overwriting oldest. This is
+- **The oracle's key map**: bounded by `maxTrackedKeys`, evicting per shard.
+- **Each key's event ring**: bounded by `ringSize`, overwriting oldest. This is
   what `explain` reads, and what makes memory depend on ring depth rather than
   on key count ([G-001](KNOWN_GAPS.md)).
-- **Per-publisher sequence state**, bounded by `maxPublishers`.
-- **The confirmation queue**, bounded by `maxConfirmQueue`, dropping and
+- **Per-publisher sequence state**: bounded by `maxPublishers`.
+- **The confirmation queue**: bounded by `maxConfirmQueue`, dropping and
   counting rather than growing.
 
 Everything else is per-sweep or per-call. The full audit, with the enforcement
@@ -161,8 +161,8 @@ site for each of eighteen collections, is in
 
 ## Concurrency
 
-One check runs a small, fixed number of goroutines — thirteen throughout the
-sixty-minute soak, at both t=0 and t=60m — communicating over two buffered
+One check runs a small, fixed number of goroutines, thirteen throughout the
+sixty-minute soak, at both t=0 and t=60m, communicating over two buffered
 channels:
 
 ```text
@@ -202,16 +202,16 @@ that **driftwatch degrades to saying less, never to saying something wrong.**
 | Source disconnects | Reconnect with exponential backoff and jitter, 100ms → 30s. On reconnect, mark keys suspect unless the transport guarantees replay. | The events missed during the gap are unknowable, so every key they *could* have touched is now unverifiable. Continuing to assert on them is how a checker blames a store for its own loss. |
 | Target unreachable | Sweeps fail fast, `TargetUnavailable=True`, **no divergence reported**. | Absence of data is not evidence of drift (§23 A5). Reporting it would produce a wall of findings proportional to someone else's outage. |
 | Decode failures exceed 10%/min | `CodecMismatch=True`, keep running. | Almost always a misconfigured field mapping. Stopping would remove the one signal saying so. |
-| Oracle hits `maxTrackedKeys` | Evict approximately-oldest per shard, `OracleSaturated=True`, and reduce `coverage_ratio` accordingly. Never OOM. | A saturated oracle has a permanently partial view, so the phase stays Degraded rather than returning to Watching — a clean report over 60% of a keyspace must not read like a clean report. |
+| Oracle hits `maxTrackedKeys` | Evict approximately-oldest per shard, `OracleSaturated=True`, and reduce `coverage_ratio` accordingly. Never OOM. | A saturated oracle has a permanently partial view, so the phase stays Degraded rather than returning to Watching, a clean report over 60% of a keyspace must not read like a clean report. |
 | Sweep exceeds its interval | Skip the next tick, count it, log at WARN. | Overlapping sweeps are an unbounded queue. |
 | Confirm queue full | Drop and count. | Under mass divergence the magnitude matters more than the per-key list, and the list is what costs memory. |
 | Panic in any goroutine | Recover at the goroutine boundary, log with stack, count it, cancel that check's context. | One check's panic must not take down the other forty-nine in the same manager. |
 
 Two conditions are **sticky**, and deliberately so:
 
-- **`OracleSaturated`** — every report after saturation covers only part of the
+- **`OracleSaturated`**: every report after saturation covers only part of the
   store, so a later clean sweep does not clear it.
-- **`SourceFailed`** — a source that has stopped delivering makes every
+- **`SourceFailed`**: a source that has stopped delivering makes every
   subsequent sweep look perfectly clean, because the oracle stops changing and
   the target stops being written to. That is the most dangerous reading this
   tool can produce, and it must never be reported as Watching.
@@ -233,5 +233,5 @@ spread the checks between them rather than idling.
 - A new transport: [ADDING_A_SOURCE.md](ADDING_A_SOURCE.md)
 - A new fold: [ADDING_A_PROJECTION.md](ADDING_A_PROJECTION.md)
 - A new datastore: implement `target.Target`. The same shape as the source
-  guide, with a read-only allowlist as the one extra obligation — see
+  guide, with a read-only allowlist as the one extra obligation, see
   [D-004](DISCOVERIES.md) for the trap in enforcing that strictly.

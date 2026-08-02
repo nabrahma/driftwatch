@@ -22,7 +22,7 @@ request.
 Nothing checks that Redis still matches the events. If the materializer drops a
 message, mishandles a delete, or falls behind and never catches up, the index is
 quietly wrong. Requests go to replicas that no longer hold the block. There is
-no error, no alert and no log line — the system is behaving correctly according
+no error, no alert and no log line, the system is behaving correctly according
 to a store that is lying to it.
 
 driftwatch subscribes to the same event stream, independently folds it into what
@@ -39,7 +39,7 @@ for each event:      oracle[key] = fold(oracle[key], event)
 every 30 seconds:    for each key: if oracle[key] != store[key]: report(key)
 ```
 
-This does not work. Not "needs tuning" — it produces so many false reports that
+This does not work. Not "needs tuning", it produces so many false reports that
 the output is meaningless.
 
 ### A worked example
@@ -56,13 +56,13 @@ At 2,000 events/sec, during the 400ms the slowest 1% of writes take, **800
 events are in flight**. Those events touch up to 800 distinct keys, and every
 one of them shows the oracle ahead of the store.
 
-**800 false positives per sweep out of 10,000 keys — an 8% false-positive
+**800 false positives per sweep out of 10,000 keys, an 8% false-positive
 rate**, every 30 seconds. None of them are drift. All of them are a materializer
 being normally, healthily, a few hundred milliseconds behind.
 
 It gets worse: they are not the same 800 keys each time. They rotate, so an
 operator watching a list of divergent keys sees it churn completely between
-sweeps — which is what a real, spreading corruption would look like.
+sweeps, which is what a real, spreading corruption would look like.
 
 Sweeping less often does not help, because the in-flight window is set by write
 latency rather than by how frequently you look. Comparing only keys that "look
@@ -75,7 +75,7 @@ The worked example is only the first.
 
 | # | Failure | What the naive detector concludes |
 |---|---|---|
-| **F1** | Materializer lag — the store has not caught up yet | Drift, on every key currently in flight |
+| **F1** | Materializer lag, the store has not caught up yet | Drift, on every key currently in flight |
 | **F2** | driftwatch itself missed events | Drift, on every key it can no longer vouch for |
 | **F3** | Out-of-order delivery | Permanent drift for order-dependent folds |
 | **F4** | The store evicted keys under memory pressure | Mass "missing" drift, when the store did what it was configured to do |
@@ -85,8 +85,8 @@ The worked example is only the first.
 | **F8** | Comparison against a value the oracle has since superseded | Drift on a key that was correct at both instants |
 
 **F2 is the one that matters most**, and the one a naive design gets exactly
-backwards. When driftwatch loses events — a reconnect, a full buffer, a network
-blip — its oracle goes stale while the store stays correct. Compare them and
+backwards. When driftwatch loses events, a reconnect, a full buffer, a network
+blip, its oracle goes stale while the store stays correct. Compare them and
 driftwatch reports the store as wrong. The tool blames the system for the tool's
 own failure, at precisely the moment it is least able to tell the difference.
 
@@ -96,7 +96,7 @@ own failure, at precisely the moment it is least able to tell the difference.
 
 Each defeats specific failure modes. None is optional.
 
-### 1. The settlement window — defeats F1
+### 1. The settlement window, defeats F1
 
 A key is compared only once it has gone unchanged for **W** seconds. Anything
 touched more recently is *in flight*: driftwatch knows an event is on its way to
@@ -113,8 +113,8 @@ the cost is that genuine drift on a hot key takes an extra 1.2 seconds to
 surface.
 
 **The relationship that matters is W > p99 convergence.** While it holds, a key
-that is merely behind is never compared. If the two cross — because the
-materializer slowed and W hit its configured ceiling — false positives resume
+that is merely behind is never compared. If the two cross, because the
+materializer slowed and W hit its configured ceiling, false positives resume
 immediately. That is why the Grafana dashboard plots them on one axis and why
 `DriftwatchSettlementWindowAtMax` is an alert rather than a log line.
 
@@ -125,27 +125,27 @@ timestamp. This is what defeats F5.
 
 If settlement used publisher timestamps, a replica whose clock ran five minutes
 fast would stamp its events in the future. Those keys would appear to have
-settled long ago, and driftwatch would compare them the instant they arrived —
+settled long ago, and driftwatch would compare them the instant they arrived, 
 guaranteeing a false positive on every event from that publisher. A replica five
 minutes slow would produce keys that never settled at all.
 
 Publisher clock skew is still measured and exported, because it is worth
 knowing. It simply cannot affect what gets compared, or when.
 
-### 2. Sequence tracking and trust states — defeats F2
+### 2. Sequence tracking and trust states, defeats F2
 
 Every event carries a publisher identity, an epoch and a monotonic sequence
 number. driftwatch tracks, per publisher, which sequence numbers it has actually
 seen.
 
-When a gap appears — 500 arrives after 498 — driftwatch knows it missed 499. It
+When a gap appears, 500 arrives after 498, driftwatch knows it missed 499. It
 does not know which key that event touched, so every key that publisher could
 have written becomes **Suspect**.
 
 | State | Meaning | Reported as |
 |---|---|---|
-| **Complete** | Derived from an unbroken event stream | Confirmed divergence — alert on this |
-| **Suspect** | A gap means part of the history is missing | Suspect divergence — never alert |
+| **Complete** | Derived from an unbroken event stream | Confirmed divergence, alert on this |
+| **Suspect** | A gap means part of the history is missing | Suspect divergence, never alert |
 | **Adopted** | Read from the store at startup, never verified | Not asserted on at all |
 
 Findings on Suspect keys are counted separately and never merge into the
@@ -153,17 +153,17 @@ alertable number. This is the honesty mechanism, and it is the difference
 between a tool that says "the store is wrong" and one that says "I cannot
 currently vouch for these keys".
 
-A sequence *reset* — the number going back to 1 — is read as a publisher restart
+A sequence *reset*, the number going back to 1, is read as a publisher restart
 rather than as several hundred thousand missing events, provided the epoch
 moved. Getting that wrong marks the whole keyspace suspect every time a
 publisher is rescheduled.
 
-### 3. Two-phase confirmation — defeats residual F1
+### 3. Two-phase confirmation, defeats residual F1
 
 A key seen to disagree once is a **candidate**, not a finding. It is re-read
 after a further settlement window and reported only if it still disagrees.
 
-This catches whatever the window's estimate missed — a convergence distribution
+This catches whatever the window's estimate missed, a convergence distribution
 that shifted, or one unusually slow write. The first read sees a disagreement,
 the second sees it resolved, and the candidate is recorded as a **transient**
 that never reaches the alertable count.
@@ -172,7 +172,7 @@ A healthy pipeline produces transients constantly. Their *absence* alongside
 real traffic is more suspicious than their presence: it usually means W is so
 wide that nothing is being compared while it still moves.
 
-### 4. Version fencing — defeats F8
+### 4. Version fencing, defeats F8
 
 Between the first read and the confirming read, an event may arrive that changes
 the oracle's expectation for that key. The candidate was raised against a value
@@ -181,12 +181,12 @@ the oracle has since superseded.
 Every oracle entry carries a version that increments on change. A candidate
 records the version it was raised against, and confirmation checks it first: if
 the version moved, the finding is *withdrawn* rather than confirmed, and the key
-— now in flight again — is reconsidered on a later sweep.
+,  now in flight again, is reconsidered on a later sweep.
 
 Without this, a key updated at exactly the wrong moment produces a confirmed
 finding describing a disagreement that was never simultaneously true.
 
-### 5. Bootstrap modes — defeat F6
+### 5. Bootstrap modes, defeat F6
 
 At startup the store already holds contents driftwatch has seen no events for.
 Three answers, because different deployments need different ones:
@@ -198,12 +198,12 @@ Three answers, because different deployments need different ones:
 | **Strict** | Assert nothing until a publisher retransmits its full state | Needs a producer that can snapshot on demand |
 
 Adopt is the default because it is the only one useful within seconds of
-starting. What it must not do — and what an earlier version of this code did —
+starting. What it must not do, and what an earlier version of this code did, 
 is then claim to have *verified* those keys. Comparing an adopted key against
 the store proves only that the store agrees with itself, so adopted keys are
 excluded from both the comparison and the coverage ratio.
 
-### 6. Eviction and expiry correlation — defeats F4 and F7
+### 6. Eviction and expiry correlation, defeats F4 and F7
 
 A key missing from the store looks identical whether the materializer failed to
 write it or the store evicted it under memory pressure. The remedies are
@@ -223,7 +223,7 @@ TTLs so the oracle can expire keys itself.
 
 ## Ordering, and the folds that care
 
-F3 is defeated by a bounded reorder buffer — but only for the folds that need
+F3 is defeated by a bounded reorder buffer, but only for the folds that need
 one.
 
 A **commutative** fold gives the same result whatever order events arrive in.
@@ -233,8 +233,8 @@ needed.
 
 A **non-commutative** fold does not. Last-write-wins scalars, and counters that
 accept absolute values, both converge to different answers under different
-orderings. For these, an event arriving ahead of its predecessor is held — for a
-bounded window, up to a bounded count — until either the predecessor arrives or
+orderings. For these, an event arriving ahead of its predecessor is held, for a
+bounded window, up to a bounded count, until either the predecessor arrives or
 the wait expires. When it expires the hole is a real gap, and sequence tracking
 says so.
 
@@ -257,7 +257,7 @@ cost of asserting nothing until a full retransmission.
 
 **Reordering at the very start of a stream.** Sequence tracking establishes its
 baseline from the first event it sees from a publisher. If the first two arrive
-out of order there is nothing to be out of order *relative to* — the one seen
+out of order there is nothing to be out of order *relative to*, the one seen
 first simply becomes the baseline. This is G-002 in `KNOWN_GAPS.md`.
 
 **Divergence inside the settlement window.** By construction. A key that is
@@ -276,7 +276,7 @@ as an extra. The coverage ratio makes the first case visible.
 
 **Anything at all, while the store is unreachable.** No comparison runs, so no
 new findings appear and the counts freeze at their last known values. This is
-deliberate — absence of data is not evidence of divergence — and it means a
+deliberate, absence of data is not evidence of divergence, and it means a
 drift alert coinciding with a store outage should be read as the drift having
 come first.
 
@@ -321,7 +321,7 @@ backed by:
   four seconds against a fake clock; 20 consecutive runs with no flakes
   ([evidence](evidence/fault-matrix-20-runs-no-flake.txt)).
 - **The honesty test**,
-  `TestFaults_DriftwatchOwnLoss_ReportsSuspectNotConfirmed` — faults on
+  `TestFaults_DriftwatchOwnLoss_ReportsSuspectNotConfirmed`, faults on
   driftwatch's own stream must produce suspect keys, never confirmed findings.
 - **The e2e honesty test**, E3, which severs driftwatch's subscription with a
   network proxy while the store keeps being written correctly, and asserts
@@ -332,5 +332,5 @@ backed by:
 
 The soak's midpoint fault is worth singling out. Surviving an hour proves the
 process does not crash. Breaking something deliberately at minute thirty and
-watching it be found within one minute — and resolve in the next — proves the
+watching it be found within one minute, and resolve in the next, proves the
 process is still *working*, which is a different claim and the one that matters.

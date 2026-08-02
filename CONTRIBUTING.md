@@ -3,12 +3,12 @@
 ## Prerequisites
 
 - **Go 1.25 or newer.** 1.25 is the declared minimum and CI builds on it.
-- **A 64-bit C compiler**, for `go test -race` only. Nothing that ships needs
-  cgo — `CGO_ENABLED=0` is the default for every build (`docs/DECISIONS.md`
-  ADR-0005) — but the race detector does.
+- **A 64-bit C compiler**: for `go test -race` only. Nothing that ships needs
+  cgo, `CGO_ENABLED=0` is the default for every build (`docs/DECISIONS.md`
+  ADR-0005), but the race detector does.
 - **GNU make and a POSIX shell.** On Windows use Git Bash or WSL; the Makefile
   recipes are `sh`, not `cmd`.
-- **Docker**, for the integration and e2e suites. Not needed for `make test`.
+- **Docker**: for the integration and e2e suites. Not needed for `make test`.
 
 ```sh
 make install-tools    # golangci-lint and gofumpt, pinned, into $(go env GOPATH)/bin
@@ -41,7 +41,7 @@ module is not done until its tests pass under `-race`.
 store.
 
 **The clock is always injected.** No `time.Now()` outside `main()` and the clock
-implementation itself. No `time.Sleep` in tests — `hack/verify-no-sleep.sh`
+implementation itself. No `time.Sleep` in tests, `hack/verify-no-sleep.sh`
 enforces this in CI. A suite that sleeps is slow, then flaky, then unrun, then
 rotten.
 
@@ -50,15 +50,15 @@ turns driftwatch into a cardinality bomb that takes down the monitoring system
 it exists to inform.
 
 **No unbounded collections.** A map that grows with the keyspace, a slice of all
-findings, a per-key list of every event — each one is an out-of-memory kill in
+findings, a per-key list of every event, each one is an out-of-memory kill in
 production. Every collection has a documented bound.
 
 **Prefer boring, obvious code.** The value of this project is its correctness
 reasoning and its test suite, not clever Go. If a reviewer has to think hard
 about *how* the code works, rewrite it.
 
-**Record surprises immediately.** When something does not behave as expected —
-a library, a Redis command, a socket — it goes in `docs/DISCOVERIES.md` with the
+**Record surprises immediately.** When something does not behave as expected, 
+a library, a Redis command, a socket, it goes in `docs/DISCOVERIES.md` with the
 reproduction, while you still have it. Reconstructing evidence later is painful
 and the result is less convincing.
 
@@ -67,7 +67,7 @@ benchmark number is pasted without the run that produced it. Every claim traces
 to a real file in `docs/evidence/`.
 
 **No unbacked superlatives.** The marketing adjectives that promise maturity or
-speed without a number behind them do not appear anywhere in this repository —
+speed without a number behind them do not appear anywhere in this repository, 
 `hack/verify-no-superlatives.sh` enforces the list and CI runs it. Write the
 measured number instead, or write nothing.
 

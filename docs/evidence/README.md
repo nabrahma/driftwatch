@@ -37,7 +37,7 @@ Each of these is the captured output for one entry in
 | `D-025-silent-subscriber.txt` | A SUB socket whose publisher is replaced never reconnects, and driftwatch reports itself healthy while deaf | `pkg/source`, `test/e2e` |
 | `D-026-stale-manager-image.txt` | `make e2e-reuse` applied an unchanged manifest and kept a 17-hour-old manager running | `test/e2e` |
 
-Seven discoveries — D-017 through D-023 — carry their reproduction inline in
+Seven discoveries, D-017 through D-023, carry their reproduction inline in
 [DISCOVERIES.md](../DISCOVERIES.md) rather than as a separate capture, because
 each is a code-level finding whose evidence is a named regression test rather
 than a terminal transcript. D-021 and D-022 are additionally visible in the soak
@@ -51,19 +51,19 @@ The numbered criteria from PRD §2.
 |---|---|---|
 | `S2-soak-60min-zero-drift.txt` | 60 minutes, 5,388,510 events, 0 dropped, 0 false positives in steady state | `make soak` |
 | `S6-sweep-1m-keys.txt` | A full sweep of 1,000,000 real Redis keys in 5.68s, against a 10s bar | `make bench-sweep` |
-| `S2-soak-capacity-500k-keys.txt` | Why the soak runs at 150k keys and not §16.7's 500k — the memory arithmetic | `make soak` |
+| `S2-soak-capacity-500k-keys.txt` | Why the soak runs at 150k keys and not §16.7's 500k, the memory arithmetic | `make soak` |
 
 ### Soak profiles
 
 Captured by `test/soak/soak_test.go` at the start, midpoint and end of the
 60-minute run. They are the evidence for "no goroutine leak, no unbounded heap
-growth" — a claim that a table of RSS samples alone cannot settle.
+growth", a claim that a table of RSS samples alone cannot settle.
 
 | File | What it shows |
 |---|---|
 | `S2-soak-goroutine-start.pprof` | Goroutine profile at t=0 |
 | `S2-soak-goroutine-middle.pprof` | Goroutine profile at t=30m, immediately after the injected fault |
-| `S2-soak-goroutine-end.pprof` | Goroutine profile at t=60m — same 13 goroutines as t=0 |
+| `S2-soak-goroutine-end.pprof` | Goroutine profile at t=60m, same 13 goroutines as t=0 |
 | `S2-soak-heap-start.pprof` | Heap profile at t=0 |
 | `S2-soak-heap-middle.pprof` | Heap profile at t=30m, while the per-key rings were still filling |
 | `S2-soak-heap-end.pprof` | Heap profile at t=60m, after the rings reached steady state |
@@ -98,6 +98,7 @@ ring-buffer fill from an actual leak.
 | `phase5-redis-demo.txt` | `driftwatch watch -f examples/local.yaml` against a real Redis | `internal/cli` |
 | `phase7-live-check.txt` | A DriftCheck reconciled by the real manager, detecting real drift | `internal/controller` |
 | `demo-drift-detected-and-resolved.txt` | `make demo` detects 360 deleted keys in 7s and watches them heal | `make demo` |
+| `dashboard-drift-detected.png` | The dashboard mid-fault: 350 confirmed divergent keys at 100% coverage | `make demo` + `make demo-inject-drift` |
 
 ## What is deliberately not here
 
@@ -106,8 +107,12 @@ failing run, and they contain full container logs. D-024's load-bearing lines ar
 transcribed into `D-024-namespace-resolution.txt` with a reproduction that does
 not need an e2e run at all.
 
-**A dashboard screenshot.** The dashboard JSON is checked by `hack/dashboardcheck`
-in CI, which asserts that every panel resolves to a registered metric — a stronger
-guarantee than an image, because an image goes stale silently and the check does
-not. A screenshot is still worth adding for a reader who wants to see it; it is
-listed in `docs/KNOWN_GAPS.md` as outstanding.
+**A demo GIF or asciinema cast.** The dashboard screenshot above covers the
+static case. A recording would show the number rising and then decaying back to
+zero on its own, which is the half that argues the tool is usable day to day,
+and it is still outstanding.
+
+Note that the screenshot is a supplement rather than the guarantee.
+`hack/dashboardcheck` runs in CI and asserts every panel resolves to a
+registered metric, which is the stronger check: an image goes stale silently
+and the check does not.

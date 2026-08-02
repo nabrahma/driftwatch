@@ -5,8 +5,8 @@ that **e2e is deliberately the smallest of them.**
 
 That inversion is on purpose. A checker whose evidence comes mostly from a Kind
 cluster is a checker whose failures take twenty minutes to reproduce and whose
-bugs are found by someone else. The fault matrix — sixty named failure scenarios
-driven through the entire pipeline in-process on a fake clock — runs in under two
+bugs are found by someone else. The fault matrix, sixty named failure scenarios
+driven through the entire pipeline in-process on a fake clock, runs in under two
 minutes and is the specification of correctness under failure. e2e exists to
 prove the wiring is real, not to find logic bugs.
 
@@ -26,8 +26,8 @@ prove the wiring is real, not to find logic bugs.
 | Benchmark | `*_bench_test.go` | < 120s | none | `make bench` |
 
 `go test ./...` runs unit, property and fault, and finishes in under three
-minutes. Everything heavier is behind a build tag — `integration`, `e2e`,
-`interop`, `soak` — because a slow default test command stops being run, and a
+minutes. Everything heavier is behind a build tag, `integration`, `e2e`,
+`interop`, `soak`, because a slow default test command stops being run, and a
 test suite nobody runs is worse than none: it looks like coverage.
 
 **675 unit tests, 49 property tests at 10,000 cases each, 60 fault scenarios, 8
@@ -44,7 +44,7 @@ a real cluster.
 
 The reasoning is not stylistic. A sleep is a guess about how long something takes
 on the machine you happened to write it on. It is too short on CI and too long
-everywhere, and when it fails it fails intermittently — which costs more than
+everywhere, and when it fails it fails intermittently, which costs more than
 every other test problem combined. Anything worth sleeping for is worth asserting
 on.
 
@@ -67,7 +67,7 @@ clk.BlockUntil(3)
 Worth reading before writing a test that advances a clock past a ticker.
 
 **A tick carries the deadline it was scheduled for, not the clock's new value.
-A tick the consumer has not yet drained is dropped rather than queued** — exactly
+A tick the consumer has not yet drained is dropped rather than queued**, exactly
 like `time.Ticker`.
 
 So a single `Advance(3s)` across a 1s ticker fires three ticks, delivers whichever
@@ -100,7 +100,7 @@ and each one carries a comment saying which and why. The ones present:
 - `go-redis`'s process-wide time cache and connection-pool reaper.
 - `go-zeromq`'s connection reaper and per-connection readers.
 - `klog`'s flush daemon.
-- `go-winio`'s IO completion processor — Windows only, reached through
+- `go-winio`'s IO completion processor, Windows only, reached through
   testcontainers.
 
 **No ignore is ever for one of driftwatch's own goroutines.** One of those
@@ -132,7 +132,7 @@ means the same thing as the version that does.
 
 ## The fault matrix
 
-`test/faults/` is sixty named scenarios, one per row of §15 — every way the
+`test/faults/` is sixty named scenarios, one per row of §15, every way the
 system around driftwatch can misbehave, and what driftwatch must report when it
 does. It is the closest thing here to a specification.
 
@@ -151,7 +151,7 @@ The whole matrix ran 20 consecutive times with zero flakes:
 1. Add it to §15's table in the PRD with an ID and expected behaviour.
 2. Write `TestFaultNN_ShortDescription` in the matching file under
    `test/faults/`.
-3. Drive it through a real check with a fake clock — the harness in
+3. Drive it through a real check with a fake clock, the harness in
    `test/faults/harness.go` builds one over a memory source and memory target.
 4. Assert on the **observable**: the status, the metric, the condition. Not on
    internal state.
@@ -161,7 +161,7 @@ The whole matrix ran 20 consecutive times with zero flakes:
 
 §16.9's floors are enforced by `hack/verify-coverage.sh`, which runs in CI and
 fails per package. It recomputes each package's figure from statement counts in
-the profile rather than averaging per-function percentages — that would weight a
+the profile rather than averaging per-function percentages. That would weight a
 one-line getter the same as a ninety-line applier.
 
 Current: **91.5% overall**, every package over its floor.
@@ -192,16 +192,16 @@ found something" without the input is not a bug report.
 Eight scenarios, one namespace each with a generated name, torn down after. The
 two worth knowing about:
 
-- **E2 (DroppedEventDetected)** — the materializer skips a sequence range.
+- **E2 (DroppedEventDetected)**: the materializer skips a sequence range.
   driftwatch's own view is complete, so it must report *confirmed* divergence.
-- **E3 (SelfLossReportsSuspect)** — toxiproxy severs driftwatch's own
+- **E3 (SelfLossReportsSuspect)**: toxiproxy severs driftwatch's own
   subscription. The same underlying disagreement must come out as **suspect**,
   with `divergentKeys == 0`.
 
 They are adjacent on purpose. Getting them the wrong way round is the single most
 damaging thing this tool can do, and one test cannot catch it.
 
-`test/e2e/diagnostics.go` writes nineteen files per failed scenario — the object,
+`test/e2e/diagnostics.go` writes nineteen files per failed scenario, the object,
 its events, every container's log, Redis's INFO and DBSIZE, the metrics, the
 pprof profiles, `driftwatch explain` for an affected key. It was written *second*,
 before the second scenario existed, because a failing e2e test that dumps nothing
@@ -219,13 +219,13 @@ make e2e-break   # deliberately break a scenario, to see the diagnostics
 ## Interop
 
 `test/interop/` runs driftwatch's pure-Go ZMQ against real libzmq in both
-directions — Python publisher to Go subscriber, and Go publisher to Python
+directions, Python publisher to Go subscriber, and Go publisher to Python
 subscriber. It found the thing no unit test could: **ZMQ subscription is a prefix
 match**, so subscribing to `kv-events` also receives `kv-events-debug`, and two
 of three topics matching a prefix yields exactly two thirds of the events. That
 looks like 33% packet loss and is not.
 
-Synchronization between the two processes is a handshake, never a sleep — a
+Synchronization between the two processes is a handshake, never a sleep, a
 ready-file in one direction, because an earlier REQ/REP attempt put a second
 socket pair between two processes that were already failing to talk over the
 first.

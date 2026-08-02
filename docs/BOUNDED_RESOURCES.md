@@ -1,7 +1,7 @@
 # Bounded-resource audit
 
 PRD §19.2 requires that every collection in driftwatch has an explicit cap, a
-metric, and a test proving the cap holds — and states the rule plainly: **there
+metric, and a test proving the cap holds, and states the rule plainly: **there
 must be no unbounded collection anywhere in the codebase.**
 
 This document is the audit. It was performed by reading every `make(map`,
@@ -63,18 +63,18 @@ bound.
 **`confirmedCats` in `pkg/check` is rebuilt, not accumulated.** It maps each
 confirmed key to its category so that `publishEpisodes` can tell a new episode
 from a continuing one. An earlier reading of the code suggested it only ever
-grew; it does not — each sweep replaces the whole map with one built from
+grew; it does not, each sweep replaces the whole map with one built from
 `Sweeper.Confirmed()`, which is itself bounded by the confirmation queue.
 
 **The clock-skew map checks its own length before inserting.** A stream of
-one-off publisher identities — which a misconfigured producer emits readily —
+one-off publisher identities, which a misconfigured producer emits readily, 
 would otherwise grow it without limit. It is capped at `policy.maxPublishers`,
 the same bound seqtrack uses, so the two cannot disagree about how many
 publishers exist.
 
 **The ingest channel is sized differently per source type.** §10.2 requires it
 to exceed the socket high-water mark so that loss is countable rather than
-invisible, which is right for a transport that can drop — and costs 12.8 MB per
+invisible, which is right for a transport that can drop, and costs 12.8 MB per
 check for one that cannot. `ingestBufferFor` gives zmq and nats the configured
 size and caps everything else at 4,096. See D-016.
 
@@ -98,11 +98,11 @@ survive it:
 
 Seventeen `make(chan` sites. Every one is either:
 
-- **Buffered with a configured size** — the two ingest channels above.
-- **Buffered with a fixed small size** — the source's gap-signal channel, sized
+- **Buffered with a configured size**: the two ingest channels above.
+- **Buffered with a fixed small size**: the source's gap-signal channel, sized
   1 and dropping rather than blocking, because the pipeline needs to learn that
   a gap happened rather than how many times.
-- **Unbuffered and used for a single handoff** — `done`, `bootstrapped`, the
+- **Unbuffered and used for a single handoff**, `done`, `bootstrapped`, the
   errgroup's internal channels. An unbuffered channel holds nothing.
 
 ## The bound that is documented rather than enforced
@@ -110,8 +110,8 @@ Seventeen `make(chan` sites. Every one is either:
 `policy.maxTrackedKeys` bounds the oracle's *key count*, not its memory. Each
 key's cost depends on how many events its ring holds, which is why the
 measured figure is ~670 bytes per key with one event of history and roughly
-16 KiB per key with sixteen. The bound holds — the oracle never exceeds
-`maxTrackedKeys` and `TestProp_MemoryBounded` proves it — but sizing against
+16 KiB per key with sixteen. The bound holds, the oracle never exceeds
+`maxTrackedKeys` and `TestProp_MemoryBounded` proves it, but sizing against
 the key count alone will under-provision by more than an order of magnitude on
 a workload that touches keys repeatedly.
 
