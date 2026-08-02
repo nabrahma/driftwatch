@@ -1,0 +1,234 @@
+# PRD §17.4. On a v* tag: multi-arch binaries, checksums, SBOMs, a multi-arch
+# image on GHCR, cosign signatures for all of it, and the Helm chart published
+# as an OCI artifact.
+#
+# The ordering matters and is not incidental. `verify` runs first and everything
+# else needs it: a release is the worst possible place to discover that the
+# tests do not pass, because the tag is already public and deleting a tag people
+# may have pulled is worse than shipping the bad build.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  # Dry-run any tag's build without publishing, so the workflow itself can be
+  # changed without minting a release to test it.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: build everything but publish nothing
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.25"
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  # Everything CI runs, again, against the tagged commit. CI having passed on
+  # the branch is not the same statement: a tag can point anywhere.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: unit, property and fault suites
+        run: |
+          go test -race -covermode=atomic -coverprofile=cover.out \
+            ./pkg/... ./internal/... ./api/...
+          ./hack/verify-coverage.sh cover.out
+
+      - name: fault matrix
+        run: make test-fault
+
+      - name: the repository's own rules
+        run: |
+          ./hack/verify-no-sleep.sh
+          ./hack/verify-no-superlatives.sh
+          ./hack/verify-metrics-docs.sh
+
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  binaries:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write   # keyless signing
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # goreleaser needs the history for the changelog
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - uses: anchore/sbom-action/download-syft@v0
+      - uses: sigstore/cosign-installer@v3
+
+      - name: goreleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: >-
+            release --clean
+            ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--snapshot --skip=publish' || '' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Signed after the fact rather than by goreleaser's own signing block, so
+      # the checksums file is signed too — that is the one signature that covers
+      # every artifact at once, and the one worth verifying if you only verify
+      # one thing.
+      - name: sign the checksums
+        if: github.event_name == 'push'
+        run: |
+          cosign sign-blob --yes \
+            --output-signature dist/checksums.txt.sig \
+            --output-certificate dist/checksums.txt.pem \
+            dist/checksums.txt
+
+          gh release upload "${GITHUB_REF_NAME}" \
+            dist/checksums.txt.sig dist/checksums.txt.pem --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+
+  image:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: sigstore/cosign-installer@v3
+
+      - name: log in to ghcr
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+
+      # The same Dockerfile CI builds on every push. §18's guarantees — no
+      # shell, uid 65532, read-only root — are asserted by the `image` job in
+      # ci.yaml against that file, so this inherits those checks rather than
+      # restating them.
+      - name: build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+
+      # By digest, not by tag. A tag is mutable; signing one signs a name rather
+      # than an artifact, and the name can be repointed afterwards.
+      - name: sign the image
+        if: github.event_name == 'push'
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+        env:
+          IMAGE: ${{ env.IMAGE }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+
+      - name: attach an SBOM to the image
+        if: github.event_name == 'push'
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          format: spdx-json
+          upload-artifact: false
+
+  chart:
+    needs: [verify, image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+
+      - uses: sigstore/cosign-installer@v3
+
+      # The chart's appVersion has to name the tag being released. A chart that
+      # ships pointing at a previous image is the kind of mistake nobody notices
+      # until an upgrade appears to do nothing.
+      - name: pin the chart to this tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          sed -i "s/^version: .*/version: ${version}/" deploy/helm/driftwatch/Chart.yaml
+          sed -i "s/^appVersion: .*/appVersion: \"${version}\"/" deploy/helm/driftwatch/Chart.yaml
+          helm lint deploy/helm/driftwatch
+          helm template driftwatch deploy/helm/driftwatch >/dev/null
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+
+      - name: package
+        run: helm package deploy/helm/driftwatch --destination dist/
+
+      - name: push to ghcr
+        if: github.event_name == 'push'
+        run: |
+          echo "${GITHUB_TOKEN}" | helm registry login "${REGISTRY}" \
+            --username "${GITHUB_ACTOR}" --password-stdin
+
+          version="${GITHUB_REF_NAME#v}"
+          helm push "dist/driftwatch-${version}.tgz" \
+            "oci://${REGISTRY}/${GITHUB_REPOSITORY_OWNER}/charts"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          REGISTRY: ${{ env.REGISTRY }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+
+      - name: upload the chart to the release
+        if: github.event_name == 'push'
+        run: gh release upload "${GITHUB_REF_NAME}" dist/*.tgz --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}

@@ -1,0 +1,154 @@
+# Release build for the two binaries (PRD §17.4).
+#
+# The container image is NOT built here. It is built by the release workflow
+# from the same Dockerfile CI already tests on every push, so the image that
+# ships is produced by the path that has been exercised hundreds of times
+# rather than by a second one that runs four times a year.
+version: 2
+
+project_name: driftwatch
+
+before:
+  hooks:
+    - go mod download
+    # A release must not be the thing that discovers the tree does not build.
+    - go build ./...
+
+builds:
+  # driftwatch: the CLI. Every platform someone might run it from, because it
+  # is a debugging tool and the person debugging is on whatever they are on.
+  - id: driftwatch
+    main: ./cmd/driftwatch
+    binary: driftwatch
+    env:
+      # §8.5: CGO is never required. It is also what makes the binaries
+      # statically linked and the distroless base legal.
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/nabrahma/driftwatch/internal/buildinfo.Version={{.Version}}
+      - -X github.com/nabrahma/driftwatch/internal/buildinfo.Commit={{.FullCommit}}
+      - -X github.com/nabrahma/driftwatch/internal/buildinfo.Date={{.Date}}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+  # driftwatch-manager: the operator. Linux only, and deliberately — it runs as
+  # a pod. Shipping a darwin build of a Kubernetes controller invites someone
+  # to run it outside a cluster and discover the hard way that it expects a
+  # service account.
+  - id: driftwatch-manager
+    main: ./cmd/driftwatch-manager
+    binary: driftwatch-manager
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/nabrahma/driftwatch/internal/buildinfo.Version={{.Version}}
+      - -X github.com/nabrahma/driftwatch/internal/buildinfo.Commit={{.FullCommit}}
+      - -X github.com/nabrahma/driftwatch/internal/buildinfo.Date={{.Date}}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: default
+    ids: [driftwatch, driftwatch-manager]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+      - docs/CORRECTNESS.md
+      - docs/KNOWN_GAPS.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+# An SBOM per archive. §17.4 asks for one, and the reason to attach it here
+# rather than generate it on demand is that it describes what was actually
+# shipped — a later scan of the repository describes whatever the repository
+# says today.
+sboms:
+  - id: archive
+    artifacts: archive
+    documents:
+      - "{{ .ArtifactName }}.sbom.spdx.json"
+
+# Reproducibility: no timestamp anywhere that changes between two builds of the
+# same commit. Combined with -trimpath and mod_timestamp above, two builds of
+# one tag produce identical binaries, which is what makes a signature worth
+# anything.
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  use: github
+  sort: asc
+  # The commit convention is enforced in CI, so the groups below are reliable
+  # rather than aspirational.
+  groups:
+    - title: Features
+      regexp: '^feat(\(.+\))?!?:'
+      order: 0
+    - title: Fixes
+      regexp: '^fix(\(.+\))?!?:'
+      order: 1
+    - title: Performance
+      regexp: '^perf(\(.+\))?!?:'
+      order: 2
+    - title: Documentation
+      regexp: '^docs(\(.+\))?!?:'
+      order: 3
+    - title: Other
+      order: 999
+  filters:
+    exclude:
+      - '^chore(\(.+\))?:'
+      - '^style(\(.+\))?:'
+      - '^test(\(.+\))?:'
+      - "^Merge "
+
+release:
+  github:
+    owner: nabrahma
+    name: driftwatch
+  draft: false
+  prerelease: auto
+  header: |
+    ## driftwatch {{ .Tag }}
+
+    Detects when a datastore has silently stopped matching the event stream
+    that built it.
+
+    Container image:
+
+    ```sh
+    docker pull ghcr.io/nabrahma/driftwatch:{{ .Tag }}
+    ```
+
+    Every artifact below is signed with cosign keylessly, and every archive has
+    an SPDX SBOM beside it. Verify a binary before you run it:
+
+    ```sh
+    cosign verify-blob \
+      --certificate-identity-regexp 'https://github.com/nabrahma/driftwatch/.*' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+      --signature driftwatch_{{ .Version }}_linux_amd64.tar.gz.sig \
+      --certificate driftwatch_{{ .Version }}_linux_amd64.tar.gz.pem \
+      driftwatch_{{ .Version }}_linux_amd64.tar.gz
+    ```
+  footer: |
+    ---
+
+    **Before deploying:** read [Known gaps](https://github.com/nabrahma/driftwatch/blob/main/docs/KNOWN_GAPS.md).
+    The oracle's memory is bounded by key count rather than by bytes (G-001),
+    which is the one limitation most likely to surprise you at scale.

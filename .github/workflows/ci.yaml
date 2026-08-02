@@ -10,7 +10,7 @@ permissions:
 
 env:
   # §8.5: the declared minimum. Building on the floor is the point.
-  GO_VERSION: "1.23"
+  GO_VERSION: "1.25"
   GOLANGCI_VERSION: v1.64.8
 
 concurrency:
@@ -133,8 +133,11 @@ jobs:
           go test -race -covermode=atomic -coverprofile=cover.out \
             ./pkg/... ./internal/... ./api/...
 
-      # Per-package coverage thresholds (§16.9) are enforced from Phase 1, when
-      # there is code to cover. See docs/DECISIONS.md ADR-0007.
+      # §16.9's per-package floors. Until this step existed the job produced
+      # cover.out, uploaded it, and nothing read the number — and two packages
+      # had quietly drifted below their floor.
+      - name: coverage floors
+        run: ./hack/verify-coverage.sh cover.out
 
       - name: upload coverage
         if: always()
@@ -143,6 +146,87 @@ jobs:
           name: coverage
           path: cover.out
           if-no-files-found: warn
+
+  # §16.1 asks for 60 seconds of fuzzing per CI run against the one property
+  # that matters on untrusted input: Decode never panics. A decoder that panics
+  # on a malformed frame takes down the auditor, and it does so at exactly the
+  # moment the system it is auditing is misbehaving.
+  #
+  # The committed corpus under pkg/codec/testdata/fuzz/ is run by the unit job
+  # as ordinary seeds. This job is the part that looks for something new.
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: fuzz the codec
+        run: make fuzz FUZZTIME=60s
+
+      # A crash is written into testdata/fuzz/ by the toolchain. Uploading it
+      # is what makes the failure actionable — without the input, "the fuzzer
+      # found something" is not a bug report.
+      - name: upload any crash the fuzzer found
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash
+          path: pkg/codec/testdata/fuzz/
+          if-no-files-found: ignore
+
+  # §18. Two scanners because they answer different questions: govulncheck
+  # reports known vulnerabilities in Go code that is actually reachable from
+  # this binary, and trivy reports them in everything else the image contains.
+  #
+  # Neither is allowed to fail silently. A scanner wired in and set to
+  # continue-on-error is worse than no scanner, because the badge says the
+  # supply chain is checked and nothing is checking it.
+  security:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # Reachability-based: a vulnerability in a dependency that no code path
+      # here calls is reported as informational rather than as a failure, which
+      # is the difference between a signal and a weekly ritual of dismissing it.
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      - name: build the image
+        run: docker build -t driftwatch:scan .
+
+      - name: trivy
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: driftwatch:scan
+          format: sarif
+          output: trivy.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+
+      # Uploaded even when the scan failed, so the findings are readable in the
+      # Security tab rather than only as a red step in a log.
+      - name: upload the scan to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy.sarif
+        continue-on-error: true
 
   # The controller suite runs against a real API server and a real etcd, because
   # a fake client would let every one of its tests pass while the controller was

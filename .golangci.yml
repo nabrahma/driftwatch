@@ -104,3 +104,16 @@ issues:
     - path: (^|/)(test/|.*_test\.go)
       linters:
         - prealloc
+
+    # Ginkgo and Gomega are dot-imported, by their own documented convention
+    # and by everyone who uses them. `Describe`, `It`, `Expect` and `Eventually`
+    # unqualified are what makes a Ginkgo suite readable as a specification,
+    # which is the entire reason to use it over plain table tests.
+    #
+    # Scoped to test/e2e rather than repository-wide: this is the only suite
+    # written in that style, and a dot import anywhere else would still be a
+    # finding worth seeing.
+    - path: ^test/e2e/.*_test\.go
+      linters:
+        - revive
+      text: "dot-imports"
