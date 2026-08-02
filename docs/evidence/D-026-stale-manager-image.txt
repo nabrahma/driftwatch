@@ -1,0 +1,120 @@
+D-026 — make e2e-reuse silently tested a seventeen-hour-old binary
+
+Captured Phase 9, three e2e runs into fixing D-025.
+
+======================================================================
+THE SYMPTOM
+======================================================================
+
+A fix was made to pkg/check/check.go, committed, and the suite re-run with
+DRIFTWATCH_E2E_REUSE_CLUSTER=1. E1 failed with exactly the same message and
+exactly the same numbers as before the fix:
+
+  run 1:  coverage was 0.0000 ... tracked=3000 settled=945 applied=129130
+  run 3:  coverage was 0.0000 ... tracked=3000 settled=950 applied=128940
+
+Identical, down to the shape. That is not what a fix that fails to work
+looks like — it is what no fix at all looks like.
+
+======================================================================
+THE EVIDENCE, IN A FILE NOBODY READS
+======================================================================
+
+15-node.txt, written by the diagnostics collector on every failure:
+
+    Non-terminated Pods:          (13 in total)
+      Namespace           Name                                  AGE
+      driftwatch-system   driftwatch-manager-8b7f69798-hgsn9    17h
+      e2e-e1-happy-path   materializer-667f485b76-db6vg         75s
+      e2e-e1-happy-path   publisher-85f5ff788-vsczx             75s
+
+The scenario's own pods are 75 seconds old. The manager is seventeen hours
+old — older than the session, older than every fix in it, and unchanged
+across four suite runs.
+
+The same file also ruled out the hypothesis that had been forming, that the
+cluster was simply overloaded:
+
+    cpu:      16
+    memory:   7739584Ki
+    Allocated resources:
+      cpu       1200m (7%)   limits 5100m (31%)
+      memory    610Mi (8%)   limits 2438Mi (32%)
+
+Seven percent of sixteen cores. Nothing was saturated.
+
+======================================================================
+THE CAUSE
+======================================================================
+
+test/e2e/kind.go's deploy path, before the fix:
+
+    kubectl apply -f test/e2e/manifests/manager.yaml
+    kubectl rollout status deployment/driftwatch-manager
+
+The manifest pins:
+
+    image: driftwatch/manager:e2e
+    imagePullPolicy: Never
+
+Both are deliberate — a fixed tag and Never are what make a locally built,
+never-pushed image usable in Kind. They are also what makes the apply a
+no-op: the Deployment spec is byte-identical to the one already in the API
+server, so Kubernetes correctly decides there is nothing to reconcile.
+
+`kind load docker-image` had put the freshly built layers into the node's
+containerd. That does not restart anything. A pod already running keeps its
+own image reference.
+
+And every step reports success:
+
+    e2e: building images            ok
+    e2e: loading images into kind   ok
+    e2e: deploying the manager      ok       <- applied nothing
+    e2e: waiting for the manager    ok       <- the old pod is healthy
+
+======================================================================
+WHY IT IS EXPENSIVE
+======================================================================
+
+make e2e-reuse is the documented fast-iteration path. It is what someone
+reaches for exactly when they are debugging, which is exactly when being
+shown a stale binary's behaviour is most costly.
+
+The failure mode is "the fix did not work", which is the most misleading
+result a test can give: it sends the search somewhere the bug is not. The
+next hypothesis is then also tested against the old binary, and so is the
+one after that.
+
+Three conclusions drawn earlier in this session were artifacts of it:
+
+  - that D-020's status fix had failed and coverage was still zeroing,
+  - that E2 was still not detecting the dropped range,
+  - that the E5 maxmemory change had not taken effect.
+
+All three were wrong. None of that code was running.
+
+======================================================================
+THE FIX
+======================================================================
+
+    fmt.Println("e2e: rolling the manager onto the image just built")
+    kubectl -n driftwatch-system rollout restart deployment/driftwatch-manager
+    kubectl -n driftwatch-system rollout status  deployment/driftwatch-manager
+
+Unconditional. It costs a few seconds on a path that already spends minutes
+building images, and it removes the category rather than this instance of it.
+
+======================================================================
+THE GENERAL SHAPE
+======================================================================
+
+A cache keyed on something that does not change is a cache that never
+invalidates.
+
+The image tag is constant by design, so that imagePullPolicy: Never can
+work. That same constancy is what made `kubectl apply` a no-op. The two
+requirements are in direct tension and nothing in either says so — which is
+why the fix is accompanied by a comment at the call site explaining that the
+rollout is not redundant, since the next reader's instinct will be that
+applying a manifest and then restarting it is doing the same thing twice.

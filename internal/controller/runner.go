@@ -472,6 +472,21 @@ func (r *RunnerRegistry) stopLocked(
 		err = fmt.Errorf("closing check %s: %w", key, closeErr)
 	}
 
+	// The check is gone, so its series must go with it.
+	//
+	// Left behind, every gauge freezes at whatever it last held. A check deleted
+	// while it had drift keeps exporting that number forever, so the §12.2
+	// alert on it keeps firing about an object that no longer exists, and the
+	// only way to clear it is to restart the manager — which discards every
+	// other check's history at the same time.
+	//
+	// After the wait rather than before: a runner still draining could write one
+	// more sample, and deleting first would leave exactly the series this is
+	// meant to remove.
+	if r.opts.Metrics != nil {
+		r.opts.Metrics.ForgetCheck(key.String())
+	}
+
 	r.log.Info("stopped runner", "check", key.String(), "hash", runner.Hash)
 	return err
 }

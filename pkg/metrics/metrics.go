@@ -246,6 +246,42 @@ func (m *Metrics) ForCheck(name string) *CheckMetrics {
 	}
 }
 
+// ForgetCheck removes every series belonging to a check that has stopped.
+//
+// Without it a deleted DriftCheck's series stay in the registry for the life of
+// the process, and three things go wrong — the third being the one that pages
+// someone.
+//
+//  1. Cardinality grows with the number of checks the process has *ever* run
+//     rather than the number it is running, which is not the quantity §19.2's
+//     budget was computed against.
+//  2. The dashboard's `check` variable lists checks that no longer exist, and
+//     selecting one shows a flat line rather than nothing.
+//  3. Every gauge freezes at its final value. `driftwatch_divergent_keys` for a
+//     check deleted while it had drift stays at that number forever, so the
+//     §12.2 alert on it fires forever, about an object that is gone. The only
+//     way to clear it is to restart the manager — which clears every other
+//     check's history too.
+//
+// Called from the runner registry when a check stops, so the series outlive the
+// check by no more than one scrape.
+func (m *Metrics) ForgetCheck(name string) {
+	labels := prometheus.Labels{LabelCheck: name}
+
+	// DeletePartialMatch rather than DeleteLabelValues: most of these vectors
+	// carry a second label — publisher, reason, op — whose values are not known
+	// here and would have to be enumerated to delete one at a time.
+	for _, v := range m.counters {
+		v.DeletePartialMatch(labels)
+	}
+	for _, v := range m.gauges {
+		v.DeletePartialMatch(labels)
+	}
+	for _, v := range m.histograms {
+		v.DeletePartialMatch(labels)
+	}
+}
+
 // CheckMetrics is the metric surface for one running check.
 //
 // Every method is safe for concurrent use and cheap enough to call on the hot

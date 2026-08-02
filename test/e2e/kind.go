@@ -535,6 +535,28 @@ func deployOperator(ctx context.Context) error {
 		return err
 	}
 
+	// Always roll the deployment, even though the manifest was just applied.
+	//
+	// `kubectl apply` is a no-op when the spec has not changed, and the spec
+	// never changes: the image tag is fixed at driftwatch/manager:e2e and the
+	// pull policy is Never. `kind load docker-image` puts the newly built
+	// layers into the node's containerd, but a pod that is already running does
+	// not restart because of that. So on a reused cluster the manager keeps
+	// serving whatever binary it started with.
+	//
+	// This cost most of an afternoon. `make e2e-reuse` is the documented
+	// fast-iteration path, and it was silently exercising a seventeen-hour-old
+	// build — so a fix would be made, the suite re-run, the same failure seen,
+	// and the search would move somewhere the bug was not. The failure looks
+	// exactly like a fix that did not work.
+	//
+	// A rollout costs a few seconds and removes the whole category.
+	fmt.Println("e2e: rolling the manager onto the image just built")
+	if _, err := KubectlOut(ctx, "-n", ManagerNamespace,
+		"rollout", "restart", "deployment/driftwatch-manager"); err != nil {
+		return err
+	}
+
 	fmt.Println("e2e: waiting for the manager")
 	_, waitErr := KubectlOut(ctx, "-n", ManagerNamespace, "rollout", "status",
 		"deployment/driftwatch-manager", "--timeout="+deployTimeout.String())

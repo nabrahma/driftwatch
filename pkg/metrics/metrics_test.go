@@ -642,3 +642,68 @@ func sampleValue(m *dto.Metric) float64 {
 		return 0
 	}
 }
+
+func TestMetrics_ForgetCheckRemovesEverySeriesForAStoppedCheck(t *testing.T) {
+	// A deleted DriftCheck's series must not outlive it, and the reason is the
+	// third-order one: every gauge freezes at its final value. A check deleted
+	// while it had drift keeps exporting that number forever, so the §12.2 alert
+	// on it keeps firing about an object that no longer exists, and the only way
+	// to clear it is a manager restart — which discards every other check's
+	// history at the same time.
+	reg := prometheus.NewRegistry()
+	m := metrics.New(metrics.Options{Registry: reg})
+
+	doomed := m.ForCheck("inference/doomed")
+	survivor := m.ForCheck("inference/survivor")
+
+	// A spread of shapes: a plain counter, one with a second label, a gauge, and
+	// a histogram — because ForgetCheck has to reach all four maps.
+	for _, c := range []*metrics.CheckMetrics{doomed, survivor} {
+		c.EventReceived("replica-0", metrics.Op("add"))
+		c.EventDropped("replica-0", metrics.DropDecodeError)
+		c.SetDivergentKeys(metrics.CatMissingInTarget, 7)
+		c.ObserveSweepDuration(metrics.SweepOracleToTarget, time.Second)
+	}
+
+	require.Positive(t, seriesFor(t, reg, "inference/doomed"),
+		"the fixture did not produce any series to forget")
+	before := seriesFor(t, reg, "inference/survivor")
+	require.Positive(t, before)
+
+	m.ForgetCheck("inference/doomed")
+
+	assert.Zero(t, seriesFor(t, reg, "inference/doomed"),
+		"a stopped check's series must not outlive it; a frozen "+
+			"divergent_keys gauge alerts forever about an object that is gone")
+	assert.Equal(t, before, seriesFor(t, reg, "inference/survivor"),
+		"forgetting one check must not disturb another's series")
+}
+
+func TestMetrics_ForgetCheckIsSafeForACheckThatNeverRan(t *testing.T) {
+	// The registry's stop path calls this unconditionally, including for a
+	// runner that failed to start. It must not panic.
+	reg := prometheus.NewRegistry()
+	m := metrics.New(metrics.Options{Registry: reg})
+
+	assert.NotPanics(t, func() { m.ForgetCheck("inference/never-existed") })
+}
+
+// seriesFor counts the exported series carrying a given check label.
+func seriesFor(t *testing.T, reg *prometheus.Registry, check string) int {
+	t.Helper()
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+
+	n := 0
+	for _, f := range families {
+		for _, sample := range f.GetMetric() {
+			for _, l := range sample.GetLabel() {
+				if l.GetName() == metrics.LabelCheck && l.GetValue() == check {
+					n++
+				}
+			}
+		}
+	}
+	return n
+}

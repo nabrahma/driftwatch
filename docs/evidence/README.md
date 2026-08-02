@@ -34,8 +34,10 @@ Each of these is the captured output for one entry in
 | `D-015-declared-and-unwritten-metrics.txt` | Three §12 metrics were exported and never written | `pkg/check` |
 | `D-016-idle-check-memory.txt` | Fifty idle checks held 640 MB of empty channel | `pkg/check` |
 | `D-024-namespace-resolution.txt` | A bare service name in a DriftCheck resolves from the manager's namespace | `test/e2e` |
+| `D-025-silent-subscriber.txt` | A SUB socket whose publisher is replaced never reconnects, and driftwatch reports itself healthy while deaf | `pkg/source`, `test/e2e` |
+| `D-026-stale-manager-image.txt` | `make e2e-reuse` applied an unchanged manifest and kept a 17-hour-old manager running | `test/e2e` |
 
-Eight discoveries — D-017 through D-023 — carry their reproduction inline in
+Seven discoveries — D-017 through D-023 — carry their reproduction inline in
 [DISCOVERIES.md](../DISCOVERIES.md) rather than as a separate capture, because
 each is a code-level finding whose evidence is a named regression test rather
 than a terminal transcript. D-021 and D-022 are additionally visible in the soak

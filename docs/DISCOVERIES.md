@@ -30,6 +30,71 @@ written here in anticipation.
 
 ---
 
+## D-026 — `make e2e-reuse` silently tested a seventeen-hour-old binary
+
+**Found:** Phase 9, three e2e runs into fixing D-025, when a fix that was
+definitely in the source kept not appearing in the cluster.
+
+**What happened:** The suite's reuse path does this:
+
+```go
+kubectl apply -f manifests/manager.yaml
+kubectl rollout status deployment/driftwatch-manager
+```
+
+and the apply is a no-op. The manifest never changes — the image tag is fixed
+at `driftwatch/manager:e2e` and the pull policy is `Never` — so the Deployment
+spec is byte-identical to what is already there, Kubernetes correctly decides
+there is nothing to do, and the running pod stays exactly where it was.
+
+`kind load docker-image` had put the newly built layers into the node's
+containerd. A pod that is already running does not restart because of that.
+
+The evidence was in the diagnostics all along, in the one file nobody reads:
+
+```text
+$ kubectl get pods -o wide          # 15-node.txt
+NAMESPACE           NAME                                  AGE
+driftwatch-system   driftwatch-manager-8b7f69798-hgsn9    17h
+```
+
+Seventeen hours, across four suite runs and three separate fixes.
+
+**Why it matters:** `make e2e-reuse` is the documented fast-iteration path —
+the one someone reaches for precisely when they are debugging. It presents a
+stale binary's behaviour as the current one, and the failure mode is the most
+expensive possible: **a fix that did not work.**
+
+So the search moves on. The next hypothesis is wrong too, because it is also
+tested against the old binary, and so is the one after that. Three of the
+conclusions drawn earlier in this session — that E1's coverage bug had survived
+its fix, that E2 was still undetected, that the sizing change to E5 had not
+taken — were all artifacts of this and all wrong.
+
+There is no signal anywhere that this is happening. The build succeeds, the
+load succeeds, the rollout status succeeds because the existing pod is
+healthy, and the suite runs green up to the assertion that was going to fail
+anyway.
+
+**Fix:** always `kubectl rollout restart` after loading the images, before
+waiting on the rollout. It costs a few seconds on a path that already spends
+minutes building, and it removes the category rather than the instance.
+
+The general lesson is worth more than the fix: **a cache keyed on something
+that does not change is a cache that never invalidates.** The tag was constant
+by design, so that `imagePullPolicy: Never` would work; that same constancy is
+what made the apply a no-op.
+
+**Evidence:** `docs/evidence/D-026-stale-manager-image.txt`
+
+**Regression test:** none that is worth having. Asserting the manager pod's
+age or UID changed would test kubectl rather than driftwatch, and the fix is
+one unconditional command whose absence is visible in the function. The
+protection here is the comment at the call site, which says why the rollout is
+not redundant.
+
+---
+
 ## D-025 — A SUB socket whose publisher is replaced never reconnects, and driftwatch reports itself healthy while deaf
 
 **Found:** Phase 9, running the e2e suite after the coverage work. E7
