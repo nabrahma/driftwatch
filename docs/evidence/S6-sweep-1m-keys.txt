@@ -1,0 +1,85 @@
+S6 — a full sweep of 1,000,000 Redis keys completes in under 10 seconds
+
+PRD §2 success criterion S6, measured by BenchmarkFullSweep1M (§16.8).
+
+Machine: AMD Ryzen 7 6800HS, windows/amd64, go1.26.4
+Redis:   7.2-alpine in Docker, --save "" --maxmemory-policy noeviction
+Date:    2026-08-02
+
+Reproduce:
+
+    make bench-sweep
+
+or directly:
+
+    go test -tags=integration -run='^$' -bench=BenchmarkFullSweep1M \
+      -benchtime=5x -timeout=30m ./pkg/sweeper/
+
+----------------------------------------------------------------------
+goos: windows
+goarch: amd64
+pkg: github.com/nabrahma/driftwatch/pkg/sweeper
+cpu: AMD Ryzen 7 6800HS with Radeon Graphics
+BenchmarkFullSweep1M-16   5   5675390860 ns/op   5675 ns/key   481363472 B/op   9048053 allocs/op
+PASS
+ok   github.com/nabrahma/driftwatch/pkg/sweeper   67.697s
+----------------------------------------------------------------------
+
+RESULT: 5.68 s per full sweep. S6 requires under 10 s.
+
+What the number covers, and what it does not
+--------------------------------------------
+
+Included in the timed region: iterating the settled-key set, the batched
+pipelined reads (500 keys per round trip), the per-key comparison, and
+categorisation of any disagreement.
+
+Excluded: seeding both the store and the oracle, which happens before
+ResetTimer; and confirmation, which by construction happens a settlement
+window after a sweep and is not part of a sweep's latency.
+
+The oracle and the store are seeded to AGREE. This is deliberate. A sweep
+that found a million divergences would spend its time allocating findings
+and would be measuring the reporting path rather than the read path, which
+is not what S6 is about. The benchmark asserts `len(warm.Findings) == 0`
+before the timer starts, so a seeding mistake fails the run rather than
+quietly producing a faster number.
+
+A trap this benchmark walked into, and the fix
+----------------------------------------------
+
+The first version configured the oracle with `MaxTrackedKeys: sweepKeys + 1`
+and asserted that a million keys went in and a million were tracked. It
+failed:
+
+    Error:    Not equal:
+              expected: 1000000
+              actual  : 996673
+    Messages: oracle did not retain the whole keyspace
+
+That is D-003 reproducing itself exactly as documented. The key budget is
+enforced per shard so that eviction stays shard-local; hashing a million
+keys across 64 shards leaves some shards over-subscribed while others sit
+idle, and every key landing on a full shard is evicted while the oracle is
+globally not full. The loss here was 3,327 keys, 0.33% — consistent with
+the 3,115 keys and 0.31% recorded in D-003 during Phase 1.
+
+D-003 predicted this specific wrong turn: "The natural benchmark asserts a
+million keys go in and a million keys are tracked, and that assertion fails
+— which reads as an eviction bug. Chasing a correctness bug that is really
+a statistical property of sharding is the expensive kind of wrong turn."
+
+The fix is the documented recommendation: allow headroom. The benchmark now
+configures 1.1M for a 1M keyspace, and the comment at that line says why and
+points at D-003, so the next person to read it does not have to rediscover
+the reasoning.
+
+Allocation note
+---------------
+
+9,048,053 allocations per sweep is roughly 9 per key. §16.8's allocation
+budget of "< 5 allocs/key" applies to BenchmarkGetMany500, the batched read
+in isolation, and is met there. A full sweep additionally allocates for
+settled-key iteration and per-key comparison. D-007 records why the read
+path cannot go below ~4 allocs/key: that is the go-redis client's own floor
+for a pipelined command, not driftwatch's.

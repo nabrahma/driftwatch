@@ -51,7 +51,11 @@ type server struct {
 // The seeding client is deliberately separate from the target under test: the
 // target refuses to write, and that refusal is the feature being relied on
 // rather than worked around.
-func startRedis(ctx context.Context, t *testing.T, image string) *server {
+// It takes testing.TB rather than *testing.T so BenchmarkFullSweep1M can use
+// the same harness. That benchmark is the one measurement in §16.8 that has to
+// run against a real server rather than miniredis, because the network round
+// trip is the thing being measured rather than an obstacle to measuring it.
+func startRedis(ctx context.Context, t testing.TB, image string) *server {
 	t.Helper()
 
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
@@ -65,8 +69,8 @@ func startRedis(ctx context.Context, t *testing.T, image string) *server {
 	require.NoError(t, err, "starting %s", image)
 
 	t.Cleanup(func() {
-		if err := testcontainers.TerminateContainer(container); err != nil {
-			t.Logf("terminating %s: %v", image, err)
+		if termErr := testcontainers.TerminateContainer(container); termErr != nil {
+			t.Logf("terminating %s: %v", image, termErr)
 		}
 	})
 
@@ -77,7 +81,11 @@ func startRedis(ctx context.Context, t *testing.T, image string) *server {
 
 	addr := fmt.Sprintf("%s:%s", host, port.Port())
 	client := redis.NewClient(&redis.Options{Addr: addr})
-	t.Cleanup(func() { _ = client.Close() })
+	t.Cleanup(func() {
+		if closeErr := client.Close(); closeErr != nil {
+			t.Logf("closing the seeding client: %v", closeErr)
+		}
+	})
 
 	require.NoError(t, client.Ping(ctx).Err())
 
@@ -88,7 +96,7 @@ func startRedis(ctx context.Context, t *testing.T, image string) *server {
 }
 
 // newTargetFor builds a target pointed at a running server.
-func newTargetFor(t *testing.T, s *server, batch, scanCount int) *target.RedisTarget {
+func newTargetFor(t testing.TB, s *server, batch, scanCount int) *target.RedisTarget {
 	t.Helper()
 
 	tgt, err := target.NewRedis(target.RedisOptions{
@@ -131,7 +139,7 @@ func splitInfoLines(s string) []string {
 	for i := 0; i < len(s); i++ {
 		if s[i] == '\n' {
 			line := s[start:i]
-			if len(line) > 0 && line[len(line)-1] == '\r' {
+			if line != "" && line[len(line)-1] == '\r' {
 				line = line[:len(line)-1]
 			}
 			out = append(out, line)
@@ -450,10 +458,10 @@ func TestRedisIntegration_ScanMatchesKeysWithPatternMetacharacters(t *testing.T)
 			require.NoError(t, s.client.Set(ctx, key, "v", 0).Err())
 		}
 
-		all := drain(t, tgt.Scan(ctx, "*", 10), ctx)
+		all := drain(ctx, t, tgt.Scan(ctx, "*", 10))
 		assert.Len(t, all, 4)
 
-		escaped := drain(t, tgt.Scan(ctx, `weird\*key`, 10), ctx)
+		escaped := drain(ctx, t, tgt.Scan(ctx, `weird\*key`, 10))
 		assert.Equal(t, []string{"weird*key"}, escaped)
 	})
 }
@@ -494,7 +502,7 @@ func seedKeys(t *testing.T, s *server, n int, prefix string) {
 	}
 }
 
-func drain(t *testing.T, it target.Iterator, ctx context.Context) []string {
+func drain(ctx context.Context, t *testing.T, it target.Iterator) []string {
 	t.Helper()
 
 	var got []string
