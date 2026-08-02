@@ -181,8 +181,14 @@ unrelated assertion about a metric.
 **Evidence:** `docs/evidence/D-025-silent-subscriber.txt`
 
 **Regression test:**
-`pkg/source: TestZMQ_ASilentSocketEndsTheSessionRatherThanBlockingForever`, plus
-e2e E7.
+`pkg/source: TestZMQ_ASilentSocketEndsTheSessionRatherThanBlockingForever`, and
+`pkg/check: TestCheck_TheIdleTimeoutReachesTheSource` for the four-hop config
+path.
+
+**Status:** the diagnosis above is measured and the fix is unit-tested, but it
+has **not** yet been confirmed end to end — E7 still fails, and the deadline
+did not visibly fire in the cluster. See `docs/KNOWN_GAPS.md` G-003 before
+relying on this being closed.
 
 ---
 

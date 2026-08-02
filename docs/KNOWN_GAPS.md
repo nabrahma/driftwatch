@@ -140,3 +140,60 @@ that mode exists.
 **Asserted, not assumed:** `test/faults: TestFault07_AdjacentPairReorderedOnDriftwatch`
 seeds a stream before reordering the pair, with a comment saying why. The
 limitation is in the test rather than hidden by it.
+
+---
+
+## G-003 — The e2e suite is at 23 of 27 specs; four scenarios have unverified fixes
+
+**Status at the v0.1.0 cut:** `make e2e` is not green.
+
+The last measured run was **23 specs passing, 4 failing** across the eight
+scenarios, up from 20/5 at the start of Phase 9. E4, E5, E6 and E8 pass
+outright.
+
+The four remaining failures all have diagnosed causes and committed fixes; what
+they do not have is a run confirming those fixes, because each cycle is eleven
+minutes and the fixes were made after the last one.
+
+| Scenario | Last measured | Cause | Fix, unverified |
+|---|---|---|---|
+| E1 HappyPath | coverage 0.8982 against a 0.90 bar | Coverage is measured against tracked keys, which grows until the whole keyspace has been touched once, so the oracle must *fill* as well as settle before the assertion runs | 40,000 keys at 800/sec — a 50s cycle, populated 50s in |
+| E2 DroppedEventDetected | drift 0 | Not re-measured since the keyspace changed | 20,000 keys, a 50s cycle, so a skipped key stays wrong long enough to confirm |
+| E3 SelfLossReportsSuspect | suspect 0 | §5.2 suspicion decays per key on the next event; at 2,000 keys and 600/sec the keyspace healed every 3.3s, faster than a sweep could look | 20,000 keys, a 33s cycle |
+| E7 PublisherRestart | restarts_total 0 | **Not fully diagnosed.** See below |
+
+E1, E2 and E3 are all the same mistake made three times independently: **a
+scenario whose workload heals faster than the mechanism under test can observe
+proves nothing, and fails in a way that reads as the mechanism being broken.**
+The arithmetic is now written at each parameter rather than left implicit.
+
+### E7 is the one that is genuinely open
+
+The scenario deletes the publisher pod. The replacement comes up correctly, and
+driftwatch never receives from it — `lastSeenSeconds` climbing past 92 while the
+new pod emits 800 events/sec.
+
+That much is [D-025](DISCOVERIES.md), and D-025's fix — an idle deadline on the
+receive loop — is implemented, unit-tested against a stub socket that goes
+silent, and confirmed to reach the socket from the spec through all four hops
+(`TestCheck_TheIdleTimeoutReachesTheSource`). The effective-config dump from the
+failing run shows `idleTimeout: 1m0s`, and the CRD carries the field.
+
+**It nonetheless did not visibly fire in the cluster.** After 92 seconds of
+silence against a 60-second deadline there is exactly one reconnect in the
+manager log — the one at startup. Either the deadline is not firing, or the
+session ends and the reconnect finds nothing to receive from, and the diagnostics
+captured so far do not distinguish those.
+
+So D-025 is a real bug with a fix that is right in principle and not yet proven
+in situ. That is a weaker claim than the discovery entry implies on its own, and
+this is where it is recorded.
+
+### What this blocks
+
+§22's "8 e2e scenarios pass; suite under 8 minutes; 5 consecutive clean runs" is
+not satisfied and is not close: the suite currently takes about eleven minutes,
+and no consecutive clean runs have been achieved.
+
+The suite is also sized for the 16-core machine it was developed on rather than
+the 2-core runner §14.5 specifies, which is a separate piece of work.

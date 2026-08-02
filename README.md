@@ -450,6 +450,11 @@ Two scripted checks exist because the alternative was worse:
 
 The fault matrix ran 20 consecutive times with zero flakes:
 [docs/evidence/fault-matrix-20-runs-no-flake.txt](docs/evidence/fault-matrix-20-runs-no-flake.txt).
+
+**`make e2e` is not green.** The last measured run was 23 of 27 specs passing;
+four scenarios have diagnosed causes and committed but unverified fixes, and one
+of them (E7) is not fully diagnosed. The specifics, including what that says
+about D-025, are in [G-003](docs/KNOWN_GAPS.md). Every other level passes.
 More in [docs/TESTING.md](docs/TESTING.md);
 [docs/evidence/](docs/evidence/README.md) indexes every captured artifact.
 
