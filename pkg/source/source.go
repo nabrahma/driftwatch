@@ -92,6 +92,16 @@ const (
 
 	// GapOversized means a frame was refused for exceeding MaxPayloadBytes.
 	GapOversized GapReason = "oversized_frame"
+
+	// GapIdle means the session was ended because nothing arrived within the
+	// configured idle timeout.
+	//
+	// Separate from GapReconnect so the log says which of the two happened. A
+	// reconnect after an error and a reconnect after silence look identical
+	// downstream and mean different things upstream: the first is a peer that
+	// went away noisily, the second is one that went away without saying so,
+	// which is the case D-025 exists for.
+	GapIdle GapReason = "idle_timeout"
 )
 
 // GapSignal reports that the source may have missed messages.

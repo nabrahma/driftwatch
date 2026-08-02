@@ -48,11 +48,22 @@ var _ = Describe("E1 HappyPath", Ordered, func() {
 		// populated.
 		//
 		// So the cycle has to be long enough to settle and short enough to fill
-		// inside the scenario's budget. 40,000 keys at 800/sec is a 50-second
-		// cycle: 94% settled, and fully populated 50 seconds in, against a
-		// coverage assertion that runs after a converge wait plus a 60-second
-		// hold.
-		s = newScenario("e1-happy-path", &FixtureOptions{Rate: 800, Keys: 40_000})
+		// inside the scenario's budget.
+		//
+		// The third constraint is the runner. 40,000 keys at 800/sec satisfied
+		// both of the above and then failed on CI with
+		// "TargetAvailable Status:False Reason:Unreachable" — Redis timing out
+		// under a sweep reading 40,000 keys in 500-key batches, every five
+		// seconds, on two shared cores alongside a publisher, a materializer and
+		// the manager. Correct behavior from driftwatch, reporting a store it
+		// genuinely could not reach.
+		//
+		// Lowering the rate fixes both at once, which raising the keyspace does
+		// not: the cycle is keys/rate, so 12,000 at 200/sec is the same 60
+		// seconds while doing a quarter of the work and sweeping a third of the
+		// keys. 95% settled, populated at 60 seconds, and light enough that the
+		// store stays reachable.
+		s = newScenario("e1-happy-path", &FixtureOptions{Rate: 200, Keys: 12_000})
 		s.waitForPublisher(2000)
 
 		var err error

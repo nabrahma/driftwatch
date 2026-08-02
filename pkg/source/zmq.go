@@ -463,6 +463,8 @@ func (z *ZMQSource) receive(
 			// it backs off, re-resolves, reconnects, and signals the gap. A
 			// quiet socket and a dead one are indistinguishable from here, and
 			// the safe reading is that events were missed.
+			z.signal(GapIdle, z.clk.Now(),
+				fmt.Sprintf("no usable frame from %v in %s", z.endpoints, z.idleTimeout))
 			return fmt.Errorf("%w: no frame from %v in %s",
 				ErrIdle, z.endpoints, z.idleTimeout)
 
@@ -475,8 +477,17 @@ func (z *ZMQSource) receive(
 				waitForReceiver()
 				return nil
 			}
-			idle.reset()
-			z.deliver(res.msg, out)
+			// Reset on delivery rather than on arrival.
+			//
+			// A frame that splitFrames rejects, or that exceeds the payload
+			// cap, is not evidence the publisher is alive and well; it is
+			// evidence something is arriving. Resetting on those keeps a
+			// session alive on junk, which is the state the deadline exists to
+			// end. The deadline is about receiving usable data, so it is usable
+			// data that postpones it.
+			if z.deliver(res.msg, out) {
+				idle.reset()
+			}
 		}
 	}
 }
@@ -520,16 +531,16 @@ func (t *idleTimer) stop() {
 }
 
 // deliver turns one ZMQ message into a RawMessage and hands it to the pipeline.
-func (z *ZMQSource) deliver(msg zmq4.Msg, out chan<- RawMessage) {
+func (z *ZMQSource) deliver(msg zmq4.Msg, out chan<- RawMessage) bool {
 	topic, payload, ok := splitFrames(msg.Frames)
 	if !ok {
-		return
+		return false
 	}
 	if len(payload) > z.maxPayload {
 		z.c.dropped()
 		z.c.fail(ErrPayloadTooLarge)
 		z.signal(GapOversized, z.clk.Now(), fmt.Sprintf("%d bytes on topic %q", len(payload), topic))
-		return
+		return false
 	}
 
 	raw := RawMessage{Topic: topic, Payload: payload, ObservedAt: z.clk.Now()}
@@ -541,11 +552,12 @@ func (z *ZMQSource) deliver(msg zmq4.Msg, out chan<- RawMessage) {
 	// and turns driftwatch into the thing that slows the system it audits.
 	if trySend(out, raw) {
 		z.c.frame(len(payload), raw.ObservedAt)
-		return
+		return true
 	}
 
 	z.c.dropped()
 	z.signal(GapHighWaterMark, raw.ObservedAt, fmt.Sprintf("ingest buffer full at topic %q", topic))
+	return false
 }
 
 // splitFrames handles both multipart conventions.

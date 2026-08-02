@@ -54,8 +54,8 @@ var _ = Describe("E3 SelfLossReportsSuspect", Ordered, func() {
 		// 20,000 keys at 600/sec is a 33-second cycle, so a key made suspect by
 		// the cut stays suspect across a settlement window and a sweep.
 		s = newScenario("e3-self-loss", &FixtureOptions{
-			Rate:      600,
-			Keys:      20_000,
+			Rate:      150,
+			Keys:      12_000,
 			WithProxy: true,
 		})
 		s.waitForPublisher(1000)

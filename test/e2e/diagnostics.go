@@ -134,9 +134,23 @@ func (c *Collector) managerLogs(ctx context.Context) {
 		"-l", "app.kubernetes.io/name=driftwatch", "--tail=2000", "--all-containers")
 
 	// The previous container's logs. §14.3 asks for both, and this is the one
-	// that matters: a manager that crash-looped has nothing useful in its
-	// current log, because the current container has only just started.
-	c.capture(ctx, "04-manager-previous.log",
+	// that matters when it exists: a manager that crash-looped has nothing
+	// useful in its current log, because the current container has only just
+	// started.
+	//
+	// Absence is the good outcome and must not be reported as a failure.
+	// `kubectl logs --previous` exits non-zero when there is no previous
+	// container, which is the case whenever the manager did not restart. The
+	// collector used to record that as "04-manager-previous.log: exit status 1"
+	// in its problem list, and the summary at the end of a failing run then said
+	// one item could not be collected.
+	//
+	// That reads as a broken collector, and worse, it reads as evidence the
+	// manager crashed. It cost a real detour: a failure was diagnosed as the
+	// manager being OOM-killed and needing resource limits, on the strength of
+	// this line, when it meant the exact opposite.
+	c.captureOptional(ctx, "04-manager-previous.log",
+		"the manager has no previous container, so it did not restart",
 		"logs", "-n", ManagerNamespace,
 		"-l", "app.kubernetes.io/name=driftwatch", "--tail=2000", "--previous")
 }
@@ -410,6 +424,27 @@ func (c *Collector) capture(ctx context.Context, name string, args ...string) {
 		c.problem("%s: %v", name, res.Err)
 	}
 	c.writeFile(name, body)
+}
+
+// captureOptional captures a command whose failure is an ordinary outcome
+// rather than a problem, writing absent as an explanation instead.
+//
+// The distinction is the whole point. c.problem feeds the "N item(s) could not
+// be collected" summary a reader sees at the end of a failing scenario, and
+// every entry in it should be something that went wrong with the collection.
+// An entry that means "the thing you were looking for did not happen" sends
+// people to investigate the collector, or worse, to believe the failure it
+// implies.
+func (c *Collector) captureOptional(ctx context.Context, name, absent string, args ...string) {
+	cmdCtx, cancel := context.WithTimeout(ctx, diagCommandTimeout)
+	defer cancel()
+
+	res := Kubectl(cmdCtx, args...)
+	if res.Err != nil {
+		c.writeFile(name, absent+"\n")
+		return
+	}
+	c.writeFile(name, res.Output())
 }
 
 // captureExec runs a command inside a pod in the scenario's namespace.

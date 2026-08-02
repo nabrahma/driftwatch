@@ -38,9 +38,14 @@ var _ = Describe("E2 DroppedEventDetected", Ordered, func() {
 	// The drift was real and driftwatch was right to stop reporting it. The
 	// scenario simply never gave it long enough to be seen.
 	//
-	// 20,000 keys at 400/s is a 50-second cycle, so a skipped key stays wrong
-	// for the better part of a minute — long enough to be swept, confirmed, and
-	// asserted on.
+	// 20,000 keys at 400/s was a 50-second cycle and still failed on CI, at
+	// coverage 0.9263 with the keyspace only two thirds populated: detection on
+	// two cores took longer than the workload took to heal.
+	//
+	// 12,000 keys at 150/s is 80 seconds, against a 60-second detection budget.
+	// The margin is the point. A skipped key has to stay wrong for longer than
+	// a settlement window plus a sweep plus a confirmation, on the slowest
+	// machine this runs on, or the scenario measures the runner.
 	const (
 		skipFrom = 500
 		skipTo   = 900
@@ -48,8 +53,8 @@ var _ = Describe("E2 DroppedEventDetected", Ordered, func() {
 
 	BeforeAll(func() {
 		s = newScenario("e2-dropped-event", &FixtureOptions{
-			Rate:     400,
-			Keys:     20_000,
+			Rate:     150,
+			Keys:     12_000,
 			SkipFrom: skipFrom,
 			SkipTo:   skipTo,
 		})
