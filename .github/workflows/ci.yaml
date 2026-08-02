@@ -28,11 +28,22 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
+      # Built here rather than downloaded, because the published binary for
+      # this version was compiled with Go 1.24 and golangci-lint refuses to run
+      # when its own build toolchain is older than the module's go directive:
+      #
+      #   the Go language version (go1.24) used to build golangci-lint is lower
+      #   than the targeted Go version (1.25.0)
+      #
+      # go install compiles it with whatever setup-go just provisioned, so the
+      # two versions cannot disagree. The alternative was upgrading to
+      # golangci-lint v2, which changes the config schema and is a separate
+      # piece of work from getting CI green.
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: ${{ env.GOLANGCI_VERSION }}
-          args: --timeout 5m
+        run: |
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@${{ env.GOLANGCI_VERSION }}
+          echo "$(go env GOPATH)/bin" >>"$GITHUB_PATH"
+          golangci-lint run --timeout 5m
 
       # Generated files are excluded: gofumpt strips the redundant import alias
       # controller-gen emits, controller-gen puts it back, and the two would
@@ -154,6 +165,13 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
+      # ./internal/... sweeps up internal/controller, which needs a real API
+      # server. Easy to miss, because the job is called "unit" and the package
+      # that needs it is two directories down. Without this the job fails with a
+      # message about envtest binaries that reads as though the controller job
+      # is the broken one.
+      - uses: ./.github/actions/envtest
+
       - name: go test -race
         run: |
           go test -race -covermode=atomic -coverprofile=cover.out \
@@ -235,15 +253,24 @@ jobs:
       - name: build the image
         run: docker build -t driftwatch:scan .
 
+      # The CLI rather than aquasecurity/trivy-action, whose pinned tag stopped
+      # resolving: "unable to find version 0.28.0".
+      #
+      # Deliberately unpinned, which is the opposite of the rule everywhere else
+      # in this repository, and for a reason. A vulnerability scanner pinned to
+      # a release is a scanner running last year's detection logic against this
+      # year's CVEs. It is a CI tool rather than a dependency of the shipped
+      # artifact, so a new version cannot reach the binary; the only thing it
+      # changes is how much the scan finds.
       - name: trivy
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: driftwatch:scan
-          format: sarif
-          output: trivy.sarif
-          severity: CRITICAL,HIGH
-          exit-code: "1"
-          ignore-unfixed: true
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sudo sh -s -- -b /usr/local/bin
+          trivy --version
+          trivy image \
+            --format sarif --output trivy.sarif \
+            --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 \
+            driftwatch:scan
 
       # Uploaded even when the scan failed, so the findings are readable in the
       # Security tab rather than only as a red step in a log.
@@ -269,22 +296,7 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      # setup-envtest is installed into $(go env GOPATH)/bin, which is not on a
-      # runner's PATH. The command substitution below therefore ran a binary
-      # that could not be found, produced an empty string, and exported an empty
-      # KUBEBUILDER_ASSETS — which the suite reported as "no envtest binaries
-      # under ~/.local/share/kubebuilder-envtest/k8s". An empty assignment is
-      # not an error, so nothing failed until the tests did.
-      #
-      # The absolute path is used rather than relying on PATH, and the result is
-      # checked, so a download failure fails this step instead of the suite.
-      - name: envtest binaries
-        run: |
-          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.20
-          assets="$("$(go env GOPATH)/bin/setup-envtest" use 1.31.0 -p path)"
-          test -n "$assets" || { echo "::error::setup-envtest returned no path"; exit 1; }
-          test -d "$assets" || { echo "::error::$assets is not a directory"; exit 1; }
-          echo "KUBEBUILDER_ASSETS=$assets" >>"$GITHUB_ENV"
+      - uses: ./.github/actions/envtest
 
       - name: controller and CRD suites
         run: go test -race -count=1 -timeout=10m ./api/... ./internal/controller/...

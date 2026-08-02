@@ -60,13 +60,38 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+      # The context is checked first because the suite tears the cluster down on
+      # its way out unless DRIFTWATCH_E2E_KEEP is set. When the failure is the
+      # cluster never coming up, every command below then fails on a context
+      # that does not exist, and the step fills with errors about kubectl rather
+      # than with anything about driftwatch.
       - name: cluster state on failure
         if: failure()
         run: |
-          kubectl --context kind-driftwatch-e2e get pods -A -o wide || true
-          kubectl --context kind-driftwatch-e2e get driftchecks -A || true
-          kubectl --context kind-driftwatch-e2e -n driftwatch-system \
+          ctx=kind-driftwatch-e2e
+          if ! kubectl config get-contexts -o name | grep -qx "$ctx"; then
+            echo "no $ctx context; the cluster was never created or is already gone"
+            exit 0
+          fi
+
+          kubectl --context "$ctx" get pods -A -o wide || true
+          kubectl --context "$ctx" get driftchecks -A -o wide || true
+          kubectl --context "$ctx" -n driftwatch-system \
             logs -l app.kubernetes.io/name=driftwatch --tail=200 || true
+
+          # Previous-container logs exist only if the manager restarted, so a
+          # non-zero exit here is the ordinary case rather than a problem. The
+          # suite's own collector reported it as "04-manager-previous.log: exit
+          # status 1", which reads like a broken diagnostic.
+          for pod in $(kubectl --context "$ctx" -n driftwatch-system \
+              get pods -l app.kubernetes.io/name=driftwatch -o name); do
+            if kubectl --context "$ctx" -n driftwatch-system \
+                logs --previous "$pod" --tail=200 2>/dev/null; then
+              echo "(above: previous container for $pod, so it restarted)"
+            else
+              echo "no previous container for $pod, so it did not restart"
+            fi
+          done
 
   # Wire compatibility with real libzmq (§16.6). Its own job because it needs a
   # Python toolchain and nothing else in the repository does, and because it

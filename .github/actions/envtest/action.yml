@@ -1,0 +1,53 @@
+name: envtest
+description: >-
+  Install setup-envtest and export KUBEBUILDER_ASSETS, verified.
+
+  Two jobs need this: `controller`, which runs the CRD and reconcile suites
+  directly, and `unit`, which runs ./internal/... and therefore sweeps up
+  internal/controller with it. The second one is easy to miss, and when it is
+  missed the unit job fails with a message about envtest binaries that reads as
+  though the controller job is broken.
+
+inputs:
+  k8s-version:
+    description: The Kubernetes version to fetch binaries for
+    required: false
+    default: "1.31.0"
+
+runs:
+  using: composite
+  steps:
+    - name: install setup-envtest and export KUBEBUILDER_ASSETS
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.20
+
+        # By absolute path. go install writes to $(go env GOPATH)/bin, which is
+        # not on a runner's PATH, so a bare `setup-envtest` inside a command
+        # substitution produces an empty string and exports an empty
+        # KUBEBUILDER_ASSETS. That is not an error, so nothing fails until the
+        # tests do, with a message that points at the wrong thing.
+        setup="$(go env GOPATH)/bin/setup-envtest"
+        if [ ! -x "$setup" ]; then
+          echo "::error::setup-envtest is not at $setup"
+          ls -la "$(dirname "$setup")" || true
+          exit 1
+        fi
+
+        assets="$("$setup" use '${{ inputs.k8s-version }}' -p path | tr -d '\r')"
+        echo "setup-envtest returned: $assets"
+
+        test -n "$assets" || { echo "::error::setup-envtest returned no path"; exit 1; }
+        test -d "$assets" || { echo "::error::$assets is not a directory"; exit 1; }
+
+        # The suite looks for the API server binary itself, so check for it
+        # rather than for the directory existing.
+        if [ ! -x "$assets/kube-apiserver" ]; then
+          echo "::error::no kube-apiserver under $assets"
+          ls -la "$assets" || true
+          exit 1
+        fi
+
+        echo "KUBEBUILDER_ASSETS=$assets" >>"$GITHUB_ENV"

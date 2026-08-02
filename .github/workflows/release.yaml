@@ -43,6 +43,12 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
+      # Same reason as the unit job in ci.yaml: ./internal/... includes
+      # internal/controller, which needs a real API server. Worth having here
+      # even though CI already ran, because this is the job that gates a tag and
+      # the failure mode is a release blocked by something unrelated to it.
+      - uses: ./.github/actions/envtest
+
       - name: unit, property and fault suites
         run: |
           go test -race -covermode=atomic -coverprofile=cover.out \
