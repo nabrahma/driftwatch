@@ -27,7 +27,25 @@ var _ = Describe("E1 HappyPath", Ordered, func() {
 	var check string
 
 	BeforeAll(func() {
-		s = newScenario("e1-happy-path", &FixtureOptions{Rate: 2000, Keys: 3000})
+		// The keyspace has to be large enough that keys can settle, and the
+		// original 3,000 was not. The arithmetic is the whole scenario:
+		//
+		//   a key is rewritten every  keys / rate  seconds
+		//   a key is settled once it has been quiet for W
+		//   so the settled fraction is  1 - W / (keys / rate)
+		//
+		// At 3,000 keys and 2,000 events/sec that cycle is 1.5 seconds against
+		// a 3-second window, so a key is rewritten twice over before it could
+		// ever settle. Coverage cannot exceed a few tenths no matter how well
+		// driftwatch works, and the assertion below asks for 0.90 — which made
+		// this scenario unsatisfiable by construction rather than by defect.
+		//
+		// 60,000 keys at 1,000/sec is a 60-second cycle against the same
+		// 3-second window: 95% settled, with margin. The load is still
+		// sustained — a thousand events a second for the full ninety — and the
+		// keyspace stays well under the 100,000-key oracle cap, so saturation
+		// does not put the check into Degraded and fail the phase assertion.
+		s = newScenario("e1-happy-path", &FixtureOptions{Rate: 1000, Keys: 60_000})
 		s.waitForPublisher(2000)
 
 		var err error

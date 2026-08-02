@@ -136,12 +136,14 @@ var _ = Describe("E5 RedisEviction", Ordered, func() {
 			//    6mb -> 5.21M used, 0 evicted. Still never evicts; the plateau
 			//           sits just under the cap, which is the worst place for
 			//           it because the scenario looks nearly right.
-			//    4mb -> evicts continuously.
+			//    5mb -> evicts continuously, without thrashing.
+			//    4mb -> evicts continuously, and starves Redis hard enough that
+			//           its health check intermittently times out.
 			//
 			// A cap that is merely close to the steady-state size proves
 			// nothing and takes ninety seconds to say so.
 			Keys:                50_000,
-			RedisMaxMemory:      "4mb",
+			RedisMaxMemory:      "5mb",
 			RedisEvictionPolicy: "allkeys-lru",
 		})
 		s.waitForPublisher(3000)
@@ -186,8 +188,19 @@ var _ = Describe("E5 RedisEviction", Ordered, func() {
 	})
 
 	It("keeps reporting honestly under memory pressure", func() {
-		status, err := s.Status(suiteCtx, check)
-		Expect(err).NotTo(HaveOccurred())
+		// Eventually rather than a single read, and the reason is a real
+		// property of the scenario rather than flake-tolerance.
+		//
+		// A Redis held far below its working set evicts continuously, and under
+		// that load a health check occasionally times out. driftwatch reports
+		// that honestly — targetReachable goes false for a sweep and back true
+		// on the next one — so a single sample taken during a blip sees false
+		// and fails. What the scenario is actually claiming is that driftwatch
+		// keeps working under memory pressure, not that a starved store never
+		// stutters.
+		status := s.waitForCheck(check, converge,
+			"the store never came back as reachable under eviction pressure",
+			func(st *CheckStatus) bool { return st.TargetReachable })
 
 		// The store is genuinely smaller than the oracle expects, so findings
 		// here are legitimate. What must not happen is driftwatch falling over
@@ -195,8 +208,6 @@ var _ = Describe("E5 RedisEviction", Ordered, func() {
 		// not a reason to stop auditing.
 		Expect(status.Phase).NotTo(Equal("Failed"),
 			"an evicting store is not a failure of driftwatch: %s", status.Summary())
-		Expect(status.TargetReachable).To(BeTrue(),
-			"the store is up and answering: %s", status.Summary())
 
 		Expect(status.TargetKeyspaceSize).To(BeNumerically("<", int64(status.TrackedKeys)),
 			"eviction should leave the store holding fewer keys than the oracle "+

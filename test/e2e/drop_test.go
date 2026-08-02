@@ -24,10 +24,23 @@ var _ = Describe("E2 DroppedEventDetected", Ordered, func() {
 	var s *scenario
 	var check string
 
-	// The range the materializer never writes. Wide enough that the keys it
-	// touches are unlikely to be rewritten before confirmation — with 3,000
-	// keys at 400/s each key comes round every 7.5s, so a narrow range would
-	// heal before a sweep could confirm it.
+	// The range the materializer never writes, and the keyspace that makes it
+	// observable.
+	//
+	// The original comment had the right idea and the wrong numbers: at 3,000
+	// keys and 400/s a key comes round every 7.5 seconds, so the ~400 keys the
+	// skipped range touches were all rewritten — correctly, by a materializer
+	// that had resumed — within 7.5 seconds. Detection needs a settlement
+	// window plus a confirmation cycle, which is longer than that, so the drift
+	// healed before it could be confirmed and the scenario timed out reporting
+	// zero divergent keys.
+	//
+	// The drift was real and driftwatch was right to stop reporting it. The
+	// scenario simply never gave it long enough to be seen.
+	//
+	// 20,000 keys at 400/s is a 50-second cycle, so a skipped key stays wrong
+	// for the better part of a minute — long enough to be swept, confirmed, and
+	// asserted on.
 	const (
 		skipFrom = 500
 		skipTo   = 900
@@ -36,7 +49,7 @@ var _ = Describe("E2 DroppedEventDetected", Ordered, func() {
 	BeforeAll(func() {
 		s = newScenario("e2-dropped-event", &FixtureOptions{
 			Rate:     400,
-			Keys:     3000,
+			Keys:     20_000,
 			SkipFrom: skipFrom,
 			SkipTo:   skipTo,
 		})
