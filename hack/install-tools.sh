@@ -8,6 +8,7 @@ set -euo pipefail
 
 GOLANGCI_VERSION="${GOLANGCI_VERSION:-v1.64.8}"
 GOFUMPT_VERSION="${GOFUMPT_VERSION:-v0.7.0}"
+BENCHSTAT_VERSION="${BENCHSTAT_VERSION:-v0.0.0-20250801214200-bdd8b5c05d51}"
 
 GOBIN="$(go env GOPATH)/bin"
 
@@ -22,10 +23,13 @@ echo
 
 install_tool golangci-lint "github.com/golangci/golangci-lint/cmd/golangci-lint@${GOLANGCI_VERSION}"
 install_tool gofumpt       "mvdan.cc/gofumpt@${GOFUMPT_VERSION}"
+install_tool benchstat     "golang.org/x/perf/cmd/benchstat@${BENCHSTAT_VERSION}"
 
 echo
 echo "done. Ensure ${GOBIN} is on your PATH."
 echo
-echo "Tools for later phases (controller-gen, setup-envtest, kind, ginkgo,"
-echo "benchstat) are added to this script by the phase that first needs them;"
-echo "see docs/DECISIONS.md ADR-0007."
+echo "controller-gen and setup-envtest are installed by the Makefile into"
+echo "./bin, pinned there rather than here so that the version the targets use"
+echo "and the version they check are the same one; see docs/DECISIONS.md"
+echo "ADR-0007. kind and ginkgo are installed by the e2e target for the same"
+echo "reason."

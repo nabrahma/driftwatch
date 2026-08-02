@@ -43,6 +43,15 @@ LDFLAGS := -s -w \
 # it, so TEST_FLAGS deliberately does not inherit this.
 export CGO_ENABLED := 0
 
+# The race detector is on by default and CI never turns it off — a race that
+# only CI catches is still caught, but a day later and by someone else.
+#
+# It is overridable because -race needs a 64-bit cgo toolchain, and a Windows
+# contributor with 32-bit MinGW on PATH gets "sorry, unimplemented: 64-bit mode
+# not compiled in" from every test target with no hint that the tests are fine
+# and the compiler is not. `make test RACE=` runs them.
+RACE ?= -race
+
 .PHONY: help
 help: ## Show this help
 	@echo 'driftwatch - make targets'
@@ -89,7 +98,7 @@ vet: ## Run go vet
 
 .PHONY: test
 test: ## Run the unit suite with the race detector and coverage
-	CGO_ENABLED=1 go test -race -covermode=atomic -coverprofile=cover.out ./...
+	CGO_ENABLED=1 go test $(RACE) -covermode=atomic -coverprofile=cover.out ./...
 
 .PHONY: cover
 cover: ## Report coverage per package, excluding generated code
@@ -101,6 +110,18 @@ cover: ## Report coverage per package, excluding generated code
 	@grep -v 'zz_generated' cover.out >cover.filtered.out
 	@go tool cover -func=cover.filtered.out | tail -1
 	@rm -f cover.filtered.out
+
+.PHONY: test-unit
+test-unit: ## Run only the unit tests, no property or fault levels
+	CGO_ENABLED=1 go test $(RACE) -count=1 $(shell go list ./... | grep -v '/test/')
+
+.PHONY: test-property
+test-property: ## Run only the property tests (PRD section 5.8 invariants)
+	@# -run matches the top-level name, and every property test in this repo is
+	@# named TestProp_*. Running them alone is worth a target because they are
+	@# the slowest part of the default suite and the first thing to re-run after
+	@# touching an invariant.
+	CGO_ENABLED=1 go test $(RACE) -count=1 -run 'TestProp_' ./pkg/...
 
 .PHONY: test-fault
 test-fault: ## Run the fault scenario matrix (PRD section 15), all 60 rows
@@ -116,12 +137,12 @@ test-integration: ## Run the integration suite against real Redis 6 and 7 (needs
 	@docker version --format '{{.Server.Version}}' >/dev/null 2>&1 || \
 		{ echo "Docker is not reachable; the integration suite needs a running daemon"; exit 1; }
 	@echo "Docker $$(docker version --format '{{.Server.Version}}')"
-	CGO_ENABLED=1 go test -tags=integration -race -timeout=25m ./pkg/target/...
+	CGO_ENABLED=1 go test -tags=integration $(RACE) -timeout=25m ./pkg/target/...
 
 .PHONY: test-controller
 test-controller: envtest ## Run the CRD and controller suites against envtest
 	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" \
-		CGO_ENABLED=1 go test -race -count=1 -timeout=10m ./api/... ./internal/controller/...
+		CGO_ENABLED=1 go test $(RACE) -count=1 -timeout=10m ./api/... ./internal/controller/...
 
 .PHONY: manifests
 manifests: controller-gen ## Regenerate the CRD, RBAC and webhook manifests
@@ -270,6 +291,73 @@ soak: ## Run the soak test (DURATION=60m by default)
 		{ echo "Docker is not reachable; the soak needs a running daemon"; exit 1; }
 	DRIFTWATCH_SOAK_DURATION=$(or $(DURATION),60m) \
 		go test -tags=soak -timeout=$(or $(SOAK_TIMEOUT),120m) -v -run TestSoak ./test/soak/
+
+.PHONY: bench
+bench: ## Run every in-process benchmark and write docs/benchmarks/current.txt
+	@# -run='^$$' so no ordinary test runs; benchmarks that share a package with
+	@# a slow test would otherwise pay for it on every invocation.
+	@#
+	@# Each package is benchmarked in its own process. The 1M-key oracle
+	@# benchmarks are sensitive to leftover garbage from seeding, and running
+	@# them alongside another package's allocations changes the number.
+	@mkdir -p docs/benchmarks
+	@: >docs/benchmarks/current.txt
+	@echo "Machine: $$(go env GOARCH) $$(go env GOOS), $$(go version | cut -d' ' -f3)" \
+		>>docs/benchmarks/current.txt
+	@echo "Captured: $$(date -u +%Y-%m-%d)" >>docs/benchmarks/current.txt
+	@echo '' >>docs/benchmarks/current.txt
+	@for pkg in $$(go list ./pkg/... | grep -v '/test'); do \
+		if go test -run='^$$' -bench=. -benchmem -timeout=30m $$pkg 2>/dev/null | \
+			grep -qE '^Benchmark'; then \
+			echo "--- $$pkg ---" >>docs/benchmarks/current.txt; \
+			go test -run='^$$' -bench=. -benchmem -timeout=30m $$pkg \
+				>>docs/benchmarks/current.txt; \
+			echo '' >>docs/benchmarks/current.txt; \
+		fi; \
+	done
+	@echo 'bench: wrote docs/benchmarks/current.txt'
+
+.PHONY: bench-sweep
+bench-sweep: ## Run BenchmarkFullSweep1M against real Redis (S6; needs Docker)
+	@# The one benchmark that has to run against a real server rather than
+	@# miniredis, because the network round trip is what S6 is a claim about.
+	@# Kept out of `make bench` because it seeds a million keys, which takes
+	@# longer than the whole rest of the benchmark suite.
+	@docker version --format '{{.Server.Version}}' >/dev/null 2>&1 || \
+		{ echo "Docker is not reachable; BenchmarkFullSweep1M needs a running daemon"; exit 1; }
+	go test -tags=integration -run='^$$' -bench=BenchmarkFullSweep1M \
+		-benchmem -benchtime=$(or $(BENCHTIME),5x) -timeout=30m ./pkg/sweeper/
+
+.PHONY: benchstat
+benchstat: ## Compare docs/benchmarks/current.txt against BASE (default: the newest committed baseline)
+	@command -v benchstat >/dev/null 2>&1 || { \
+		echo "benchstat not found — run 'make install-tools'"; exit 1; }
+	@test -f docs/benchmarks/current.txt || { \
+		echo "no docs/benchmarks/current.txt — run 'make bench' first"; exit 1; }
+	@base=$(or $(BASE),$$(ls -1 docs/benchmarks/*-baseline.txt | tail -1)); \
+		echo "comparing against $$base"; \
+		benchstat "$$base" docs/benchmarks/current.txt
+
+.PHONY: fuzz
+fuzz: ## Fuzz the codec for FUZZTIME (default 60s)
+	@# One target per fuzz function: `go test -fuzz` refuses to run more than
+	@# one at a time, and a glob that silently matched only the first would be
+	@# worse than an error.
+	@for fn in $$(grep -rhoE '^func (Fuzz[A-Za-z0-9_]+)' ./pkg/codec | sed 's/func //'); do \
+		echo "--- $$fn ---"; \
+		go test -run='^$$' -fuzz="^$$fn$$" -fuzztime=$(or $(FUZZTIME),60s) ./pkg/codec/ || exit 1; \
+	done
+
+.PHONY: verify
+verify: lint vet verify-manifests helm-lint test cover ## Everything CI runs, locally
+	@bash hack/verify-no-sleep.sh
+	@bash hack/verify-no-superlatives.sh
+	@bash hack/verify-metrics-docs.sh
+	@bash hack/verify-fault-matrix.sh
+	@go run ./hack/dashboardcheck deploy/grafana/driftwatch-dashboard.json
+	@$(MAKE) --no-print-directory test-fault
+	@echo ''
+	@echo 'verify: ok'
 
 .PHONY: install-tools
 install-tools: controller-gen envtest ## Install the pinned development tools into $(go env GOPATH)/bin
