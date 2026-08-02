@@ -1342,7 +1342,23 @@ func (c *Check) onReport(rep *differ.Report, err error) {
 	// dashboard and the CRD status disagreed, and the CRD is what an operator
 	// reads first. Found by e2e E1, which asserts coverage above 0.90 and got
 	// exactly zero.
-	if rep != nil && rep.Pass == differ.PassOracleToTarget {
+	//
+	// The `err == nil` guard is the same defect a third time, and it survived
+	// the first two fixes. A sweep that failed part-way — the store went
+	// unreachable, the context was canceled — still produces a report, and
+	// that report has compared however many keys it got to before it stopped,
+	// usually none. Letting it land here replaces a good measurement with a
+	// worthless one, so `coverageRatio` collapsed to zero every time the store
+	// blinked, on a check that had verified a third of its keyspace a second
+	// earlier.
+	//
+	// §6.4 already says what should happen: on an unreachable target "the
+	// reported counts are the last ones driftwatch actually knew". That is what
+	// the event message says, and now it is what the code does. Keeping a
+	// slightly stale number is honest — lastSweepTime says how stale — and
+	// reporting zero is not, because zero means "verified nothing" rather than
+	// "could not check just now".
+	if err == nil && rep != nil && rep.Pass == differ.PassOracleToTarget {
 		c.lastReport = rep
 		c.lastSweep = rep.FinishedAt
 	}

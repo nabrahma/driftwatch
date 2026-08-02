@@ -324,3 +324,105 @@ func TestZMQ_BackoffIsBoundedAndJittered(t *testing.T) {
 	assert.Greater(t, len(distinct), 10,
 		"full jitter means the waits differ; identical waits would be a herd")
 }
+
+func TestZMQ_ASilentSocketEndsTheSessionRatherThanBlockingForever(t *testing.T) {
+	// D-025, and the reason it is a product bug rather than a test bug.
+	//
+	// A SUB socket whose publisher disappears does not report an error. Recv
+	// blocks, waiting for a peer that is never coming back. driftwatch's
+	// session only ends on a Recv error, so without a deadline it never ends:
+	// Run never retries, DNS is never re-resolved, and driftwatch sits
+	// reporting itself connected and healthy while receiving nothing.
+	//
+	// That is the exact failure this project exists to make visible, happening
+	// inside the tool. It is also invisible from every metric that was designed
+	// to catch it — connected stays true, no error is recorded, and the drift
+	// count stays at zero because a frozen oracle agrees with a frozen store.
+	//
+	// The assertion is that a silent socket produces a *new session*: the
+	// deadline fires, the session ends, and Run dials again.
+	var dials atomic.Int64
+
+	src, err := NewZMQ([]string{"tcp://publisher.default.svc:5555"}, clock.Real(),
+		WithSeed(1),
+		WithReconnectIntervalMax(time.Millisecond),
+		WithIdleTimeout(50*time.Millisecond))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, src.Close()) })
+
+	src.resolve = func(context.Context, string) ([]string, error) {
+		return []string{"tcp://10.0.0.1:5555"}, nil
+	}
+
+	// A socket that connects successfully and then says nothing at all — which
+	// is what zmq4 does when the peer is gone.
+	src.dial = func(ctx context.Context) zmqSocket {
+		dials.Add(1)
+		return &stubSocket{
+			recv: func() (zmq4.Msg, error) {
+				<-ctx.Done()
+				return zmq4.Msg{}, ctx.Err()
+			},
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	out := make(chan RawMessage, 1)
+	done := make(chan error, 1)
+	go func() { done <- src.Run(ctx, out) }()
+
+	require.Eventually(t, func() bool { return dials.Load() >= 3 },
+		30*time.Second, 10*time.Millisecond,
+		"the socket went silent and the session never ended; only %d dial(s) "+
+			"happened, so driftwatch would have stayed connected to a dead "+
+			"publisher forever", dials.Load())
+
+	// Every one of those sessions is a window of possible loss, and each has to
+	// be reported as such — a reconnect that says nothing is how the pipeline
+	// silently keeps asserting on a keyspace it can no longer see.
+	assert.Positive(t, src.Stats().Gaps,
+		"a session that ended on the idle deadline must still signal possible loss")
+
+	cancel()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(30 * time.Second):
+		t.Fatal("Run did not return after cancellation")
+	}
+}
+
+func TestZMQ_AZeroIdleTimeoutDisablesTheDeadline(t *testing.T) {
+	// The escape hatch, and the reason it is worth having: a test that drives
+	// reconnection by hand does not want a deadline firing underneath it. In
+	// production nothing should set this.
+	src, err := NewZMQ([]string{"tcp://publisher.default.svc:5555"}, clock.Real(),
+		WithIdleTimeout(0))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, src.Close()) })
+
+	assert.Zero(t, src.idleTimeout)
+
+	// A disabled deadline must be a channel that never fires rather than one
+	// that fires immediately, which is the failure mode of a nil timer read
+	// without a guard.
+	timer := src.newIdleTimer()
+	defer timer.stop()
+
+	select {
+	case <-timer.expired():
+		t.Fatal("a disabled idle timer fired")
+	default:
+	}
+}
+
+func TestZMQ_TheIdleTimeoutDefaultsToSomethingReconnectable(t *testing.T) {
+	src, err := NewZMQ([]string{"tcp://publisher.default.svc:5555"}, clock.Real())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, src.Close()) })
+
+	assert.Equal(t, defaultIdleTimeout, src.idleTimeout,
+		"the deadline must be on by default; the failure it prevents is silent")
+}

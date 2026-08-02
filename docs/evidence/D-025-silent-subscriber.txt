@@ -1,0 +1,161 @@
+D-025 — a SUB socket whose publisher is replaced never reconnects
+
+Captured Phase 9, running the Kind e2e suite. Scenario E7 (PublisherRestart)
+failed on an assertion about a metric, and the cause turned out to be a
+product bug several layers below it.
+
+======================================================================
+THE OBSERVATION
+======================================================================
+
+E7 deletes the publisher pod and waits for the Deployment to reschedule it.
+The replacement came up correctly and was emitting:
+
+    $ kubectl -n e2e-e7-publisher-restart-8600 get pods -o wide
+    NAME                         READY   STATUS    AGE   IP
+    publisher-695946dd8b-9gfkx   1/1     Running   97s   10.244.0.12
+
+    $ kubectl -n e2e-e7-publisher-restart-8600 logs publisher-695946dd8b-9gfkx
+    publishing as replica-0 epoch 1785611184 on tcp://0.0.0.0:5557
+      topic "kv-events" at 800/s
+
+driftwatch's status at the same moment (01-driftcheck.yaml):
+
+    status:
+      phase: Watching
+      publishers:
+      - id: replica-0
+        epoch: 1785611178          <- the PREVIOUS incarnation
+        highWaterMark: 3916
+        lastSeenSeconds: "92.544"  <- 92 seconds with no events
+      conditions:
+      - type: SequenceIntegrity
+        status: "True"
+        message: no gaps across 1 publishers
+
+A publisher emitting 800 events/sec, and driftwatch had seen nothing from it
+for a minute and a half — while reporting phase Watching, no gaps, and
+complete sequence integrity.
+
+The manager log (03-manager.log) is the other half. One reconnect at startup:
+
+    19:06:23.643Z INFO runners  the source may have missed messages; every
+      key is suspect until a later event refreshes it
+      {"reason": "reconnect",
+       "detail": "receiving from [tcp://publisher...:5557]: EOF"}
+
+and then, for the rest of the scenario, nothing. No error. No retry. No
+re-resolution. The source simply stopped.
+
+======================================================================
+THE CAUSE
+======================================================================
+
+pkg/source/zmq.go's session ends when Recv returns an error:
+
+    case res := <-frames:
+        if res.err != nil {
+            waitForReceiver()
+            return fmt.Errorf("receiving from %v: %w", z.endpoints, res.err)
+        }
+
+A SUB socket whose peer disappears does not return an error. Recv blocks,
+waiting for a peer that is never coming back. So:
+
+  - the session never ends,
+  - Run never loops,
+  - z.resolve is never called again,
+  - and D-011's per-attempt DNS re-resolution — which is correct, and which
+    has its own regression test — never runs, because there is never
+    another attempt.
+
+D-011 fixed re-resolution. It did not fix *detection*, and detection is what
+was missing.
+
+======================================================================
+WHY IT IS WORSE THAN IT LOOKS
+======================================================================
+
+A deaf driftwatch does not present as broken. It presents as clean.
+
+The oracle stops changing. The store stops being written to by anything
+driftwatch can see. The two frozen answers agree perfectly, so:
+
+    driftwatch_divergent_keys          0
+    driftwatch_suspect_divergent_keys  0
+    driftwatch_coverage_ratio          1.0
+    driftwatch_target_reachable        1
+    driftwatch_events_dropped_total    0
+    SourceConnected                    True
+    phase                              Watching
+
+Every alert in §12.2 stays silent. Every panel on the §12.1 dashboard is
+green. An operator concludes the index is healthy, and driftwatch has not
+observed anything for an hour.
+
+The one field that would have shown it — publishers[].lastSeenSeconds
+climbing without bound — is a status field with no alert on it.
+
+The trigger is not exotic. Any pod replacement does it: a node drain, a
+rolling update, an OOM kill, a spot-instance reclaim. On a busy cluster
+this happens weekly.
+
+======================================================================
+REPRODUCE WITHOUT KUBERNETES
+======================================================================
+
+The regression test, in pkg/source/zmq_internal_test.go, does it with a stub
+socket that connects successfully and then says nothing:
+
+    src.dial = func(ctx context.Context) zmqSocket {
+        dials.Add(1)
+        return &stubSocket{
+            recv: func() (zmq4.Msg, error) {
+                <-ctx.Done()              // block forever, like a dead peer
+                return zmq4.Msg{}, ctx.Err()
+            },
+        }
+    }
+
+Before the fix, dials stays at 1 forever. After it, the idle deadline ends
+each session and Run dials again:
+
+    $ go test -run TestZMQ_ASilentSocketEndsTheSessionRatherThanBlockingForever \
+        ./pkg/source/
+    ok   github.com/nabrahma/driftwatch/pkg/source
+
+======================================================================
+THE FIX
+======================================================================
+
+An idle deadline on the receive loop, reset on every frame. When it fires,
+the session ends with ErrIdle and Run treats it as any other failed session:
+back off, re-resolve, reconnect, and signal possible loss so the affected
+keys become suspect.
+
+    source:
+      zmq:
+        idleTimeout: 60s     # default; 0 disables
+
+On by default, because the failure it prevents is silent. A stream that can
+legitimately be quieter than sixty seconds should raise the value rather than
+disable it — firing early costs one reconnect and a round of suspicion that
+the next event clears, and firing late costs silence.
+
+======================================================================
+WHAT DID NOT CATCH IT
+======================================================================
+
+Worth listing, because each looked like it should have:
+
+  - The unit tests drive reconnection by making Recv return an error. That
+    is the case that already worked.
+  - goleak found nothing. No goroutine leaked — one was parked forever,
+    which is a different thing and not what goleak looks for.
+  - The 60-minute soak passed. Nothing in it replaces the publisher.
+  - The fault matrix has rows for source disconnection, but they inject an
+    error, not silence.
+  - The interop test passed. Both ends stayed up.
+
+It took an e2e scenario that deletes a pod, and even then it presented as an
+unrelated assertion about a restart counter.

@@ -124,10 +124,20 @@ var _ = Describe("E5 RedisEviction", Ordered, func() {
 	BeforeAll(func() {
 		s = newScenario("e5-eviction", &FixtureOptions{
 			Rate: 1500,
-			// A keyspace far larger than the memory bound below, so eviction is
-			// certain rather than hoped for.
+			// The keyspace has to outgrow the memory bound decisively, and
+			// 50,000 keys against 12mb does not.
+			//
+			// A two-member set in Redis 7 is listpack-encoded at roughly 120
+			// bytes including the key and the dict entry, so 50,000 of them is
+			// about 6MB — comfortably inside a 12mb cap, plus Redis's own ~1MB
+			// baseline. The store would sit there never evicting, the first
+			// assertion below would fail after two minutes, and nothing about
+			// driftwatch would have been tested.
+			//
+			// 6mb against the same 50,000 keys starts evicting around the
+			// 35,000th, which at 1,500 events/sec is roughly 25 seconds in.
 			Keys:                50_000,
-			RedisMaxMemory:      "12mb",
+			RedisMaxMemory:      "6mb",
 			RedisEvictionPolicy: "allkeys-lru",
 		})
 		s.waitForPublisher(3000)

@@ -155,3 +155,57 @@ func TestReporting_CoverageIsOneWhenThereIsNothingToCover(t *testing.T) {
 
 // keyIdx names block i.
 func keyIdx(i int) string { return string(rune('a' + i)) }
+
+func TestReporting_AFailedSweepDoesNotErasePreviousCoverage(t *testing.T) {
+	// D-020's third instance, and the one that survived the first two fixes.
+	//
+	// A sweep that fails part-way still produces a report, and that report has
+	// compared however many keys it reached before stopping — usually none.
+	// Letting it land in lastReport replaces a real measurement with a
+	// worthless one, so coverageRatio collapses to zero every time the store
+	// blinks, on a check that verified its whole keyspace a second earlier.
+	//
+	// Zero does not mean "could not check just now". It means "verified
+	// nothing", and it is the number the low-coverage alert fires on.
+	clk := clock.Fake(epoch())
+	c := newCheckWith(t, inProcessSpec, clk)
+	stop := running(t, c)
+	defer stop()
+
+	store, ok := c.Target().(*target.MemoryTarget)
+	require.True(t, ok)
+
+	const keys = 6
+	for i := 0; i < keys; i++ {
+		publish(t, c, addEventJSON("replica-0", uint64(i+1), keyIdx(i), "replica-0"))
+		store.SeedSets(map[string][]string{"block:" + keyIdx(i): {"replica-0"}})
+	}
+	clk.Advance(5 * time.Second)
+
+	ctx := context.Background()
+	_, err := c.SweepNow(ctx)
+	require.NoError(t, err)
+
+	before := c.Status()
+	require.InDelta(t, 1.0, before.CoverageRatio, 0.001)
+
+	// The store blinks.
+	health, err := store.Health(ctx)
+	require.NoError(t, err)
+	health.Reachable = false
+	store.SetHealth(health)
+
+	_, err = c.SweepNow(ctx)
+	require.Error(t, err)
+
+	after := c.Status()
+	assert.InDelta(t, before.CoverageRatio, after.CoverageRatio, 0.001,
+		"a sweep that could not read the store must not overwrite what the "+
+			"last successful one measured; §6.4 says the reported counts stay "+
+			"the last ones driftwatch actually knew")
+	assert.Equal(t, before.LastSweepTime, after.LastSweepTime,
+		"and lastSweepTime must not advance, or the stale coverage would look "+
+			"fresh — that pairing is what makes keeping it honest")
+	assert.False(t, after.TargetReachable,
+		"the status has to say why the numbers are stale")
+}

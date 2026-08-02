@@ -68,6 +68,9 @@ type ZMQSpec struct {
 	RecvHWM              int      `yaml:"recvHWM"`
 	ConnectTimeout       Duration `yaml:"connectTimeout"`
 	ReconnectIntervalMax Duration `yaml:"reconnectIntervalMax"`
+	// IdleTimeout ends a session that has received nothing for this long, so
+	// the source reconnects and re-resolves. See D-025.
+	IdleTimeout Duration `yaml:"idleTimeout"`
 	// Multipart is auto, topicThenPayload or singleFrame.
 	Multipart string `yaml:"multipart"`
 }
@@ -472,6 +475,7 @@ const (
 	DefaultReadTimeout       = 3 * time.Second
 	DefaultConnectTimeout    = 5 * time.Second
 	DefaultReconnectMax      = 30 * time.Second
+	DefaultIdleTimeout       = 60 * time.Second
 	DefaultForDuration       = 60 * time.Second
 
 	DefaultSafetyFactor   = 3.0
@@ -517,6 +521,9 @@ func (s *Spec) defaultSource() {
 		}
 		if z.ReconnectIntervalMax <= 0 {
 			z.ReconnectIntervalMax = Duration(DefaultReconnectMax)
+		}
+		if z.IdleTimeout <= 0 {
+			z.IdleTimeout = Duration(DefaultIdleTimeout)
 		}
 		if z.Multipart == "" {
 			z.Multipart = MultipartAuto
@@ -678,6 +685,7 @@ func (s *Spec) SourceSettings() map[string]string {
 			out["recvHWM"] = strconv.Itoa(z.RecvHWM)
 			out["connectTimeout"] = z.ConnectTimeout.String()
 			out["reconnectIntervalMax"] = z.ReconnectIntervalMax.String()
+			out["idleTimeout"] = z.IdleTimeout.String()
 		}
 	case "nats":
 		if n := s.Source.NATS; n != nil {

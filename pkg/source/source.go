@@ -40,6 +40,16 @@ var (
 	// ErrClosed reports use of a source after Close.
 	ErrClosed = errors.New("source is closed")
 
+	// ErrIdle reports a session ended because nothing arrived within the
+	// configured idle timeout.
+	//
+	// It is a sentinel rather than a bare error because it is the one
+	// "failure" that is often not one: a genuinely quiet publisher produces it
+	// too. What the reconnection path does with it is the same either way —
+	// back off, re-resolve, reconnect, signal possible loss — but an operator
+	// reading LastError needs to be able to tell it from a refused connection.
+	ErrIdle = errors.New("no frames received within the idle timeout")
+
 	// ErrPayloadTooLarge reports a frame beyond MaxPayloadBytes. It is counted
 	// and dropped rather than propagated: an oversized frame is a producer bug,
 	// and allocating for it is how one bad publisher takes down the auditor.

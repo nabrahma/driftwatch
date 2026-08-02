@@ -103,6 +103,7 @@ func (in *DriftCheckSpec) convertSource(out *check.Spec) {
 			RecvHWM:              z.RecvHWM,
 			ConnectTimeout:       check.Duration(z.ConnectTimeout.Duration),
 			ReconnectIntervalMax: check.Duration(z.ReconnectIntervalMax.Duration),
+			IdleTimeout:          check.Duration(z.IdleTimeout.Duration),
 			Multipart:            z.Multipart,
 		}
 	}

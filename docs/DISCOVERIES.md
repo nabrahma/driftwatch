@@ -30,6 +30,97 @@ written here in anticipation.
 
 ---
 
+## D-025 — A SUB socket whose publisher is replaced never reconnects, and driftwatch reports itself healthy while deaf
+
+**Found:** Phase 9, running the e2e suite after the coverage work. E7
+(PublisherRestart) failed on "the publisher restarted and nothing recorded it",
+and the reason turned out to have nothing to do with restart detection.
+
+**What happened:** E7 deletes the publisher pod and waits for the Deployment to
+reschedule it. The replacement came up correctly — same identity `replica-0`, a
+higher epoch, sequence restarting at 1:
+
+```text
+$ kubectl get pods
+publisher-695946dd8b-9gfkx   1/1   Running   0   97s   10.244.0.12
+
+$ kubectl logs publisher-695946dd8b-9gfkx
+publishing as replica-0 epoch 1785611184 on tcp://0.0.0.0:5557 at 800/s
+```
+
+driftwatch's status, at the same moment:
+
+```yaml
+publishers:
+- id: replica-0
+  epoch: 1785611178        # the OLD incarnation
+  highWaterMark: 3916
+  lastSeenSeconds: "92.544"
+```
+
+Ninety-two seconds with no events, from a publisher that was emitting eight
+hundred a second. And the manager log had nothing to say about it: one
+reconnect at startup, then silence. No error, no retry, no re-resolution.
+
+The cause is in the receive loop. driftwatch's ZMQ session ends when `Recv`
+returns an error, and **a SUB socket whose peer disappears does not return an
+error — it blocks, waiting for a peer that is never coming back.** So the
+session never ended, `Run` never retried, and D-011's per-attempt DNS
+re-resolution never got a chance to run, because there was never another
+attempt.
+
+**Why it matters:** this is the failure this entire project exists to make
+visible, occurring inside the tool.
+
+A deaf driftwatch does not look broken. It looks *clean*. The oracle stops
+changing, the store stops being written to by anything driftwatch can see, and
+the two frozen answers agree perfectly:
+
+- `driftwatch_divergent_keys` — 0
+- `driftwatch_coverage_ratio` — 1.0
+- `driftwatch_target_reachable` — 1
+- `SourceConnected` — True
+- phase — `Watching`
+
+Every alert in §12.2 stays silent. An operator looking at the dashboard sees a
+system with no drift in it, and every panel is green, and the tool has not
+observed anything for an hour. The one signal that would have shown it —
+`lastSeenSeconds` climbing — is a status field nobody watches.
+
+And the trigger is not exotic. Any pod reschedule does it: a node drain, a
+rolling update, an OOM kill, an eviction. On a busy cluster this is a
+weekly event.
+
+**Fix:** an idle deadline on the receive loop. If no frame arrives within
+`source.zmq.idleTimeout` (default 60s), the session ends with `ErrIdle`, and
+`Run` treats it as any other failed session — back off, re-resolve, reconnect,
+and signal possible loss so the affected keys become suspect.
+
+The default is on, because the failure it prevents is silent. A stream that is
+legitimately quieter than sixty seconds should raise the value rather than
+disable it: firing early costs one reconnect and a round of suspicion that the
+next event clears, and firing late costs silence.
+
+The deliberate consequence is that a genuinely idle publisher now produces
+periodic reconnects and suspicion. That is the right trade — §5.2's suspicion
+decays per key as events arrive, and the alternative is a tool that goes deaf
+without saying so.
+
+Worth noting what did *not* catch this. The unit tests drive reconnection by
+making `Recv` return an error, which is the case that already worked. goleak
+saw nothing, because no goroutine leaked — one was parked forever, which is
+different. The 60-minute soak passed, because nothing in it replaces the
+publisher. It took an e2e scenario that deletes a pod, and it presented as an
+unrelated assertion about a metric.
+
+**Evidence:** `docs/evidence/D-025-silent-subscriber.txt`
+
+**Regression test:**
+`pkg/source: TestZMQ_ASilentSocketEndsTheSessionRatherThanBlockingForever`, plus
+e2e E7.
+
+---
+
 ## D-024 — A DriftCheck's endpoints resolve from the manager, not from itself
 
 **Found:** Phase 8, the first full run of the e2e suite — all eight scenarios

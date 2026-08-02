@@ -423,14 +423,27 @@ func (f *Fixture) configureProxy(ctx context.Context) error {
 
 // CutSubscription severs driftwatch's link to the publisher.
 //
-// A `timeout` toxic with zero delay, which drops the connection and refuses new
-// ones — the closest thing to a network partition toxiproxy offers, and much
-// closer to reality than stopping the publisher would be. The publisher keeps
-// emitting and the materializer keeps writing throughout, so the store stays
-// correct while driftwatch's view of the stream develops a hole. That asymmetry
-// is the whole point of E3.
+// The publisher keeps emitting and the materializer keeps writing throughout,
+// so the store stays correct while driftwatch's view of the stream develops a
+// hole. That asymmetry is the whole point of E3.
+//
+// The timeout is 1ms rather than 0, and the difference is the difference
+// between this scenario working and silently proving nothing.
+//
+// toxiproxy's `timeout` toxic with `timeout: 0` does not partition anything:
+// its documented behavior is that "the connection won't close, and data will
+// be delayed until the toxic is removed." So the frames driftwatch would have
+// missed are held by the proxy and delivered in full the moment the toxic is
+// deleted. driftwatch loses nothing, has nothing to be suspect about, and E3
+// asserts on a fault that never happened.
+//
+// A non-zero timeout closes the connection instead. ZMQ PUB/SUB has no replay,
+// so everything published while the socket is down is gone — which is the
+// actual fault this scenario is about. 1ms rather than something larger so that
+// each reconnection attempt is cut promptly too, keeping the partition closed
+// for as long as the toxic is present.
 func (f *Fixture) CutSubscription(ctx context.Context) error {
-	body := `{"name":"cut","type":"timeout","stream":"downstream","toxicity":1.0,"attributes":{"timeout":0}}`
+	body := `{"name":"cut","type":"timeout","stream":"downstream","toxicity":1.0,"attributes":{"timeout":1}}`
 
 	_, err := f.curl(ctx, "POST", ToxiproxyAPI+"/proxies/publisher/toxics", body)
 	return err

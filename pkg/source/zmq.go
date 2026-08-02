@@ -23,6 +23,24 @@ const (
 	defaultConnectTimeout       = 5 * time.Second
 	defaultReconnectIntervalMax = 30 * time.Second
 	baseReconnectInterval       = 100 * time.Millisecond
+
+	// defaultIdleTimeout ends a session that has gone quiet, so that Run can
+	// reconnect and re-resolve.
+	//
+	// This is not a nicety. A SUB socket whose publisher disappears does not
+	// report an error: Recv simply blocks, waiting for a peer that is never
+	// coming back. Without a deadline the session never ends, Run never
+	// retries, DNS is never re-resolved, and driftwatch sits reporting itself
+	// connected and healthy while receiving nothing at all — which is the exact
+	// failure this project exists to make visible, happening inside the tool.
+	// See docs/DISCOVERIES.md D-025.
+	//
+	// Sixty seconds is chosen against §12's expectation that publishers emit
+	// heartbeats. A stream that can legitimately be quieter than this should
+	// raise source.zmq.idleTimeout rather than lower it, because the cost of
+	// firing early is one reconnect and a round of suspicion that the next
+	// event clears, and the cost of firing late is silence.
+	defaultIdleTimeout = 60 * time.Second
 )
 
 // ZMQSource subscribes to one or more PUB endpoints over a single SUB socket.
@@ -55,6 +73,7 @@ type ZMQSource struct {
 
 	connectTimeout       time.Duration
 	reconnectIntervalMax time.Duration
+	idleTimeout          time.Duration
 	maxPayload           int
 	shutdownGrace        time.Duration
 
@@ -113,6 +132,18 @@ func WithReconnectIntervalMax(d time.Duration) ZMQOption {
 	}
 }
 
+// WithIdleTimeout ends a session that has received nothing for d.
+//
+// Zero disables it, which is what the tests that drive reconnection by hand
+// want and what nothing in production should want.
+func WithIdleTimeout(d time.Duration) ZMQOption {
+	return func(z *ZMQSource) {
+		if d >= 0 {
+			z.idleTimeout = d
+		}
+	}
+}
+
 // WithConnectTimeout bounds one connection attempt.
 func WithConnectTimeout(d time.Duration) ZMQOption {
 	return func(z *ZMQSource) {
@@ -141,6 +172,7 @@ func NewZMQ(endpoints []string, clk clock.Clock, opts ...ZMQOption) (*ZMQSource,
 		recvHWM:              defaultRecvHWM,
 		connectTimeout:       defaultConnectTimeout,
 		reconnectIntervalMax: defaultReconnectIntervalMax,
+		idleTimeout:          defaultIdleTimeout,
 		maxPayload:           defaultMaxPayloadBytes,
 		shutdownGrace:        defaultShutdownGrace,
 		clk:                  clk,
@@ -174,12 +206,17 @@ func newZMQ(cfg Config, clk clock.Clock) (Source, error) {
 	if err != nil {
 		return nil, err
 	}
+	idleTimeout, err := cfg.SettingDuration("idleTimeout", defaultIdleTimeout)
+	if err != nil {
+		return nil, err
+	}
 
 	z, err := NewZMQ(cfg.SettingList("endpoints"), clk,
 		WithTopics(cfg.SettingList("topics")...),
 		WithRecvHWM(hwm),
 		WithConnectTimeout(connectTimeout),
 		WithReconnectIntervalMax(reconnectMax),
+		WithIdleTimeout(idleTimeout),
 	)
 	if err != nil {
 		return nil, err
@@ -385,11 +422,29 @@ func (z *ZMQSource) receive(
 		}
 	}
 
+	// The idle deadline, reset on every frame.
+	//
+	// Without it this loop can wait forever on a socket that will never speak
+	// again, because a SUB socket does not report a vanished peer as an error —
+	// Recv simply blocks. See D-025, and the timer's own comment at
+	// defaultIdleTimeout.
+	idle := z.newIdleTimer()
+	defer idle.stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			waitForReceiver()
 			return ctx.Err()
+
+		case <-idle.expired():
+			waitForReceiver()
+			// An error rather than nil, so Run treats it as a failed session:
+			// it backs off, re-resolves, reconnects, and signals the gap. A
+			// quiet socket and a dead one are indistinguishable from here, and
+			// the safe reading is that events were missed.
+			return fmt.Errorf("%w: no frame from %v in %s",
+				ErrIdle, z.endpoints, z.idleTimeout)
 
 		case res := <-frames:
 			if res.err != nil {
@@ -400,8 +455,47 @@ func (z *ZMQSource) receive(
 				waitForReceiver()
 				return nil
 			}
+			idle.reset()
 			z.deliver(res.msg, out)
 		}
+	}
+}
+
+// idleTimer is the receive loop's deadline, or a no-op when disabled.
+//
+// A small type rather than an inline timer because "disabled" has to mean a
+// channel that never fires, and a nil *clock.Timer cannot provide one.
+type idleTimer struct {
+	timer clock.Timer
+	d     time.Duration
+}
+
+func (z *ZMQSource) newIdleTimer() *idleTimer {
+	if z.idleTimeout <= 0 {
+		return &idleTimer{}
+	}
+	return &idleTimer{timer: z.clk.NewTimer(z.idleTimeout), d: z.idleTimeout}
+}
+
+// expired returns the deadline channel, or nil when the timer is disabled. A
+// receive from a nil channel blocks forever, which is exactly the behavior a
+// disabled deadline should have in a select.
+func (t *idleTimer) expired() <-chan time.Time {
+	if t.timer == nil {
+		return nil
+	}
+	return t.timer.C()
+}
+
+func (t *idleTimer) reset() {
+	if t.timer != nil {
+		t.timer.Reset(t.d)
+	}
+}
+
+func (t *idleTimer) stop() {
+	if t.timer != nil {
+		t.timer.Stop()
 	}
 }
 

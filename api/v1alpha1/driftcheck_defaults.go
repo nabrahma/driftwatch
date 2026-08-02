@@ -47,6 +47,7 @@ func (in *DriftCheckSpec) defaultSource() {
 		}
 		setDuration(&z.ConnectTimeout, check.DefaultConnectTimeout)
 		setDuration(&z.ReconnectIntervalMax, check.DefaultReconnectMax)
+		setDuration(&z.IdleTimeout, check.DefaultIdleTimeout)
 		if z.Multipart == "" {
 			z.Multipart = check.MultipartAuto
 		}

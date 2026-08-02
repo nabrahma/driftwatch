@@ -121,6 +121,23 @@ type ZMQSpec struct {
 	// +optional
 	ReconnectIntervalMax metav1.Duration `json:"reconnectIntervalMax,omitempty"`
 
+	// IdleTimeout ends a session that has received nothing for this long, so
+	// that the source reconnects and re-resolves its endpoints.
+	//
+	// It exists because a SUB socket whose publisher disappears does not report
+	// an error — the receive simply blocks forever. Without a deadline
+	// driftwatch stays attached to a dead peer, reports itself connected and
+	// healthy, and receives nothing, which is indistinguishable from a system
+	// with no drift in it.
+	//
+	// Raise it for a stream that is legitimately quieter than this; do not
+	// lower it below the publisher's heartbeat interval. Firing early costs one
+	// reconnect and a round of suspicion the next event clears. Firing late
+	// costs silence.
+	// +kubebuilder:default="60s"
+	// +optional
+	IdleTimeout metav1.Duration `json:"idleTimeout,omitempty"`
+
 	// Multipart declares the publisher's framing convention. The default,
 	// auto, detects topic-then-payload and single-frame per message, so a
 	// producer that changes convention mid-stream is still read correctly; the
