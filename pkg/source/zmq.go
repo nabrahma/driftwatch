@@ -639,3 +639,10 @@ func (z *ZMQSource) Close() error {
 	z.c.connected(false)
 	return nil
 }
+
+// IdleTimeout reports the configured receive deadline.
+//
+// Exposed for the same reason RecvHWM is: a bound that cannot be read back is a
+// bound nobody can confirm took effect, and D-010 is what happens when an
+// option is accepted and quietly ignored.
+func (z *ZMQSource) IdleTimeout() time.Duration { return z.idleTimeout }

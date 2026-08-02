@@ -40,12 +40,19 @@ var _ = Describe("E1 HappyPath", Ordered, func() {
 		// driftwatch works, and the assertion below asks for 0.90 — which made
 		// this scenario unsatisfiable by construction rather than by defect.
 		//
-		// 60,000 keys at 1,000/sec is a 60-second cycle against the same
-		// 3-second window: 95% settled, with margin. The load is still
-		// sustained — a thousand events a second for the full ninety — and the
-		// keyspace stays well under the 100,000-key oracle cap, so saturation
-		// does not put the check into Degraded and fail the phase assertion.
-		s = newScenario("e1-happy-path", &FixtureOptions{Rate: 1000, Keys: 60_000})
+		// There is a second constraint, and 60,000 keys at 1,000/sec missed it:
+		// the oracle also has to *fill* before the assertion runs, and coverage
+		// is measured against tracked keys, which is still growing until every
+		// key has been touched once. That run reached 0.8982 with tracked at
+		// 39,964 of 60,000 — the ratio was right and the keyspace was not yet
+		// populated.
+		//
+		// So the cycle has to be long enough to settle and short enough to fill
+		// inside the scenario's budget. 40,000 keys at 800/sec is a 50-second
+		// cycle: 94% settled, and fully populated 50 seconds in, against a
+		// coverage assertion that runs after a converge wait plus a 60-second
+		// hold.
+		s = newScenario("e1-happy-path", &FixtureOptions{Rate: 800, Keys: 40_000})
 		s.waitForPublisher(2000)
 
 		var err error

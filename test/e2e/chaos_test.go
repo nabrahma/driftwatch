@@ -37,9 +37,25 @@ var _ = Describe("E3 SelfLossReportsSuspect", Ordered, func() {
 		// The only scenario that needs toxiproxy: driftwatch connects through
 		// it, the materializer connects straight to the publisher. That
 		// asymmetry is the entire fault.
+		// The keyspace has to be large enough that suspicion survives long
+		// enough to be observed, and 2,000 keys was not.
+		//
+		// §5.2's suspicion decays per key: a suspect key becomes trustworthy
+		// again as soon as a later event touches it, which is correct — the new
+		// event is evidence driftwatch did not miss anything about that key.
+		// At 2,000 keys and 600/sec every key comes round every 3.3 seconds, so
+		// the entire keyspace cleared its suspicion before the next sweep could
+		// look at it. The run showed suspect=0 with 56,961 events applied and a
+		// subscription that had demonstrably been cut.
+		//
+		// Nothing was wrong with the mechanism. The scenario simply healed
+		// faster than it could be measured.
+		//
+		// 20,000 keys at 600/sec is a 33-second cycle, so a key made suspect by
+		// the cut stays suspect across a settlement window and a sweep.
 		s = newScenario("e3-self-loss", &FixtureOptions{
 			Rate:      600,
-			Keys:      2000,
+			Keys:      20_000,
 			WithProxy: true,
 		})
 		s.waitForPublisher(1000)

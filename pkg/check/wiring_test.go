@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/nabrahma/driftwatch/pkg/check"
+	"github.com/nabrahma/driftwatch/pkg/source"
 )
 
 // Configuration decisions that only show up once the pipeline is built.
@@ -133,4 +134,34 @@ func TestCheck_AProjectionErrorIsAttributedToACloseEnum(t *testing.T) {
 	}
 	assert.True(t, found,
 		"a projection error should have been recorded with a reason label")
+}
+
+func TestCheck_TheIdleTimeoutReachesTheSource(t *testing.T) {
+	// D-025's fix is only worth anything if the value survives the trip from
+	// the CRD, through the spec, through the settings map, into the source.
+	// That path has four hops and one of them silently drops an unknown key,
+	// so the assertion is on the source's own reading rather than on the spec.
+	//
+	// D-010 is the precedent: an option accepted and ignored looks exactly like
+	// an option that works.
+	spec, err := check.Load(strings.NewReader(`
+source:
+  type: zmq
+  zmq:
+    endpoints: ["tcp://publisher.default.svc.cluster.local:5557"]
+projection: {type: scalar}
+target: {type: memory}
+`))
+	require.NoError(t, err)
+
+	c, err := check.New(spec, check.Deps{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, c.Close()) })
+
+	z, ok := c.Source().(*source.ZMQSource)
+	require.True(t, ok, "the spec configures a zmq source")
+
+	assert.Equal(t, check.DefaultIdleTimeout, z.IdleTimeout(),
+		"the deadline did not survive the trip from the spec into the source, "+
+			"so a publisher that vanishes would still leave driftwatch deaf")
 }

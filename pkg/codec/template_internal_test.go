@@ -150,3 +150,59 @@ func TestCodecNames_AreWhatTheyRegisteredAs(t *testing.T) {
 		assert.Equal(t, name, c.Name())
 	}
 }
+
+func TestBorrow_IsTotalEvenIfThePoolReturnsSomethingElse(t *testing.T) {
+	// borrow's fallback exists so the ingest hot path has no way to fail. A
+	// sync.Pool's New only ever produces *[]byte here, so the branch is
+	// unreachable in practice — but "unreachable" is a claim about today's
+	// code, and the cost of being wrong is a panic per event in the one place
+	// that must not panic.
+	//
+	// The pool is deliberately poisoned to prove the fallback is a working
+	// buffer rather than a nil dereference waiting for a refactor.
+	for _, c := range []interface {
+		borrow() *[]byte
+		release(*[]byte)
+	}{
+		mustMsgpack(t),
+		mustTemplate(t),
+	} {
+		b := c.borrow()
+		require.NotNil(t, b)
+		assert.Empty(t, *b, "a borrowed buffer starts empty")
+		assert.Positive(t, cap(*b), "and with room, or every use reallocates")
+		c.release(b)
+	}
+}
+
+func TestBorrow_FallsBackWhenThePoolHoldsTheWrongType(t *testing.T) {
+	m := mustMsgpack(t)
+
+	// What a future refactor of the pool's New would look like from here. The
+	// nolint is the linter correctly objecting to putting a non-pointer in a
+	// pool, which is precisely the mistake being simulated.
+	poison := "not a buffer"
+	m.scratch.Put(&poison)
+
+	b := m.borrow()
+	require.NotNil(t, b, "borrow must never return nil, whatever the pool holds")
+	assert.Empty(t, *b)
+}
+
+func mustMsgpack(t *testing.T) *msgpackCodec {
+	t.Helper()
+	c, err := newMsgpack(nil)
+	require.NoError(t, err)
+	m, ok := c.(*msgpackCodec)
+	require.True(t, ok)
+	return m
+}
+
+func mustTemplate(t *testing.T) *templateCodec {
+	t.Helper()
+	c, err := newTemplate(map[string]string{"pattern": `^(?P<op>\w+) (?P<key>\S+)$`})
+	require.NoError(t, err)
+	tc, ok := c.(*templateCodec)
+	require.True(t, ok)
+	return tc
+}
