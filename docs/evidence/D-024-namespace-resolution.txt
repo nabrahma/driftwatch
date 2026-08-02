@@ -1,0 +1,145 @@
+D-024 — a DriftCheck's endpoints resolve from the manager, not from itself
+
+Captured Phase 8, the first full run of the Kind e2e suite. All eight
+scenarios failed identically, which is what made the cause cheap to find:
+one failing scenario would have read as a scenario bug.
+
+The diagnostics dump for each scenario is written to
+test/e2e/_artifacts/<scenario>/ by test/e2e/diagnostics.go. That directory
+is gitignored — it is regenerated on every failing run and holds container
+logs — so the load-bearing lines are transcribed here, with the exact
+procedure to reproduce them below.
+
+======================================================================
+WHAT THE DUMP SHOWED
+======================================================================
+
+01-driftcheck.yaml — the object, after the manager had been reconciling it
+for ninety seconds:
+
+    status:
+      phase: Bootstrapping
+      trackedKeys: 0
+      coverageRatio: 0
+      targetReachable: false
+
+07-redis-dbsize.txt — the store, at the same moment:
+
+    3000
+
+So Redis held the full 3,000-key keyspace, the publisher had emitted tens
+of thousands of events, and driftwatch had applied zero of them.
+
+03-manager.log — the two lines that answer it:
+
+    redis: connection pool: failed to dial after 2 attempts:
+      dial tcp: lookup redis: i/o timeout
+
+    the source may have missed messages; ... "detail": "resolving publisher:
+      lookup publisher on 10.96.0.10:53: server misbehaving"
+
+16-namespace.yaml — the namespace the scenario created:
+
+    name: e2e-happy-path-8f2a
+
+The DriftCheck said:
+
+    spec:
+      source:
+        zmq:
+          endpoints: ["tcp://publisher:5557"]
+      target:
+        redis:
+          addr: redis:6379
+
+Both Services exist. Both are in e2e-happy-path-8f2a. The manager runs in
+driftwatch-system, and a single-label name resolves through the *resolving
+pod's* ndots search path — so the manager looked for a Service called
+`redis` in driftwatch-system, and correctly did not find one.
+
+======================================================================
+REPRODUCE IT WITHOUT THE E2E SUITE
+======================================================================
+
+Any cluster with the operator installed cluster-scoped will show it. The
+whole finding is four commands:
+
+    $ kubectl create namespace drift-demo
+
+    $ kubectl -n drift-demo run redis --image=redis:7.2-alpine \
+        --port=6379 --expose
+
+    $ kubectl -n drift-demo apply -f - <<'EOF'
+    apiVersion: driftwatch.io/v1alpha1
+    kind: DriftCheck
+    metadata:
+      name: bare-name
+    spec:
+      source:
+        type: zmq
+        zmq:
+          endpoints: ["tcp://publisher:5557"]
+      projection:
+        type: keysetOwnership
+        keyTemplate: "block:{{.Key}}"
+      target:
+        type: redis
+        redis:
+          addr: redis:6379
+          keyPattern: "block:*"
+    EOF
+
+    $ kubectl -n drift-demo get driftcheck bare-name \
+        -o jsonpath='{.status.phase} {.status.targetReachable}'
+    Bootstrapping false
+
+Then confirm the store the object is pointing at is perfectly healthy, from
+inside the namespace the object lives in:
+
+    $ kubectl -n drift-demo run probe --rm -it --restart=Never \
+        --image=redis:7.2-alpine -- redis-cli -h redis PING
+    PONG
+
+That is the whole finding. `redis` answers immediately from a pod in
+drift-demo, and does not resolve at all from the manager in
+driftwatch-system, thirty seconds at a time.
+
+Changing the one line makes it work:
+
+    addr: redis.drift-demo.svc.cluster.local:6379
+
+======================================================================
+WHY THE FAILURE MODE IS THE PROBLEM
+======================================================================
+
+Not "Service not found". A DNS *timeout* — thirty seconds per attempt, then
+a retry. The check sits in Bootstrapping with targetReachable: false,
+retrying a scan against a Redis that is up, healthy and one namespace away.
+Nothing in the status, the events or the logs says "you wrote a name I
+cannot resolve from where I am."
+
+This is a trap in the manifests config/default ships, not a test artifact.
+The manager is cluster-scoped by default — one operator in
+driftwatch-system reconciling DriftChecks in every namespace — and an
+operator writing a DriftCheck in their own namespace will naturally write
+`redis:6379`, because that is what every other manifest in that namespace
+says and what works from every pod in it.
+
+======================================================================
+WHAT WAS AND WAS NOT CHANGED
+======================================================================
+
+Changed: the e2e fixture exposes manager-consumed endpoints as methods
+(RedisAddr, PublisherEndpoint, ProxyEndpoint) that fully qualify the
+namespace, so it is impossible to omit. The short forms are kept, separately
+named, for the materializer and throwaway pods, which really are in the
+namespace.
+
+Not changed: driftwatch itself. Resolving a bare name against the *object's*
+namespace instead of the process's would mean second-guessing DNS, and would
+break the legitimate case of a check pointing at a store outside the cluster
+entirely. The right fix is documentation now and a warning condition later,
+when a single-label host fails to resolve.
+
+Regression test: all eight e2e scenarios. Any of them reverting to a bare
+service name fails within ninety seconds.

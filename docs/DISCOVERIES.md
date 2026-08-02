@@ -85,9 +85,12 @@ right fix is documentation and, eventually, a warning condition when a
 single-label host fails to resolve. `docs/OPERATIONS.md` and the sample manifests
 already use fully-qualified names; this makes the reason explicit.
 
-**Evidence:** `test/e2e/_artifacts/` from the failing run — the manager log and
+**Evidence:** `docs/evidence/D-024-namespace-resolution.txt` — the load-bearing
+lines from the failing run's diagnostics dump (the manager log, and
 `07-redis-dbsize.txt` showing 3,000 keys present while `01-driftcheck.yaml`
-showed `trackedKeys: 0`.
+showed `trackedKeys: 0`), plus a four-command reproduction that needs no e2e
+run. The dump itself lives under `test/e2e/_artifacts/`, which is gitignored
+because it is regenerated on every failing run and holds container logs.
 
 **Regression test:** All eight e2e scenarios. Any of them reverting to a bare
 service name fails within ninety seconds.
