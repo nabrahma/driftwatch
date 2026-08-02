@@ -30,11 +30,11 @@ var _ = Describe("E7 PublisherRestart", Ordered, func() {
 	var epochBefore int64
 
 	BeforeAll(func() {
-		s = newScenario("e7-publisher-restart", FixtureOptions{Rate: 800, Keys: 1200})
+		s = newScenario("e7-publisher-restart", &FixtureOptions{Rate: 800, Keys: 1200})
 		s.waitForPublisher(3000)
 
 		var err error
-		check, err = s.CreateCheck(suiteCtx, CheckOptions{})
+		check, err = s.CreateCheck(suiteCtx, &CheckOptions{})
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -135,13 +135,13 @@ var _ = Describe("E8 MultiCheck", Ordered, func() {
 	var owned, foreign string
 
 	BeforeAll(func() {
-		s = newScenario("e8-multi-check", FixtureOptions{Rate: 800, Keys: 1500})
+		s = newScenario("e8-multi-check", &FixtureOptions{Rate: 800, Keys: 1500})
 		s.waitForPublisher(2000)
 
 		var err error
 
 		// The keyspace the publisher actually writes.
-		owned, err = s.CreateCheck(suiteCtx, CheckOptions{
+		owned, err = s.CreateCheck(suiteCtx, &CheckOptions{
 			Name:       "owned",
 			KeyPattern: "block:*",
 		})
@@ -150,7 +150,7 @@ var _ = Describe("E8 MultiCheck", Ordered, func() {
 		// A pattern nothing produces, with a scalar projection rather than a
 		// set. Two differences at once on purpose: the checks must be separable
 		// by pattern *and* must not share projection state.
-		foreign, err = s.CreateCheck(suiteCtx, CheckOptions{
+		foreign, err = s.CreateCheck(suiteCtx, &CheckOptions{
 			Name:       "foreign",
 			KeyPattern: "ledger:*",
 			Projection: "scalar",

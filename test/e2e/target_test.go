@@ -26,11 +26,11 @@ var _ = Describe("E4 TargetFlushAndRecover", Ordered, func() {
 	var check string
 
 	BeforeAll(func() {
-		s = newScenario("e4-flush-recover", FixtureOptions{Rate: 800, Keys: 1500})
+		s = newScenario("e4-flush-recover", &FixtureOptions{Rate: 800, Keys: 1500})
 		s.waitForPublisher(2000)
 
 		var err error
-		check, err = s.CreateCheck(suiteCtx, CheckOptions{})
+		check, err = s.CreateCheck(suiteCtx, &CheckOptions{})
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -122,7 +122,7 @@ var _ = Describe("E5 RedisEviction", Ordered, func() {
 	var check string
 
 	BeforeAll(func() {
-		s = newScenario("e5-eviction", FixtureOptions{
+		s = newScenario("e5-eviction", &FixtureOptions{
 			Rate: 1500,
 			// A keyspace far larger than the memory bound below, so eviction is
 			// certain rather than hoped for.
@@ -133,7 +133,7 @@ var _ = Describe("E5 RedisEviction", Ordered, func() {
 		s.waitForPublisher(3000)
 
 		var err error
-		check, err = s.CreateCheck(suiteCtx, CheckOptions{})
+		check, err = s.CreateCheck(suiteCtx, &CheckOptions{})
 		Expect(err).NotTo(HaveOccurred())
 	})
 

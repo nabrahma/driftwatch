@@ -168,7 +168,7 @@ func (c *fakeClock) Since(t time.Time) time.Duration {
 //
 // It panics on a non-positive interval, matching time.NewTicker. That is a
 // programmer error rather than a runtime condition: a ticker that fires every
-// zero seconds has no meaningful behaviour, and returning a broken one would
+// zero seconds has no meaningful behavior, and returning a broken one would
 // surface as a test that hangs rather than as the mistake it is.
 func (c *fakeClock) NewTicker(d time.Duration) Ticker {
 	if d <= 0 {

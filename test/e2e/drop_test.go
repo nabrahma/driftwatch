@@ -34,7 +34,7 @@ var _ = Describe("E2 DroppedEventDetected", Ordered, func() {
 	)
 
 	BeforeAll(func() {
-		s = newScenario("e2-dropped-event", FixtureOptions{
+		s = newScenario("e2-dropped-event", &FixtureOptions{
 			Rate:     400,
 			Keys:     3000,
 			SkipFrom: skipFrom,
@@ -48,7 +48,7 @@ var _ = Describe("E2 DroppedEventDetected", Ordered, func() {
 		// would be nothing to detect. The divergence exists only because
 		// driftwatch is watching while the materializer is not writing.
 		var err error
-		check, err = s.CreateCheck(suiteCtx, CheckOptions{})
+		check, err = s.CreateCheck(suiteCtx, &CheckOptions{})
 		Expect(err).NotTo(HaveOccurred())
 
 		// Now let the stream run past the skipped range.

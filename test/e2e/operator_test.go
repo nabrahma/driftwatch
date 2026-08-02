@@ -29,7 +29,7 @@ var _ = Describe("E6 OperatorLifecycle", Ordered, func() {
 	var baseline int
 
 	BeforeAll(func() {
-		s = newScenario("e6-operator-lifecycle", FixtureOptions{Rate: 600, Keys: 1000})
+		s = newScenario("e6-operator-lifecycle", &FixtureOptions{Rate: 600, Keys: 1000})
 		s.waitForPublisher(1000)
 	})
 
@@ -39,7 +39,7 @@ var _ = Describe("E6 OperatorLifecycle", Ordered, func() {
 		// settled rather than pristine, which is what makes it a fair baseline:
 		// the claim is that a lifecycle changes nothing, not that the manager
 		// starts from a particular number.
-		Eventually(func() int { return managerGoroutines() }).
+		Eventually(managerGoroutines).
 			WithTimeout(quick).WithPolling(poll).
 			Should(BeNumerically(">", 0), "the goroutine profile was never readable")
 
@@ -50,7 +50,7 @@ var _ = Describe("E6 OperatorLifecycle", Ordered, func() {
 
 	It("creates a check and reaches a steady state", func() {
 		var err error
-		check, err = s.CreateCheck(suiteCtx, CheckOptions{})
+		check, err = s.CreateCheck(suiteCtx, &CheckOptions{})
 		Expect(err).NotTo(HaveOccurred())
 
 		s.waitForCheck(check, converge,

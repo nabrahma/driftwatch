@@ -843,3 +843,95 @@ violating it is silent.
   duplication that needs guarding.
 - Production installs should turn the webhook on. `values-prod.yaml` does, with
   cert-manager.
+
+---
+
+## ADR-0012 — The Go floor moves from 1.23 to 1.25, because 1.23 cannot be patched
+
+**Status:** Accepted
+**Date:** 2026-08-02
+**Phase:** 9
+**PRD reference:** §8.5, §18
+**Supersedes:** the Go-version half of ADR-0005
+
+### Context
+
+Wiring `govulncheck` into CI — a §22 box that had never been ticked — turned up
+four vulnerabilities reachable from code this project actually calls. One of
+them is reachable from the shipped manager binary:
+
+```text
+Vulnerability #4: GO-2026-4918
+  Infinite loop in HTTP/2 transport when given bad SETTINGS_MAX_FRAME_SIZE
+  Module: golang.org/x/net
+    Found in: golang.org/x/net@v0.38.0
+    Fixed in: golang.org/x/net@v0.53.0
+    Example trace:
+      cmd/driftwatch-manager/main.go:223:21: driftwatch.run calls
+        manager.controllerManager.Start, which eventually calls
+        http2.Transport.NewClientConn
+```
+
+That is not a test-only path. controller-runtime talks to the API server over
+HTTP/2, so every driftwatch-manager pod holds a connection through the affected
+transport for its entire life.
+
+The problem is that it cannot be fixed on Go 1.23:
+
+| Module | Fixed in | That version declares |
+|---|---|---|
+| `golang.org/x/net` | v0.53.0 | `go 1.25.0` |
+| `golang.org/x/net` | v0.55.0 | `go 1.25.0` |
+| `golang.org/x/text` | v0.39.0 | `go 1.25.0` |
+
+There is no intermediate version. Every release carrying the fix also carries
+the newer language floor.
+
+### Options considered
+
+**Hold 1.23 and document the exposure.** ADR-0005's reasoning is still sound on
+its own terms — each bump narrows who can build the project, and 1.23 was chosen
+because range-over-func and `slices`/`maps` are what the design needs and nothing
+more. Holding it would mean a `KNOWN_GAPS.md` entry describing a reachable DoS in
+the manager's connection to the API server, and a CI scanner set to report rather
+than fail.
+
+Rejected. A monitoring tool whose failure mode is going quiet is exactly the kind
+of thing that must not hang: driftwatch reporting nothing is indistinguishable
+from driftwatch reporting no drift, which is the failure this whole project
+exists to make visible. Accepting a hang in the manager's watch to preserve a
+build-compatibility preference gets the priority backwards.
+
+**Bump only the release build.** Keep `go.mod` at 1.23 so the source still
+compiles on older toolchains, and build the published binaries and image with
+1.25. Rejected because it makes `go install` a trap: a user on Go 1.23 would get
+a binary containing the vulnerability, from a repository whose CI badge says the
+supply chain is clean, and nothing would tell them.
+
+**Bump the floor.** Accepted.
+
+### Decision
+
+- **Go 1.25 minimum**, declared as `go 1.25.0` in `go.mod`. CI, both Dockerfiles,
+  the release workflow and CONTRIBUTING.md all move together, so the floor stays
+  a tested claim.
+- **`golang.org/x/net` at v0.56.0 and `golang.org/x/text` at v0.39.0**, the
+  lowest pair that resolves together and fixes all three module vulnerabilities.
+- **`govulncheck` fails CI**, rather than reporting. A scanner set to
+  `continue-on-error` is worse than no scanner: the badge claims the supply chain
+  is checked while nothing checks it.
+
+### Consequences
+
+- Anyone on Go 1.23 or 1.24 can no longer build from source. This is a real cost
+  and the reason ADR-0005 argued against bumping; it is paid here because the
+  alternative is shipping a known hang.
+- ADR-0005's other three decisions — `CGO_ENABLED=0`, ldflags version injection,
+  distroless runtime — are unaffected and still stand.
+- One vulnerability remains in every scan: `GO-2026-5856` in `crypto/tls`, fixed
+  in go1.26.5. That is a property of the toolchain running the build rather than
+  of anything declared here, and it resolves when the builder's patch release
+  moves. It is not something `go.mod` can express.
+- The `-race` requirement on a 64-bit cgo toolchain is unchanged, which is why
+  the Makefile now takes `RACE=` for contributors whose local compiler cannot
+  provide one.

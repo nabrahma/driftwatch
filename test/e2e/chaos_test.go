@@ -37,7 +37,7 @@ var _ = Describe("E3 SelfLossReportsSuspect", Ordered, func() {
 		// The only scenario that needs toxiproxy: driftwatch connects through
 		// it, the materializer connects straight to the publisher. That
 		// asymmetry is the entire fault.
-		s = newScenario("e3-self-loss", FixtureOptions{
+		s = newScenario("e3-self-loss", &FixtureOptions{
 			Rate:      600,
 			Keys:      2000,
 			WithProxy: true,
@@ -45,7 +45,7 @@ var _ = Describe("E3 SelfLossReportsSuspect", Ordered, func() {
 		s.waitForPublisher(1000)
 
 		var err error
-		check, err = s.CreateCheck(suiteCtx, CheckOptions{ViaProxy: true})
+		check, err = s.CreateCheck(suiteCtx, &CheckOptions{ViaProxy: true})
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -69,7 +69,7 @@ var _ = Describe("E3 SelfLossReportsSuspect", Ordered, func() {
 		// The materializer is unaffected throughout, so Redis keeps being
 		// updated correctly while driftwatch is blind. What follows is a wait
 		// on an observable condition rather than on the clock — §14.5 forbids
-		// sleeping for synchronisation, and a fixed wait here would be guessing
+		// sleeping for synchronization, and a fixed wait here would be guessing
 		// how long the socket takes to notice it has been cut.
 		By("waiting for driftwatch to notice it is no longer receiving")
 		s.waitForCheck(check, converge,

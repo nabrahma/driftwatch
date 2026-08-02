@@ -115,10 +115,10 @@ func (f *Fixture) ProxyEndpoint() string {
 // NewFixture creates the namespace and brings the stack up.
 //
 // Every step here is setup, so every step may be retried (§14.5). Nothing in
-// this file asserts anything about driftwatch's behaviour — that is the
+// this file asserts anything about driftwatch's behavior — that is the
 // scenarios' job, and retrying one of those would hide the bug it exists to
 // find.
-func NewFixture(ctx context.Context, name string, opts FixtureOptions) (*Fixture, error) {
+func NewFixture(ctx context.Context, name string, opts *FixtureOptions) (*Fixture, error) {
 	opts.applyDefaults()
 
 	namespace := generateNamespace(name)
@@ -131,7 +131,7 @@ func NewFixture(ctx context.Context, name string, opts FixtureOptions) (*Fixture
 		return nil, err
 	}
 
-	manifest := f.render(&opts)
+	manifest := f.render(opts)
 	if err := retry(ctx, 3, 2*time.Second, "apply fixtures to "+namespace, func() error {
 		return KubectlApply(ctx, namespace, manifest)
 	}); err != nil {
@@ -525,7 +525,13 @@ func (f *Fixture) PublisherEmitted(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	n, _ := stats["emitted"].(float64)
+	// A missing or wrongly-typed field reads as zero rather than as an error.
+	// The publisher is a test harness, and a scenario that failed on a stats
+	// shape would report a harness problem as a driftwatch problem.
+	n, ok := stats["emitted"].(float64)
+	if !ok {
+		return 0, nil
+	}
 	return int(n), nil
 }
 
@@ -535,7 +541,10 @@ func (f *Fixture) PublisherEpoch(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	e, _ := stats["epoch"].(float64)
+	e, ok := stats["epoch"].(float64)
+	if !ok {
+		return 0, nil
+	}
 	return int64(e), nil
 }
 
@@ -550,9 +559,9 @@ func (f *Fixture) RestartPublisher(ctx context.Context) error {
 		return err
 	}
 
-	if _, err := KubectlOut(ctx, "-n", f.Namespace, "delete", "pod", pod,
-		"--grace-period=0", "--force"); err != nil {
-		return err
+	if _, delErr := KubectlOut(ctx, "-n", f.Namespace, "delete", "pod", pod,
+		"--grace-period=0", "--force"); delErr != nil {
+		return delErr
 	}
 
 	_, err = KubectlOut(ctx, "-n", f.Namespace, "wait",

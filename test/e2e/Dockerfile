@@ -9,7 +9,7 @@
 # 65532, no shell. That is not ceremony — the health check in the compose file
 # has to be the binary itself precisely because there is no curl to call, and
 # discovering that here rather than in production is part of the point.
-FROM golang:1.23-bookworm AS build
+FROM golang:1.25-bookworm AS build
 
 WORKDIR /src
 

@@ -27,11 +27,11 @@ var _ = Describe("E1 HappyPath", Ordered, func() {
 	var check string
 
 	BeforeAll(func() {
-		s = newScenario("e1-happy-path", FixtureOptions{Rate: 2000, Keys: 3000})
+		s = newScenario("e1-happy-path", &FixtureOptions{Rate: 2000, Keys: 3000})
 		s.waitForPublisher(2000)
 
 		var err error
-		check, err = s.CreateCheck(suiteCtx, CheckOptions{})
+		check, err = s.CreateCheck(suiteCtx, &CheckOptions{})
 		Expect(err).NotTo(HaveOccurred())
 	})
 

@@ -31,7 +31,7 @@ func TestE2E(t *testing.T) {
 // cluster is the shared cluster, built once for the whole suite.
 var cluster *Cluster
 
-// suiteCtx outlives any one scenario. Ginkgo's per-spec context is cancelled
+// suiteCtx outlives any one scenario. Ginkgo's per-spec context is canceled
 // when the spec ends, and teardown has to keep working after that.
 var suiteCtx = context.Background()
 
@@ -104,7 +104,7 @@ type scenario struct {
 // The DeferCleanup runs after the spec whether it passed, failed or panicked,
 // and it collects diagnostics before it removes anything — an AfterEach that
 // tore the namespace down first would delete the evidence.
-func newScenario(name string, opts FixtureOptions) *scenario {
+func newScenario(name string, opts *FixtureOptions) *scenario {
 	GinkgoHelper()
 
 	started := time.Now()

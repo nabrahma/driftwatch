@@ -9,10 +9,16 @@
 
 # --- build ------------------------------------------------------------------
 #
-# Pinned to the minimum Go the module declares rather than the newest release.
-# §8.5 holds the toolchain at 1.23 deliberately, and building with a newer one
-# here would let a 1.24-only construct into the tree that CI would then reject.
-FROM golang:1.23-bookworm AS build
+# Pinned to the minimum Go the module declares rather than the newest release,
+# so that the declared floor is a tested claim rather than an assertion. A newer
+# toolchain here would let a construct the floor does not allow into the tree,
+# and CI would reject it after the image had already built.
+#
+# The floor is 1.25 rather than the 1.23 §8.5 originally chose. See
+# docs/DECISIONS.md ADR-0012: every version of golang.org/x/net that fixes
+# GO-2026-4918 declares go 1.25.0, and that vulnerability is reachable from the
+# manager.
+FROM golang:1.25-bookworm AS build
 
 WORKDIR /src
 

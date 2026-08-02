@@ -115,7 +115,7 @@ spec:
 `
 
 // CreateCheck applies a DriftCheck into the scenario's namespace.
-func (f *Fixture) CreateCheck(ctx context.Context, opts CheckOptions) (string, error) {
+func (f *Fixture) CreateCheck(ctx context.Context, opts *CheckOptions) (string, error) {
 	opts.applyDefaults()
 
 	// Fully qualified, always. The manager lives in another namespace and a

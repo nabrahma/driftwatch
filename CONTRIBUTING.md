@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- **Go 1.23 or newer.** 1.23 is the declared minimum and CI builds on it.
+- **Go 1.25 or newer.** 1.25 is the declared minimum and CI builds on it.
 - **A 64-bit C compiler**, for `go test -race` only. Nothing that ships needs
   cgo — `CGO_ENABLED=0` is the default for every build (`docs/DECISIONS.md`
   ADR-0005) — but the race detector does.

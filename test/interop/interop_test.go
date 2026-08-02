@@ -16,6 +16,7 @@ package interop
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -108,8 +109,16 @@ func startPython(t *testing.T, args ...string) *exec.Cmd {
 	}()
 
 	t.Cleanup(func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
+		// Both errors are reported rather than discarded, but neither fails the
+		// test: by this point the subprocess has usually already exited on its
+		// own, and "no such process" is the expected outcome rather than a
+		// problem worth failing a passing interop run over.
+		if killErr := cmd.Process.Kill(); killErr != nil {
+			t.Logf("killing the python publisher: %v", killErr)
+		}
+		if waitErr := cmd.Wait(); waitErr != nil {
+			t.Logf("reaping the python publisher: %v", waitErr)
+		}
 		wg.Wait()
 	})
 
@@ -167,7 +176,7 @@ func TestInterop_LibzmqPublisherToGoSubscriber(t *testing.T) {
 	sub := zmq4.NewSub(ctx)
 	defer sub.Close() //nolint:errcheck // test cleanup
 
-	// Subscribe before dialling, always. The reverse order loses everything
+	// Subscribe before dialing, always. The reverse order loses everything
 	// that arrives before the subscription reaches the publisher, and on PUB
 	// there is no way to ask for it again.
 	require.NoError(t, sub.SetOption(zmq4.OptionSubscribe, topic))
@@ -217,7 +226,7 @@ func TestInterop_LibzmqPublisherToGoSubscriber(t *testing.T) {
 			wrongTopic++
 		}
 
-		if blob != nil && string(blob) != string(binaryBlob) {
+		if blob != nil && !bytes.Equal(blob, binaryBlob) {
 			binaryOK = false
 		}
 	}
