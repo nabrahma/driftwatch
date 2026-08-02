@@ -1,4 +1,4 @@
-# driftwatch
+# Driftwatch
 
 **Your cache is lying to you. This is how you find out.**
 
@@ -26,7 +26,7 @@ p99 nobody can explain.
 
 ---
 
-## driftwatch watches the same stream. Independently.
+## Diftwatch watches the same stream. Independently.
 
 **It builds its own answer.** Same events, folded through a pure function. No
 shared memory, no shared connection, no shared code with the thing it checks.
@@ -69,7 +69,7 @@ HISTORY (last 2)
 
 Read the last line of the diagnosis again.
 
-driftwatch doesn't just say the key is missing. It says it watched replica-0's
+Driftwatch doesn't just say the key is missing. It says it watched replica-0's
 sequence from 8801 to 8847 without a gap — so *its own* view was complete. That
 is what makes the store the party that lost something.
 
