@@ -148,6 +148,21 @@ type Check struct {
 	sourceFailed  atomic.Bool
 	sourceFailure string
 
+	// targetUnreachable records that the most recent pass could not reach the
+	// store, which is a different fact from anything a *report* carries.
+	//
+	// Status derives TargetReachable from lastReport, and a sweep that failed
+	// because the store was unreachable produces no report — so the field kept
+	// the value of the last successful sweep and said `targetReachable: true`
+	// while the phase said Degraded and the message said the target could not
+	// be reached. Meanwhile recordSweepMetrics sets the *metric* to 0 on that
+	// same error, so the dashboard and `kubectl get driftcheck` disagreed.
+	//
+	// That is D-020's shape exactly, one field over: a value the extras path
+	// and the failure path each own a piece of, with nothing reconciling them.
+	// Not sticky — it is cleared by the next pass that reaches the store.
+	targetUnreachable atomic.Bool
+
 	// awaitingSnapshot is bootstrap Strict's state: nothing is asserted on
 	// until a publisher retransmits. snapshotsSeen counts completed cycles.
 	awaitingSnapshot atomic.Bool
@@ -1335,6 +1350,16 @@ func (c *Check) onReport(rep *differ.Report, err error) {
 
 	c.recordSweepMetrics(rep, err)
 
+	// Kept in step with the metric recordSweepMetrics writes. A status that
+	// says the target is reachable while the phase says it is not is worse
+	// than either one alone: it makes the operator distrust both.
+	switch {
+	case errors.Is(err, sweeper.ErrTargetUnavailable):
+		c.targetUnreachable.Store(true)
+	case rep != nil:
+		c.targetUnreachable.Store(!rep.TargetHealth.Reachable)
+	}
+
 	switch {
 	case errors.Is(err, sweeper.ErrTargetUnavailable):
 		// Not a failure of driftwatch, and it must not read as one. §23 A5:
@@ -1704,6 +1729,14 @@ func (c *Check) Status() Status {
 		st.TargetReachable = rep.TargetHealth.Reachable
 		st.TargetRole = rep.TargetHealth.Role
 		st.TargetKeyspaceSize = rep.TargetHealth.KeyspaceSize
+	}
+
+	// A pass that could not reach the store leaves lastReport untouched, so the
+	// line above would otherwise report the reachability of the last sweep that
+	// succeeded — possibly minutes ago, and contradicting both the phase and
+	// the driftwatch_target_reachable metric.
+	if c.targetUnreachable.Load() {
+		st.TargetReachable = false
 	}
 
 	if key := c.multiWriterKey.Load(); key != nil {
