@@ -80,14 +80,21 @@ And it hands you `seq 8847` to grep for.
 
 ## Watch it happen
 
-![The driftwatch dashboard during an injected fault: 350 confirmed divergent keys at 100% coverage](docs/evidence/dashboard-drift-detected.png)
+![The driftwatch dashboard through an injected fault: the verdict flips, confirmed divergent keys spike, and the count decays back to zero while coverage holds above 0.997](docs/evidence/demo-drift-detected.gif)
 
-350 keys deleted out of Redis behind driftwatch's back. Confirmed, categorized,
-and counted, at 100% coverage.
+392 keys deleted out of Redis behind driftwatch's back. 360 confirmed seven
+seconds later, then the count falls on its own as the stream rewrites them.
+Four times real speed.
 
-Those two numbers belong together, which is why they sit side by side. A
-divergence count means nothing without the coverage it was measured over. Zero
-divergence at 3% coverage is a statement about 3% of your store.
+The recovery is the half that matters. Anything can raise an alarm. What makes
+a tool worth leaving switched on is that the alarm goes away by itself when the
+problem does, without anybody clearing it.
+
+![The same dashboard mid-fault, in detail: 350 confirmed divergent keys at 100% coverage](docs/evidence/dashboard-drift-detected.png)
+
+Coverage sits next to the count on purpose. A divergence count means nothing
+without the fraction of the store it was measured over. Zero divergence at 3%
+coverage is a statement about 3% of your store.
 
 ---
 

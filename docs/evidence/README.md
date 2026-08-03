@@ -105,6 +105,7 @@ ring-buffer fill from an actual leak.
 | `live-check-detecting-real-drift.txt` | A DriftCheck reconciled by the real manager, detecting real drift | `internal/controller` |
 | `demo-drift-detected-and-resolved.txt` | `make demo` detects 360 deleted keys in 7s and watches them heal | `make demo` |
 | `dashboard-drift-detected.png` | The dashboard mid-fault: 350 confirmed divergent keys at 100% coverage | `make demo` + `make demo-inject-drift` |
+| `demo-drift-detected.gif` | The same dashboard through a whole cycle: 360 keys confirmed, then the count decaying to zero on its own at 4x speed | `make demo` + `make demo-inject-drift` |
 
 ## What is deliberately not here
 
@@ -113,12 +114,7 @@ failing run, and they contain full container logs. D-024's load-bearing lines ar
 transcribed into `D-024-namespace-resolution.txt` with a reproduction that does
 not need an e2e run at all.
 
-**A demo GIF or asciinema cast.** The dashboard screenshot above covers the
-static case. A recording would show the number rising and then decaying back to
-zero on its own, which is the half that argues the tool is usable day to day,
-and it is still outstanding.
-
-Note that the screenshot is a supplement rather than the guarantee.
-`hack/dashboardcheck` runs in CI and asserts every panel resolves to a
-registered metric, which is the stronger check: an image goes stale silently
+Note that the screenshot and the recording are supplements rather than the
+guarantee. `hack/dashboardcheck` runs in CI and asserts every panel resolves to
+a registered metric, which is the stronger check: an image goes stale silently
 and the check does not.
