@@ -286,3 +286,128 @@ func (panicProjection) TargetKey(e *event.Event) (string, error) { return e.Key,
 func (panicProjection) Apply(event.Value, *event.Event) (projection.Mutation, error) {
 	panic("this projection always panics")
 }
+
+func TestCheck_PausingARunningCheckKeepsTheOracle(t *testing.T) {
+	// The claim §10.1's pause rests on, and the one that was not true.
+	//
+	// Pause exists so an operator can silence a check during a deploy without
+	// paying to relearn the keyspace afterwards. If it cost the oracle it would
+	// be delete with extra steps: everything would be suspect until the stream
+	// refreshed it, and §5.2 would be right to say so, because driftwatch
+	// really would have missed those events.
+	//
+	// It did cost the oracle. Paused was read once when the check was built, so
+	// the only way to apply it was to build a new check — and the controller
+	// restarts a runner on any spec change, which pausing is. The e2e scenario
+	// asserting this passed anyway, because Adopt bootstrap re-read the store
+	// and trackedKeys came straight back. The keyspace had been discarded and
+	// re-adopted from the very store the check is meant to be auditing, and
+	// adopted keys are skipped by the sweep until an event refreshes them.
+	//
+	// So the number the scenario checked recovered while the property it stood
+	// for did not. This asserts the property: the same oracle, across the
+	// pause, without a restart.
+	clk := clock.Fake(epoch())
+	c := newCheckWith(t, scalarSpec, clk)
+
+	stop := running(t, c)
+	defer stop()
+
+	store, ok := c.Target().(*target.MemoryTarget)
+	require.True(t, ok)
+
+	const keys = 5
+	for i := 0; i < keys; i++ {
+		publish(t, c, setEvent("replica-0", uint64(i+1), keyIdx(i), "v1"))
+		store.Seed(map[string][]byte{keyIdx(i): []byte("v1")})
+	}
+	clk.Advance(2 * time.Second)
+
+	_, err := c.SweepNow(context.Background())
+	require.NoError(t, err)
+
+	before := c.Status()
+	require.Equal(t, keys, before.TrackedKeys)
+	require.Equal(t, check.PhaseWatching, before.Phase)
+	require.False(t, before.LastSweepTime.IsZero())
+
+	// Pause. No restart, no new Check, no second bootstrap.
+	c.SetPaused(true)
+
+	paused := c.Status()
+	assert.Equal(t, check.PhasePaused, paused.Phase)
+	assert.Equal(t, keys, paused.TrackedKeys,
+		"pausing must not cost the oracle; that is the entire difference "+
+			"between pausing a check and deleting one")
+
+	// Ingestion continues, which is the other half. An unpaused check has to
+	// resume asserting on a keyspace that is current rather than one it has to
+	// relearn, and that only works if events kept folding in throughout.
+	publish(t, c, setEvent("replica-0", keys+1, keyIdx(keys), "v1"))
+	assert.Equal(t, keys+1, c.Status().TrackedKeys,
+		"a paused check keeps ingesting; it stops asserting, not listening")
+
+	// And nothing is swept while paused. The store is changed behind
+	// driftwatch's back first, so a sweep that did run would have something to
+	// report and the silence means something.
+	store.Seed(map[string][]byte{keyIdx(0): []byte("wrong")})
+
+	// One sweep interval, then real time for the Run goroutine to act on it.
+	//
+	// The waiting is the part that makes this an assertion. Advancing a fake
+	// clock in a loop and reading the status straight afterwards proves
+	// nothing: the ticks go to a goroutine that may not have been scheduled
+	// yet, and the test passes whether or not pause does anything. It did —
+	// neutralizing the pause gate entirely left this test green, which is worse
+	// than not having written it.
+	clk.Advance(10 * time.Second)
+	require.Never(t, func() bool {
+		return !c.Status().LastSweepTime.Equal(before.LastSweepTime)
+	}, time.Second, 10*time.Millisecond,
+		"a paused check ran a sweep: lastSweepTime moved")
+
+	during := c.Status()
+	assert.Zero(t, during.DivergentKeys,
+		"a paused check reported drift, which is what pausing exists to stop")
+	assert.Equal(t, check.PhasePaused, during.Phase)
+
+	// Resuming finds the divergence that was there all along, on the oracle it
+	// never lost. If pause had discarded it, this key would have been adopted
+	// from the store at its wrong value and would agree with it forever.
+	c.SetPaused(false)
+	assert.Equal(t, check.PhaseWatching, c.Status().Phase)
+
+	// The control arm, and the reason the silence above is evidence. The same
+	// clock advance against the same running loop now has to produce a sweep —
+	// if it does not, the tick never reached the sweeper and the paused check's
+	// stillness was the harness rather than the feature.
+	clk.Advance(10 * time.Second)
+	require.Eventually(t, func() bool {
+		return !c.Status().LastSweepTime.Equal(before.LastSweepTime)
+	}, eventuallyFor, eventuallyPoll,
+		"an unpaused check did not sweep on its tick either, so the silence "+
+			"while paused was never evidence of anything")
+
+	ctx := context.Background()
+	rep, err := c.SweepNow(ctx)
+	require.NoError(t, err)
+	require.Positive(t, rep.Total(),
+		"the resumed sweep compared %d keys and found nothing, against a store "+
+			"that was changed behind it", rep.KeysCompared)
+
+	// Raised, then confirmed. A finding is a claim about a disagreement that
+	// survived a re-read a settlement window later, so one sweep only ever
+	// produces a candidate.
+	//
+	// Asserted on the outcome rather than by draining the queue here, because
+	// the resumed Run loop has a confirm ticker of its own and advancing the
+	// clock hands it the same candidates. Whichever gets there first is not the
+	// property under test.
+	clk.Advance(2 * time.Second)
+	require.Eventually(t, func() bool {
+		c.ConfirmDue(ctx)
+		return c.Status().DivergentKeys > 0
+	}, eventuallyFor, eventuallyPoll,
+		"the store was changed during the pause and the oracle still knows "+
+			"what it should hold; resuming has to find it")
+}

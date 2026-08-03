@@ -98,6 +98,20 @@ type Config struct {
 	// it underneath a running sweeper. Read once per sweep, never per key.
 	SettlementWindow func() time.Duration
 
+	// Paused stops the passes without stopping the sweeper, read on every tick
+	// for the same reason SettlementWindow is: the answer is allowed to change
+	// underneath a running sweeper.
+	//
+	// Pausing this way rather than by not running the sweeper at all is what
+	// keeps the oracle. §10's pause exists to silence a check during a deploy,
+	// and a pause that tore the sweeper down would take the expectation with
+	// it — the check would come back adopting whatever the store happened to
+	// hold, which is the state it is supposed to be auditing. Nothing is
+	// asserted while paused; everything already learned survives.
+	//
+	// Optional. A nil Paused is never paused.
+	Paused func() bool
+
 	// ReadBatchSize is how many keys are read from the target at a time.
 	// Default 500.
 	ReadBatchSize int
@@ -304,13 +318,38 @@ func (s *Sweeper) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-sweeps.C():
+			if s.paused() {
+				continue
+			}
 			s.TrySweepOnce(ctx)
 		case now := <-confirms.C():
+			if s.paused() {
+				continue
+			}
 			s.ConfirmDue(ctx, now)
 		case <-extras.C():
+			if s.paused() {
+				continue
+			}
 			s.report(s.ScanExtrasOnce(ctx))
 		}
 	}
+}
+
+// paused reports whether the passes are currently suspended.
+//
+// The tickers keep running and their ticks are dropped, rather than the loop
+// blocking on an unpause. That is deliberate: a paused check that is
+// unpaused should sweep on the next tick like any other, not immediately and
+// not on a schedule that has drifted by however long the pause lasted.
+//
+// Confirmation is suspended along with sweeping, and that pairing matters. A
+// candidate is raised by one pass and confirmed by a later one against a
+// re-read; draining the confirm queue while sweeping is stopped would let
+// candidates raised before the pause harden into findings during it, so a
+// check silenced for a deploy would report drift from the deploy anyway.
+func (s *Sweeper) paused() bool {
+	return s.cfg.Paused != nil && s.cfg.Paused()
 }
 
 // SweepOnce performs one oracle→target pass, blocking if another sweep holds

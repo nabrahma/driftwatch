@@ -163,6 +163,26 @@ type Check struct {
 	// Not sticky — it is cleared by the next pass that reaches the store.
 	targetUnreachable atomic.Bool
 
+	// paused suspends the sweeper without stopping ingestion, and is live
+	// rather than read once at startup.
+	//
+	// It was a plain read of spec.Policy.Paused when the check was built, which
+	// made pausing something only a restart could apply — and the controller
+	// restarts a runner whenever the spec hash changes, so pausing tore the
+	// check down and built a new one. That discards the oracle, which is the
+	// one thing §10's pause exists to keep: the point of pause rather than
+	// delete is to silence a check for a deploy without paying to relearn the
+	// keyspace afterwards.
+	//
+	// Adopt bootstrap hid it. The rebuilt check re-read the store and
+	// trackedKeys came straight back, so the e2e scenario asserting "pauses
+	// without discarding the oracle" passed on a keyspace that had in fact been
+	// discarded and re-adopted from the very store it is meant to be auditing.
+	// Adopted keys are skipped by the sweep until an event refreshes them, so
+	// coverage collapsed for a full key cycle — the exact cost the scenario
+	// exists to prove is not paid.
+	paused atomic.Bool
+
 	// awaitingSnapshot is bootstrap Strict's state: nothing is asserted on
 	// until a publisher retransmits. snapshotsSeen counts completed cycles.
 	awaitingSnapshot atomic.Bool
@@ -235,6 +255,8 @@ func New(spec Spec, deps Deps) (*Check, error) {
 		confirmedCats: map[string]differ.Category{},
 		clockSkew:     map[string]time.Duration{},
 	}
+	c.paused.Store(spec.Policy.Paused)
+
 	if deps.Metrics != nil {
 		c.m = deps.Metrics.ForCheck(spec.ID())
 	}
@@ -382,6 +404,7 @@ func (c *Check) buildSweeper() {
 		ExtraScanInterval: c.spec.Policy.ExtraScanInterval.Duration(),
 		ExtraScanPattern:  c.spec.ExtraScanPattern(),
 		SettlementWindow:  c.orc.SettlementWindow,
+		Paused:            c.paused.Load,
 		ReadBatchSize:     c.readBatchSize(),
 		MaxConfirmQueue:   c.spec.Policy.MaxConfirmQueue,
 		MaxExtrasTracked:  c.spec.Policy.MaxExtrasTracked,
@@ -1009,12 +1032,10 @@ func (c *Check) runSweeper(ctx context.Context) error {
 		return err
 	}
 
-	if c.spec.Policy.Paused {
-		c.setPhase(PhasePaused, "policy.paused is set: ingesting, not sweeping")
-		<-ctx.Done()
-		return ctx.Err()
-	}
-
+	// The sweeper runs whether or not the check is paused, and declines to do
+	// anything on each tick while it is. Returning here instead — which is what
+	// this did — meant pause could only ever be applied by building a new
+	// check, and a new check has no oracle.
 	c.setPhase(c.steadyPhase())
 	return c.swp.Run(ctx)
 }
@@ -1854,6 +1875,16 @@ func (c *Check) setPhase(p Phase, message string) {
 // check that went back to reporting Watching would be telling an operator its
 // clean reports cover a keyspace they do not.
 func (c *Check) steadyPhase() (phase Phase, message string) {
+	// Paused outranks everything below it, and deliberately so. It is the one
+	// state an operator asked for, and a check somebody silenced for a deploy
+	// reporting Degraded would light up the dashboards that silencing it was
+	// meant to quieten. What is happening underneath still reaches the
+	// conditions — SourceConnected and TargetAvailable are unaffected by this —
+	// so nothing is hidden, it is only ranked.
+	if c.paused.Load() {
+		return PhasePaused, "policy.paused is set: ingesting, not sweeping"
+	}
+
 	if c.awaitingSnapshot.Load() {
 		return PhaseAwaitingSnapshot,
 			"no key is asserted on until a publisher completes a snapshot cycle"
@@ -1896,6 +1927,41 @@ func (c *Check) steadyPhase() (phase Phase, message string) {
 	}
 	return PhaseDegraded, c.saturation
 }
+
+// SetPaused suspends or resumes sweeping on a running check.
+//
+// This is what makes pause something other than a restart. The controller calls
+// it when policy.paused is the only thing that changed, so the oracle, the
+// sequence tracker and every key's trust state carry straight through — which
+// is the whole difference between pausing a check and deleting one.
+//
+// Ingestion is untouched. Events keep arriving and keep folding into the
+// oracle, so an unpaused check resumes asserting on a keyspace that is current
+// rather than one it has to relearn. A pause that stopped ingestion would leave
+// every key suspect afterwards for as long as it took the stream to refresh
+// them, and §5.2 would be right to do that: driftwatch really would have missed
+// those events.
+//
+// Safe to call before Run, from any goroutine, and with the value it already
+// has — an unchanged value does nothing, so a controller re-reconciling the
+// same spec does not rewrite the phase underneath a check that is bootstrapping.
+func (c *Check) SetPaused(paused bool) {
+	if c.paused.Swap(paused) == paused {
+		return
+	}
+
+	c.log.Info("pause changed", "paused", paused)
+
+	// Only from a state the sweeper owns. Bootstrapping, Failed and the rest
+	// are set by code that is mid-decision, and overwriting one of those from
+	// here would report a steady state the check has not reached.
+	if c.phaseIs(PhaseWatching) || c.phaseIs(PhasePaused) || c.phaseIs(PhaseDegraded) {
+		c.setPhase(c.steadyPhase())
+	}
+}
+
+// Paused reports whether sweeping is currently suspended.
+func (c *Check) Paused() bool { return c.paused.Load() }
 
 // sourceConnected reports whether the transport currently has a subscription.
 func (c *Check) sourceConnected() bool {

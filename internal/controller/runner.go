@@ -52,6 +52,13 @@ type Runnable interface {
 	Run(ctx context.Context) error
 	// Status reports what the check currently knows.
 	Status() check.Status
+	// SetPaused suspends or resumes sweeping without restarting anything.
+	//
+	// Part of the interface rather than an optional one a type assertion looks
+	// for, because a Runnable that quietly did not implement it would leave
+	// pausing silently doing nothing — and the way that presents is a check
+	// that goes on alerting through the deploy it was silenced for.
+	SetPaused(paused bool)
 	// Close releases everything the check holds.
 	Close() error
 }
@@ -267,6 +274,14 @@ func (r *RunnerRegistry) Ensure(
 		// Nothing running. Fall through to the start below.
 
 	case existing.Hash == hash && existing.Err() == nil:
+		// The one field applied to a live runner rather than by replacing it.
+		// SpecHash leaves policy.paused out, so a pause arrives here as an
+		// unchanged spec — which is the point: the oracle, the sequence tracker
+		// and every key's trust state carry through untouched.
+		//
+		// Idempotent, and it has to be: this runs on every reconcile of an
+		// unchanged object, not only when the operator edits one.
+		existing.Check().SetPaused(spec.Policy.Paused)
 		return Outcome{Action: ActionUnchanged}, nil
 
 	case existing.Hash == hash:
@@ -658,7 +673,23 @@ func (r *RunnerRegistry) Forget(key types.NamespacedName) {
 // Only a digest of each secret goes in, never the value, so the hash is safe to
 // put in a log line and in the object's status.
 func SpecHash(spec *v1alpha1.DriftCheckSpec, secrets map[string]string) (string, error) {
-	encoded, err := json.Marshal(spec)
+	// policy.paused is deliberately not part of the hash.
+	//
+	// The hash decides whether the runner is replaced, and replacing it throws
+	// away the oracle. Pause exists precisely so an operator can silence a
+	// check during a deploy and have it resume with the keyspace it already
+	// knows — so a pause that restarted the runner would destroy the thing it
+	// exists to preserve, and then the check would come back adopting whatever
+	// the store happened to hold at that moment. Adopting from the store it is
+	// meant to be auditing is the one starting position that cannot detect
+	// anything wrong with it.
+	//
+	// Ensure applies this field to the running check instead, which is why
+	// leaving it out here does not lose it.
+	hashed := *spec
+	hashed.Policy.Paused = false
+
+	encoded, err := json.Marshal(&hashed)
 	if err != nil {
 		return "", fmt.Errorf("hashing spec: %w", err)
 	}

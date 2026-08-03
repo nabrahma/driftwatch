@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/nabrahma/driftwatch/api/v1alpha1"
@@ -41,6 +42,10 @@ type stubRunnable struct {
 	// concurrency -race would otherwise flag here.
 	statusMu sync.Mutex
 	status   check.Status
+	// paused and pauseCalls record what SetPaused was told, under the same
+	// lock, because the registry calls it from the reconcile goroutine.
+	paused     bool
+	pauseCalls int
 
 	started  atomic.Int64
 	finished atomic.Int64
@@ -88,6 +93,25 @@ func (s *stubRunnable) setStatus(mutate func(*check.Status)) {
 	s.statusMu.Lock()
 	defer s.statusMu.Unlock()
 	mutate(&s.status)
+}
+
+// SetPaused records what the registry asked for.
+//
+// Recorded rather than ignored, so a test can assert that pausing reached the
+// running check instead of replacing it — which is the whole behavior, and
+// the previous version of it was invisible from here.
+func (s *stubRunnable) SetPaused(paused bool) {
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
+	s.paused = paused
+	s.pauseCalls++
+}
+
+// pausedState reports the last value SetPaused was given, and how many times.
+func (s *stubRunnable) pausedState() (paused bool, calls int) {
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
+	return s.paused, s.pauseCalls
 }
 
 func (s *stubRunnable) Close() error {
@@ -783,4 +807,98 @@ func TestAction_String(t *testing.T) {
 	assert.Equal(t, "throttled", ActionThrottled.String())
 	assert.Equal(t, "unchanged", ActionUnchanged.String())
 	assert.Equal(t, "unknown", Action(99).String())
+}
+
+func TestRegistry_PausingReachesTheRunnerInsteadOfReplacingIt(t *testing.T) {
+	// The difference between pausing a check and deleting one.
+	//
+	// Replacing the runner is how every other spec change is applied, and it
+	// throws away the oracle — which for pause is precisely the wrong outcome.
+	// §10.1's pause exists so an operator can silence a check during a deploy
+	// and have it resume knowing the keyspace it already learned. A pause that
+	// rebuilt the runner would leave it adopting whatever the store held at
+	// that moment, and adopting from the store it is meant to be auditing is
+	// the one starting position from which nothing can look wrong.
+	//
+	// So policy.paused is left out of the hash and applied to the live check,
+	// and this asserts both halves: the same runner, and the value delivered.
+	ctx := context.Background()
+	reg := newTestRegistry(t, RegistryOptions{Logger: testLogger(t)})
+
+	k := key("kvcache-index")
+	spec := specFor(time.Second)
+
+	_, err := reg.Ensure(ctx, k, "hash-1", spec)
+	require.NoError(t, err)
+
+	started := reg.Get(k).StartedAt
+	require.Len(t, reg.stubs(), 1)
+	stub := reg.stubs()[0]
+
+	// Nothing called SetPaused yet, and that is the contract rather than an
+	// omission: a check is built from the whole spec, so one starting paused is
+	// paused by its constructor. SetPaused carries the changes that arrive
+	// afterwards, which is the case a restart would otherwise have to serve.
+	paused, calls := stub.pausedState()
+	require.False(t, paused)
+	require.Zero(t, calls, "the builder owns the initial value, not Ensure")
+
+	// The reconcile that follows an operator setting paused: true. The hash is
+	// the same, because SpecHash does not include the field.
+	pausedSpec := spec
+	pausedSpec.Policy.Paused = true
+
+	outcome, err := reg.Ensure(ctx, k, "hash-1", pausedSpec)
+	require.NoError(t, err)
+	assert.Equal(t, ActionUnchanged, outcome.Action,
+		"pausing must not count as a spec change; a restart is what loses the oracle")
+
+	assert.Equal(t, started, reg.Get(k).StartedAt,
+		"the runner was replaced, so the oracle went with it")
+	assert.Len(t, reg.stubs(), 1, "and no second check was ever built")
+
+	paused, _ = stub.pausedState()
+	assert.True(t, paused, "the pause never reached the running check")
+
+	// Resuming, on the same runner again.
+	outcome, err = reg.Ensure(ctx, k, "hash-1", spec)
+	require.NoError(t, err)
+	assert.Equal(t, ActionUnchanged, outcome.Action)
+
+	paused, _ = stub.pausedState()
+	assert.False(t, paused, "unpausing never reached the running check")
+	assert.Len(t, reg.stubs(), 1)
+}
+
+func TestSpecHash_IgnoresPausedAndNothingElseInPolicy(t *testing.T) {
+	// The narrow claim, because leaving a field out of the hash is how a real
+	// spec change stops being applied. Pause is the only one that may be
+	// excluded, and this fails if a later edit widens that.
+	hashOf := func(mutate func(*v1alpha1.DriftCheckSpec)) string {
+		t.Helper()
+		spec := &v1alpha1.DriftCheckSpec{}
+		spec.Default()
+		if mutate != nil {
+			mutate(spec)
+		}
+		h, err := SpecHash(spec, nil)
+		require.NoError(t, err)
+		return h
+	}
+
+	base := hashOf(nil)
+
+	assert.Equal(t, base, hashOf(func(s *v1alpha1.DriftCheckSpec) {
+		s.Policy.Paused = true
+	}), "pausing changed the hash, so it would replace the runner and lose the oracle")
+
+	// Neighboring policy fields, to prove the exclusion is that one field and
+	// not the whole struct — which is the way this goes wrong later.
+	assert.NotEqual(t, base, hashOf(func(s *v1alpha1.DriftCheckSpec) {
+		s.Policy.SweepInterval = metav1.Duration{Duration: 9 * time.Minute}
+	}), "a change to sweepInterval stopped being noticed")
+
+	assert.NotEqual(t, base, hashOf(func(s *v1alpha1.DriftCheckSpec) {
+		s.Policy.MaxTrackedKeys = 4242
+	}), "a change to maxTrackedKeys stopped being noticed")
 }
