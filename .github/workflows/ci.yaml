@@ -383,3 +383,67 @@ jobs:
 
       - name: vet with the dev tag
         run: go vet -tags dev ./...
+
+  # §16.8's two gates: the absolute targets, and regression against a committed
+  # baseline.
+  #
+  # The split is not arbitrary. The absolute targets are the numbers the README
+  # prints and they hold on any machine with margin to spare, so they are a hard
+  # fail. The relative comparison is run on a shared two-core runner where a 30%
+  # swing between identical commits is ordinary, so it is run with -count=6 and
+  # read through benchstat's confidence intervals rather than as a raw delta —
+  # the noise is answered with repetitions, not by weakening the rule.
+  #
+  # Allocations are the exception and are enforced strictly, because allocs/op
+  # is a counted quantity rather than a timing: it does not move under load, and
+  # §16.8 asks for no increase at all. A new allocation in a hot path is exactly
+  # the regression this job exists to catch, and it is the one that shows up
+  # deterministically.
+  #
+  # The 1M-key benchmarks and BenchmarkFullSweep1M are not run here. The first
+  # group seeds a million keys per iteration and the second needs a real Redis;
+  # both are captured deliberately into the committed baselines instead, which
+  # is what docs/benchmarks/ is for.
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # The version hack/install-tools.sh pins, read from it rather than
+      # repeated here. A gate whose tool floats on @latest while everyone
+      # locally runs a pinned one will eventually disagree with the developer
+      # it is reporting to, and the argument that follows is about benchstat
+      # rather than about the regression.
+      - name: install benchstat
+        run: |
+          version=$(sed -n 's/^BENCHSTAT_VERSION="${BENCHSTAT_VERSION:-\(.*\)}"$/\1/p' \
+            hack/install-tools.sh)
+          test -n "$version" || { echo "could not read the benchstat pin"; exit 1; }
+          echo "benchstat ${version}"
+          go install "golang.org/x/perf/cmd/benchstat@${version}"
+
+      - name: run the benchmarks
+        run: make bench BENCHCOUNT=6
+
+      - name: the absolute targets
+        run: ./hack/verify-benchmarks.sh docs/benchmarks/current.txt
+
+      - name: regression against the committed baseline
+        run: ./hack/verify-bench-regression.sh
+
+      # Uploaded whether or not the gate passed. A regression is argued about
+      # with the numbers in front of you, and re-running the job to see them is
+      # how a real regression gets waved through as noise.
+      - name: upload the benchmark output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmarks-${{ github.run_number }}
+          path: docs/benchmarks/current.txt
+          if-no-files-found: ignore

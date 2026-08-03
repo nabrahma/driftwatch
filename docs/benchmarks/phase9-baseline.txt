@@ -1,0 +1,227 @@
+driftwatch Phase 9 benchmark baseline
+=====================================
+
+Six repetitions per benchmark (`make bench BENCHCOUNT=6`), which is what
+benchstat needs to put a confidence interval on a difference. A baseline with
+one sample per benchmark cannot be compared against: benchstat reports "~" for
+every row and the gate passes whatever the numbers say.
+
+Supersedes the phase1 and phase2 baselines, which predate Go 1.25, the msgpack
+and template codecs, and the batch-read change in pkg/target that removed a
+redundant copy of every Read (see G-004).
+
+BenchmarkFullSweep1M and BenchmarkGetMany500Real are not here. Both need a real
+Redis and run under the integration tag; `make bench-sweep` captures the first,
+and G-004 records the second.
+
+Machine: amd64 windows, go1.26.4
+Captured: 2026-08-03
+
+--- github.com/nabrahma/driftwatch/pkg/codec ---
+goos: windows
+goarch: amd64
+pkg: github.com/nabrahma/driftwatch/pkg/codec
+cpu: AMD Ryzen 7 6800HS with Radeon Graphics         
+BenchmarkCodecJSONDecode-16            	 1666249	       662.3 ns/op	 191.74 MB/s	      24 B/op	       2 allocs/op
+BenchmarkCodecJSONDecode-16            	 1609849	      1170 ns/op	 108.54 MB/s	      24 B/op	       2 allocs/op
+BenchmarkCodecJSONDecode-16            	 1000000	      1223 ns/op	 103.82 MB/s	      24 B/op	       2 allocs/op
+BenchmarkCodecJSONDecode-16            	 1000000	      1154 ns/op	 110.05 MB/s	      24 B/op	       2 allocs/op
+BenchmarkCodecJSONDecode-16            	 1000000	      1198 ns/op	 105.99 MB/s	      24 B/op	       2 allocs/op
+BenchmarkCodecJSONDecode-16            	 1000000	      1207 ns/op	 105.25 MB/s	      24 B/op	       2 allocs/op
+BenchmarkCodecJSONDecodeParallel-16    	 5824903	       181.1 ns/op	      24 B/op	       2 allocs/op
+BenchmarkCodecJSONDecodeParallel-16    	 6728539	       157.2 ns/op	      24 B/op	       2 allocs/op
+BenchmarkCodecJSONDecodeParallel-16    	 7881772	       157.0 ns/op	      24 B/op	       2 allocs/op
+BenchmarkCodecJSONDecodeParallel-16    	 7482807	       162.9 ns/op	      24 B/op	       2 allocs/op
+BenchmarkCodecJSONDecodeParallel-16    	 7855216	       160.5 ns/op	      24 B/op	       2 allocs/op
+BenchmarkCodecJSONDecodeParallel-16    	 6408454	       169.0 ns/op	      24 B/op	       2 allocs/op
+PASS
+ok  	github.com/nabrahma/driftwatch/pkg/codec	18.512s
+
+--- github.com/nabrahma/driftwatch/pkg/oracle ---
+goos: windows
+goarch: amd64
+pkg: github.com/nabrahma/driftwatch/pkg/oracle
+cpu: AMD Ryzen 7 6800HS with Radeon Graphics         
+BenchmarkOracleApply-16                   	 4356469	       274.1 ns/op	       2 B/op	       0 allocs/op
+BenchmarkOracleApply-16                   	 4398075	       379.7 ns/op	       2 B/op	       0 allocs/op
+BenchmarkOracleApply-16                   	 2364019	       480.5 ns/op	       4 B/op	       0 allocs/op
+BenchmarkOracleApply-16                   	 2546481	       489.5 ns/op	       4 B/op	       0 allocs/op
+BenchmarkOracleApply-16                   	 2477905	       472.9 ns/op	       4 B/op	       0 allocs/op
+BenchmarkOracleApply-16                   	 2439336	       481.9 ns/op	       4 B/op	       0 allocs/op
+BenchmarkOracleGet-16                     	 2558745	       469.5 ns/op	     256 B/op	       2 allocs/op
+BenchmarkOracleGet-16                     	 2630964	       456.2 ns/op	     256 B/op	       2 allocs/op
+BenchmarkOracleGet-16                     	 2622890	       463.3 ns/op	     256 B/op	       2 allocs/op
+BenchmarkOracleGet-16                     	 2635762	       464.6 ns/op	     256 B/op	       2 allocs/op
+BenchmarkOracleGet-16                     	 2489452	       467.7 ns/op	     256 B/op	       2 allocs/op
+BenchmarkOracleGet-16                     	 2457139	       460.3 ns/op	     256 B/op	       2 allocs/op
+BenchmarkOracleVersion-16                 	18646279	        60.69 ns/op	       0 B/op	       0 allocs/op
+BenchmarkOracleVersion-16                 	22040914	        58.40 ns/op	       0 B/op	       0 allocs/op
+BenchmarkOracleVersion-16                 	20592196	        59.53 ns/op	       0 B/op	       0 allocs/op
+BenchmarkOracleVersion-16                 	22947270	        54.77 ns/op	       0 B/op	       0 allocs/op
+BenchmarkOracleVersion-16                 	20684126	        59.54 ns/op	       0 B/op	       0 allocs/op
+BenchmarkOracleVersion-16                 	19909444	        61.25 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSettledKeys1M-16                 	      25	  42374148 ns/op	 5491942 B/op	     374 allocs/op
+BenchmarkSettledKeys1M-16                 	      25	  45167456 ns/op	 5494126 B/op	     374 allocs/op
+BenchmarkSettledKeys1M-16                 	      26	  41639350 ns/op	 5326712 B/op	     360 allocs/op
+BenchmarkSettledKeys1M-16                 	      22	  46632536 ns/op	 6107534 B/op	     425 allocs/op
+BenchmarkSettledKeys1M-16                 	      26	  40077365 ns/op	 5322513 B/op	     360 allocs/op
+BenchmarkSettledKeys1M-16                 	      24	  43080942 ns/op	 5684589 B/op	     390 allocs/op
+BenchmarkMarkSuspectAll1M-16              	 1000000	      1140 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMarkSuspectAll1M-16              	 1000000	      1173 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMarkSuspectAll1M-16              	 1000000	      1115 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMarkSuspectAll1M-16              	 1000000	      1113 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMarkSuspectAll1M-16              	  962632	      1146 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMarkSuspectAll1M-16              	  972770	      1121 ns/op	       0 B/op	       0 allocs/op
+BenchmarkOracleMemory1M-16                	       1	2231991700 ns/op	       655.8 MiB/1Mkeys	806489680 B/op	 5018825 allocs/op
+BenchmarkOracleMemory1M-16                	       1	2228720400 ns/op	       655.7 MiB/1Mkeys	806216752 B/op	 5018805 allocs/op
+BenchmarkOracleMemory1M-16                	       1	2298107700 ns/op	       655.8 MiB/1Mkeys	806489840 B/op	 5018826 allocs/op
+BenchmarkOracleMemory1M-16                	       1	2266216300 ns/op	       655.7 MiB/1Mkeys	806326016 B/op	 5018814 allocs/op
+BenchmarkOracleMemory1M-16                	       1	2306210800 ns/op	       655.7 MiB/1Mkeys	806325888 B/op	 5018813 allocs/op
+BenchmarkOracleMemory1M-16                	       1	2264614800 ns/op	       655.9 MiB/1Mkeys	806598992 B/op	 5018834 allocs/op
+BenchmarkOracleApplyLargeMemberSets/members=1-16         	 2174995	       557.3 ns/op	      20 B/op	       1 allocs/op
+BenchmarkOracleApplyLargeMemberSets/members=1-16         	 2033965	       544.8 ns/op	      20 B/op	       1 allocs/op
+BenchmarkOracleApplyLargeMemberSets/members=1-16         	 2238708	       568.7 ns/op	      20 B/op	       1 allocs/op
+BenchmarkOracleApplyLargeMemberSets/members=1-16         	 2077760	       585.2 ns/op	      20 B/op	       1 allocs/op
+BenchmarkOracleApplyLargeMemberSets/members=1-16         	 1887414	       642.4 ns/op	      21 B/op	       1 allocs/op
+BenchmarkOracleApplyLargeMemberSets/members=1-16         	 2014318	       547.6 ns/op	      20 B/op	       1 allocs/op
+BenchmarkOracleApplyLargeMemberSets/members=10-16        	 1263564	       923.2 ns/op	      23 B/op	       1 allocs/op
+BenchmarkOracleApplyLargeMemberSets/members=10-16        	 1227903	       921.3 ns/op	      24 B/op	       1 allocs/op
+BenchmarkOracleApplyLargeMemberSets/members=10-16        	 1319498	       932.0 ns/op	      23 B/op	       1 allocs/op
+BenchmarkOracleApplyLargeMemberSets/members=10-16        	 1316376	       915.3 ns/op	      23 B/op	       1 allocs/op
+BenchmarkOracleApplyLargeMemberSets/members=10-16        	 1324890	       914.6 ns/op	      23 B/op	       1 allocs/op
+BenchmarkOracleApplyLargeMemberSets/members=10-16        	 1142781	       952.1 ns/op	      24 B/op	       1 allocs/op
+BenchmarkOracleApplyLargeMemberSets/members=100-16       	  262646	      4244 ns/op	      56 B/op	       1 allocs/op
+BenchmarkOracleApplyLargeMemberSets/members=100-16       	  266124	      4198 ns/op	      56 B/op	       1 allocs/op
+BenchmarkOracleApplyLargeMemberSets/members=100-16       	  263524	      4389 ns/op	      56 B/op	       1 allocs/op
+BenchmarkOracleApplyLargeMemberSets/members=100-16       	  229740	      4452 ns/op	      62 B/op	       1 allocs/op
+BenchmarkOracleApplyLargeMemberSets/members=100-16       	  273848	      4130 ns/op	      55 B/op	       1 allocs/op
+BenchmarkOracleApplyLargeMemberSets/members=100-16       	  273870	      4487 ns/op	      55 B/op	       1 allocs/op
+PASS
+ok  	github.com/nabrahma/driftwatch/pkg/oracle	277.383s
+
+--- github.com/nabrahma/driftwatch/pkg/projection ---
+goos: windows
+goarch: amd64
+pkg: github.com/nabrahma/driftwatch/pkg/projection
+cpu: AMD Ryzen 7 6800HS with Radeon Graphics         
+BenchmarkProjectionApply-16             	 3433692	       352.3 ns/op	     256 B/op	       2 allocs/op
+BenchmarkProjectionApply-16             	 3452953	       473.1 ns/op	     256 B/op	       2 allocs/op
+BenchmarkProjectionApply-16             	 2057559	       561.9 ns/op	     256 B/op	       2 allocs/op
+BenchmarkProjectionApply-16             	 2038962	       552.1 ns/op	     256 B/op	       2 allocs/op
+BenchmarkProjectionApply-16             	 2164461	       572.8 ns/op	     256 B/op	       2 allocs/op
+BenchmarkProjectionApply-16             	 2225599	       560.7 ns/op	     256 B/op	       2 allocs/op
+BenchmarkProjectionApplyTemplated-16    	  637273	      1908 ns/op	     521 B/op	       8 allocs/op
+BenchmarkProjectionApplyTemplated-16    	  671046	      1891 ns/op	     521 B/op	       8 allocs/op
+BenchmarkProjectionApplyTemplated-16    	  666222	      1961 ns/op	     521 B/op	       8 allocs/op
+BenchmarkProjectionApplyTemplated-16    	  670862	      1893 ns/op	     521 B/op	       8 allocs/op
+BenchmarkProjectionApplyTemplated-16    	  644641	      1927 ns/op	     521 B/op	       8 allocs/op
+BenchmarkProjectionApplyTemplated-16    	  639882	      1931 ns/op	     521 B/op	       8 allocs/op
+BenchmarkProjectionApplyScalar-16       	16259082	        66.72 ns/op	      16 B/op	       1 allocs/op
+BenchmarkProjectionApplyScalar-16       	18387535	        66.81 ns/op	      16 B/op	       1 allocs/op
+BenchmarkProjectionApplyScalar-16       	19575568	        67.84 ns/op	      16 B/op	       1 allocs/op
+BenchmarkProjectionApplyScalar-16       	18582236	        66.56 ns/op	      16 B/op	       1 allocs/op
+BenchmarkProjectionApplyScalar-16       	18930609	        66.46 ns/op	      16 B/op	       1 allocs/op
+BenchmarkProjectionApplyScalar-16       	16767316	        65.44 ns/op	      16 B/op	       1 allocs/op
+BenchmarkProjectionApplyCounter-16      	30810152	        39.91 ns/op	       0 B/op	       0 allocs/op
+BenchmarkProjectionApplyCounter-16      	30402144	        38.63 ns/op	       0 B/op	       0 allocs/op
+BenchmarkProjectionApplyCounter-16      	30582130	        39.93 ns/op	       0 B/op	       0 allocs/op
+BenchmarkProjectionApplyCounter-16      	29639728	        39.54 ns/op	       0 B/op	       0 allocs/op
+BenchmarkProjectionApplyCounter-16      	33247258	        36.77 ns/op	       0 B/op	       0 allocs/op
+BenchmarkProjectionApplyCounter-16      	31217887	        39.18 ns/op	       0 B/op	       0 allocs/op
+BenchmarkProjectionApplyLargeSet/members=10-16         	  897550	      1290 ns/op	     504 B/op	       4 allocs/op
+BenchmarkProjectionApplyLargeSet/members=10-16         	 1000000	      1276 ns/op	     504 B/op	       4 allocs/op
+BenchmarkProjectionApplyLargeSet/members=10-16         	  988491	      1259 ns/op	     504 B/op	       4 allocs/op
+BenchmarkProjectionApplyLargeSet/members=10-16         	  957181	      1267 ns/op	     504 B/op	       4 allocs/op
+BenchmarkProjectionApplyLargeSet/members=10-16         	  975592	      1293 ns/op	     504 B/op	       4 allocs/op
+BenchmarkProjectionApplyLargeSet/members=10-16         	  810859	      1344 ns/op	     504 B/op	       4 allocs/op
+BenchmarkProjectionApplyLargeSet/members=100-16        	  167904	      7679 ns/op	    3544 B/op	       4 allocs/op
+BenchmarkProjectionApplyLargeSet/members=100-16        	  157089	      7708 ns/op	    3544 B/op	       4 allocs/op
+BenchmarkProjectionApplyLargeSet/members=100-16        	  150116	      7898 ns/op	    3544 B/op	       4 allocs/op
+BenchmarkProjectionApplyLargeSet/members=100-16        	  141354	      7564 ns/op	    3544 B/op	       4 allocs/op
+BenchmarkProjectionApplyLargeSet/members=100-16        	  157551	      7760 ns/op	    3544 B/op	       4 allocs/op
+BenchmarkProjectionApplyLargeSet/members=100-16        	  153943	      7741 ns/op	    3544 B/op	       4 allocs/op
+BenchmarkProjectionApplyLargeSet/members=1000-16       	   13312	     88996 ns/op	   54656 B/op	       6 allocs/op
+BenchmarkProjectionApplyLargeSet/members=1000-16       	   13202	     99516 ns/op	   54656 B/op	       6 allocs/op
+BenchmarkProjectionApplyLargeSet/members=1000-16       	   12870	     95464 ns/op	   54656 B/op	       6 allocs/op
+BenchmarkProjectionApplyLargeSet/members=1000-16       	   12774	     94607 ns/op	   54656 B/op	       6 allocs/op
+BenchmarkProjectionApplyLargeSet/members=1000-16       	   13220	     90749 ns/op	   54656 B/op	       6 allocs/op
+BenchmarkProjectionApplyLargeSet/members=1000-16       	   13822	     89322 ns/op	   54656 B/op	       6 allocs/op
+PASS
+ok  	github.com/nabrahma/driftwatch/pkg/projection	64.547s
+
+--- github.com/nabrahma/driftwatch/pkg/seqtrack ---
+goos: windows
+goarch: amd64
+pkg: github.com/nabrahma/driftwatch/pkg/seqtrack
+cpu: AMD Ryzen 7 6800HS with Radeon Graphics         
+BenchmarkSeqTrackObserve-16                  	45339820	        26.98 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSeqTrackObserve-16                  	45953241	        31.82 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSeqTrackObserve-16                  	26152678	        49.85 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSeqTrackObserve-16                  	24233024	        47.59 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSeqTrackObserve-16                  	23546910	        51.14 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSeqTrackObserve-16                  	25679763	        47.89 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSeqTrackObserveManyPublishers-16    	20091180	        62.88 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSeqTrackObserveManyPublishers-16    	20022859	        59.47 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSeqTrackObserveManyPublishers-16    	19461626	        63.58 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSeqTrackObserveManyPublishers-16    	20223980	        60.25 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSeqTrackObserveManyPublishers-16    	20213623	        60.85 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSeqTrackObserveManyPublishers-16    	20386978	        60.92 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSeqTrackObserveWithGaps-16          	  623839	      2229 ns/op	      64 B/op	       1 allocs/op
+BenchmarkSeqTrackObserveWithGaps-16          	  584342	      2278 ns/op	      64 B/op	       1 allocs/op
+BenchmarkSeqTrackObserveWithGaps-16          	  621081	      2272 ns/op	      64 B/op	       1 allocs/op
+BenchmarkSeqTrackObserveWithGaps-16          	  620038	      2180 ns/op	      64 B/op	       1 allocs/op
+BenchmarkSeqTrackObserveWithGaps-16          	  542938	      2298 ns/op	      64 B/op	       1 allocs/op
+BenchmarkSeqTrackObserveWithGaps-16          	  595740	      2296 ns/op	      64 B/op	       1 allocs/op
+BenchmarkGapSetAdd-16                        	  640183	      2114 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGapSetAdd-16                        	  682543	      2069 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGapSetAdd-16                        	  674277	      2171 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGapSetAdd-16                        	  646861	      2145 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGapSetAdd-16                        	  635787	      2147 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGapSetAdd-16                        	  703242	      2104 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGapSetContains-16                   	21268072	        56.92 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGapSetContains-16                   	22144184	        55.73 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGapSetContains-16                   	20733588	        57.21 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGapSetContains-16                   	21245066	        55.81 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGapSetContains-16                   	20021254	        56.39 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGapSetContains-16                   	23083981	        56.29 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/nabrahma/driftwatch/pkg/seqtrack	41.428s
+
+--- github.com/nabrahma/driftwatch/pkg/target ---
+goos: windows
+goarch: amd64
+pkg: github.com/nabrahma/driftwatch/pkg/target
+cpu: AMD Ryzen 7 6800HS with Radeon Graphics         
+BenchmarkGetMany500-16        	      91	  11992101 ns/op	     23984 ns/key	  273293 B/op	    9527 allocs/op
+BenchmarkGetMany500-16        	     100	  24788297 ns/op	     49577 ns/key	  273236 B/op	    9527 allocs/op
+BenchmarkGetMany500-16        	      36	  32156764 ns/op	     64313 ns/key	  274774 B/op	    9533 allocs/op
+BenchmarkGetMany500-16        	      40	  27525092 ns/op	     55050 ns/key	  274564 B/op	    9531 allocs/op
+BenchmarkGetMany500-16        	      43	  32887612 ns/op	     65775 ns/key	  274242 B/op	    9530 allocs/op
+BenchmarkGetMany500-16        	      32	  33046975 ns/op	     66094 ns/key	  275002 B/op	    9534 allocs/op
+BenchmarkGetMany500Sets-16    	      34	  34570897 ns/op	     69142 ns/key	  467542 B/op	   13036 allocs/op
+BenchmarkGetMany500Sets-16    	      31	  34429052 ns/op	     68858 ns/key	  467875 B/op	   13037 allocs/op
+BenchmarkGetMany500Sets-16    	      32	  33428469 ns/op	     66857 ns/key	  467768 B/op	   13037 allocs/op
+BenchmarkGetMany500Sets-16    	      33	  34481124 ns/op	     68962 ns/key	  467666 B/op	   13037 allocs/op
+BenchmarkGetMany500Sets-16    	      34	  32964665 ns/op	     65929 ns/key	  467743 B/op	   13037 allocs/op
+BenchmarkGetMany500Sets-16    	      31	  34392532 ns/op	     68785 ns/key	  467923 B/op	   13038 allocs/op
+BenchmarkReadMany500-16       	      32	  32252838 ns/op	  250368 B/op	    9533 allocs/op
+BenchmarkReadMany500-16       	      37	  32897051 ns/op	  250086 B/op	    9531 allocs/op
+BenchmarkReadMany500-16       	      36	  31869944 ns/op	  250206 B/op	    9532 allocs/op
+BenchmarkReadMany500-16       	      34	  32256212 ns/op	  250166 B/op	    9532 allocs/op
+BenchmarkReadMany500-16       	      33	  32977994 ns/op	  250341 B/op	    9533 allocs/op
+BenchmarkReadMany500-16       	      32	  32760347 ns/op	  250382 B/op	    9533 allocs/op
+BenchmarkScan1M-16            	       1	1661712500 ns/op	      1662 ns/key	294593704 B/op	 3003393 allocs/op
+BenchmarkScan1M-16            	       1	1805459800 ns/op	      1805 ns/key	294601544 B/op	 3003410 allocs/op
+BenchmarkScan1M-16            	       1	1788341800 ns/op	      1788 ns/key	294601520 B/op	 3003431 allocs/op
+BenchmarkScan1M-16            	       1	1766157000 ns/op	      1766 ns/key	294600152 B/op	 3003420 allocs/op
+BenchmarkScan1M-16            	       1	1780044800 ns/op	      1780 ns/key	294603424 B/op	 3003463 allocs/op
+BenchmarkScan1M-16            	       1	1777279800 ns/op	      1777 ns/key	294601608 B/op	 3003428 allocs/op
+BenchmarkMemoryGet-16         	 2200590	       566.1 ns/op	     256 B/op	       2 allocs/op
+BenchmarkMemoryGet-16         	 2029065	       557.8 ns/op	     256 B/op	       2 allocs/op
+BenchmarkMemoryGet-16         	 2022931	       536.1 ns/op	     256 B/op	       2 allocs/op
+BenchmarkMemoryGet-16         	 2209750	       559.2 ns/op	     256 B/op	       2 allocs/op
+BenchmarkMemoryGet-16         	 2194750	       568.0 ns/op	     256 B/op	       2 allocs/op
+BenchmarkMemoryGet-16         	 2391345	       550.9 ns/op	     256 B/op	       2 allocs/op
+PASS
+ok  	github.com/nabrahma/driftwatch/pkg/target	65.758s
+

@@ -58,6 +58,23 @@ report=$(benchstat "$BASE" "$CURRENT" 2>&1 || true)
 echo "$report"
 echo
 
+# Enough samples to compare at all, checked before the verdict rather than
+# after. benchstat needs six runs of each benchmark to put a confidence interval
+# on a difference; with fewer it prints "~" against every row and a percentage
+# only against the geomean. A gate reading that would find no per-benchmark
+# regression and report success, having compared nothing - the same failure the
+# test cache produced, one layer up. So it says so instead.
+if grep -q 'need >= [0-9]* samples' <<<"$report"; then
+	echo "verify-bench-regression: not enough samples to compare." >&2
+	echo >&2
+	echo "benchstat cannot distinguish a regression from noise with one run of" >&2
+	echo "each benchmark, so this comparison would pass whatever the numbers" >&2
+	echo "said. Regenerate with repetitions:" >&2
+	echo >&2
+	echo "    make bench BENCHCOUNT=6" >&2
+	exit 1
+fi
+
 # benchstat's table carries the delta in a column that reads like "+23.45%" or
 # "~". Rows are grouped by unit — sec/op, B/op, allocs/op — announced in a
 # header line, so which rule applies depends on which group the row is in.
@@ -69,6 +86,12 @@ verdict=$(printf '%s\n' "$report" | awk '
 	/sec\/op/   { unit = "time";   next }
 	/allocs\/op/{ unit = "allocs"; next }
 	/B\/op/     { unit = "bytes";  next }
+
+	# geomean is an aggregate of the rows above it, so one benchmark regressing
+	# shows up twice: under its own name and again here. Named benchmarks are
+	# what an engineer can act on, so the summary row is skipped rather than
+	# reported as though it were one of them.
+	$1 == "geomean" { next }
 
 	# A delta column: a signed percentage. "~" means benchstat could not
 	# distinguish the two, which is a pass under both rules.

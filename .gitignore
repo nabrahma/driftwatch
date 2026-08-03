@@ -39,3 +39,8 @@ deploy/demo/rules.generated.yaml
 # committed: a dump is several hundred kilobytes and only ever describes one
 # run of one cluster.
 /test/e2e/_artifacts/
+
+# `make bench` output. The committed baselines beside it are the durable
+# artefact; current.txt is whatever the last run produced and differs on every
+# machine, so committing it would make every benchmark run a diff.
+docs/benchmarks/current.txt

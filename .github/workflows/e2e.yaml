@@ -93,6 +93,43 @@ jobs:
             fi
           done
 
+  # §16.5, against real Redis 6 and 7. This job existed as a Makefile target and
+  # a passing test file that no workflow ever ran, which is the same as not
+  # having it: every finding in Phase 2 was a place where miniredis and a real
+  # server disagreed, and a suite that only runs locally catches those only when
+  # somebody remembers to look.
+  #
+  # No service containers. The suite drives testcontainers-go and starts both
+  # versions itself, so declaring them here would start four servers and test
+  # two. Docker is already present on ubuntu-latest, which is the only thing it
+  # needs.
+  #
+  # Here rather than in ci.yaml for the same reason the e2e job is: it wants a
+  # working Docker daemon and pulls images, and a registry hiccup should not
+  # block a documentation change.
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: report the versions under test
+        # Printed rather than assumed. When this job fails on one version and
+        # not the other, the first question is which server was actually
+        # running, and the answer should not require reading the test source.
+        run: |
+          docker version --format 'Docker {{.Server.Version}}'
+          grep -A4 'redisVersions = ' pkg/target/redis_integration_test.go
+
+      - name: integration
+        run: make test-integration
+
   # Wire compatibility with real libzmq (§16.6). Its own job because it needs a
   # Python toolchain and nothing else in the repository does, and because it
   # takes three seconds — there is no reason for it to wait behind a cluster.
