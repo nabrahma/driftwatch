@@ -9,7 +9,7 @@ wrong, with the evidence that proves it.
 One entry per finding, **newest first**, in this form:
 
 ```markdown
-## D-000 — One-line statement of the surprising behaviour
+## D-000 — One-line statement of the surprising behavior
 
 **Found:** Phase N, while doing X.
 
@@ -27,6 +27,65 @@ One entry per finding, **newest first**, in this form:
 Rules, from §23 A11: every entry describes something that actually happened, and
 every entry links to a real captured file in `docs/evidence/`. Nothing is
 written here in anticipation.
+
+---
+
+## D-030, The e2e materializer exited when the publisher was rescheduled, so the scenario asserting the store stayed correct was wrong about its own fixture
+
+**Found:** Phase 9, on the first of five attempted consecutive clean e2e runs.
+E7 was the only failure in 34 specs.
+
+**What happened:** E7 deletes the publisher pod and asserts driftwatch
+converges back to zero divergence, on the stated premise that "the store was
+written correctly throughout — the materializer never stopped".
+
+It had stopped. The harness materializer returned its receive error, which
+ended the process, which the kubelet answered by restarting the pod. For that
+whole window nothing was writing to Redis while driftwatch, which stays
+connected, kept applying events. The pod list makes the two simultaneous:
+
+```text
+NAME                             READY  STATUS   RESTARTS       AGE
+materializer-667f485b76-x59zn    1/1    Running  1 (19s ago)    36s
+publisher-78f8bbd64d-5htt8       1/1    Running  0              19s
+```
+
+The resulting divergence is real, and driftwatch reporting it is correct
+behavior: `drift=122`, with `tracked=2654` against `targetKeys=1615`. The
+scenario was asserting convergence to zero while its own fixture guaranteed a
+hole in the store.
+
+Reconnecting is only half of it. The endpoint is a Service DNS name and the
+replacement pod comes back on a different address, so a socket that resolved
+once at startup reconnects to an IP with nothing listening on it. That is
+D-011, which driftwatch hit in `pkg/source` and fixed there — the harness had
+the same bug, and nothing had exercised it because E7 is the only scenario that
+reschedules a publisher.
+
+**Why it matters:** It had never failed, and the reason it had never failed is
+the interesting part. Under the keysetOwnership workload every event is `add`
+of the same member to the same key, which is idempotent, so an event missed
+during the gap changes nothing observable unless it is a key's first touch. At
+1,200 keys and 800/sec the keyspace was written out several times over before
+the restart, leaving no first touches to miss. Resizing the scenario to a
+20-second cycle so it cleared the settlement window left most of the keyspace
+untouched at the moment of the restart, and the bug became visible the first
+time the scenario was capable of seeing it.
+
+That is the same shape as D-027: a workload idempotent enough to hide a real
+fault, in a scenario that reads as though it is testing for one. A green run
+proves nothing about faults the workload cannot express, and neither the test
+nor the fixture says which those are.
+
+**Fix:** The materializer reconnects rather than exiting, building a fresh
+socket per attempt so the Service name is re-resolved. Downtime goes from a pod
+restart to roughly 250ms, and any hole heals within one cycle. The status
+endpoint now reports a reconnect count, so a scenario that wants to know
+whether its fixture stayed up can ask instead of assuming.
+
+**Evidence:** `docs/evidence/D-030-materializer-died-on-publisher-restart.txt`
+
+**Regression test:** `test/e2e: E7 PublisherRestart converges back to zero divergence`
 
 ---
 
@@ -238,7 +297,7 @@ Seventeen hours, across four suite runs and three separate fixes.
 
 **Why it matters:** `make e2e-reuse` is the documented fast-iteration path, 
 the one someone reaches for precisely when they are debugging. It presents a
-stale binary's behaviour as the current one, and the failure mode is the most
+stale binary's behavior as the current one, and the failure mode is the most
 expensive possible: **a fix that did not work.**
 
 So the search moves on. The next hypothesis is wrong too, because it is also
@@ -494,7 +553,7 @@ that dropped the right *number* of the wrong messages.
 **Why it matters:** driftwatch's entire input path depends on this library
 reading what vLLM's libzmq-backed publishers emit. Without this test that is an
 assumption; ADR-0001 would be a bet rather than a decision. It also means the
-prefix-matching behaviour is pinned: an operator who sets `topics: ["kv"]`
+prefix-matching behavior is pinned: an operator who sets `topics: ["kv"]`
 expecting an exact match will receive `kv-events`, `kv-cache` and anything else
 starting with those two letters, and that is ZMQ's semantics rather than
 driftwatch's to change.
@@ -877,7 +936,7 @@ And the collapsed drop reasons send someone to the serializer when the real
 answer is that a producer started emitting an event type nobody configured.
 
 **Why the name tests were not enough:** they assert the contract's shape. §15
-asserts its behaviour, each of these was found by the row that names the value,
+asserts its behavior, each of these was found by the row that names the value,
 not the metric.
 
 **Fix:** `decodeReason` maps the codec's typed errors onto the §12 reasons;
@@ -1117,7 +1176,7 @@ that would be genuinely hard to diagnose, a publisher mysteriously slowing down
 whenever the monitoring is running.
 
 It is also exactly the class of finding §8.1 asked for in advance: it chose the
-pure-Go binding over cgo and required any wire or behavioural gap to be recorded
+pure-Go binding over cgo and required any wire or behavioral gap to be recorded
 rather than assumed away.
 
 **Fix:** enforce the bound in driftwatch, where it can be counted. `RecvHWM`
@@ -1332,7 +1391,7 @@ keeps testing driftwatch rather than tracking its dependency.
 **What happened:** M8 says a `SCAN` cursor invalidated by a `FLUSHDB`
 mid-iteration causes Redis to restart the cursor at 0, and that the loop must be
 detected and aborted "rather than spinning forever". I built the detection, then
-went to reproduce the behaviour it was defending against.
+went to reproduce the behavior it was defending against.
 
 It does not reproduce. Ten thousand keys, `COUNT 100`, the keyspace destroyed
 at various points, including flushed and refilled on every single call, and
@@ -1365,7 +1424,7 @@ Dragonfly, a managed emulation, rather than against Redis itself, and aborting
 a legitimate scan on a single unexpected repeat would be a worse failure than
 the one being prevented. The 1,000,000-call cap remains as the backstop.
 
-The early-termination behaviour is documented on `redisIterator` so the next
+The early-termination behavior is documented on `redisIterator` so the next
 person does not go looking for the hang either.
 
 **Evidence:** `docs/evidence/D-006-scan-flushdb.txt`

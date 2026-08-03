@@ -1,0 +1,49 @@
+Integration suite against real Redis 6 and 7 (PRD §16.5)
+
+Captured 2026-08-03 with 'make test-integration'. testcontainers-go starts
+redis:6.2-alpine and redis:7.2-alpine; every test runs against both, because
+the version differences are the point.
+
+This level existed as a Makefile target and a passing test file that no
+workflow ran. It now runs in e2e.yaml as its own job.
+
+--------------------------------------------------------------------------
+Result
+--------------------------------------------------------------------------
+
+ok  	github.com/nabrahma/driftwatch/pkg/target	25.472s
+
+Every case, both versions:
+
+    --- PASS: TestRedisIntegration_HealthParsesBothVersions/redis7 (2.32s)
+    --- PASS: TestRedisIntegration_HealthParsesBothVersions/redis6 (2.42s)
+    --- PASS: TestRedisIntegration_HealthReportsEvictionsAndExpiries/redis6 (1.50s)
+    --- PASS: TestRedisIntegration_HealthReportsEvictionsAndExpiries/redis7 (1.61s)
+    --- PASS: TestRedisIntegration_ScanOver100kKeys/redis7 (1.95s)
+    --- PASS: TestRedisIntegration_ScanOver100kKeys/redis6 (2.06s)
+    --- PASS: TestRedisIntegration_ScanSurvivesAFlushMidIteration/redis7 (1.47s)
+    --- PASS: TestRedisIntegration_ScanSurvivesAFlushMidIteration/redis6 (1.58s)
+    --- PASS: TestRedisIntegration_ScanIsBoundedWhenTheKeyspaceChurns/redis6 (1.50s)
+    --- PASS: TestRedisIntegration_ScanIsBoundedWhenTheKeyspaceChurns/redis7 (1.59s)
+    --- PASS: TestRedisIntegration_WrongType/redis6 (1.44s)
+        --- PASS: TestRedisIntegration_WrongType/redis6/a_set_read_as_a_scalar (0.01s)
+        --- PASS: TestRedisIntegration_WrongType/redis6/a_string_read_as_a_set (0.00s)
+        --- PASS: TestRedisIntegration_WrongType/redis6/a_hash_read_as_a_set (0.00s)
+        --- PASS: TestRedisIntegration_WrongType/redis6/a_hash_read_as_a_scalar (0.00s)
+    --- PASS: TestRedisIntegration_WrongType/redis7 (1.55s)
+        --- PASS: TestRedisIntegration_WrongType/redis7/a_set_read_as_a_scalar (0.01s)
+        --- PASS: TestRedisIntegration_WrongType/redis7/a_string_read_as_a_set (0.00s)
+        --- PASS: TestRedisIntegration_WrongType/redis7/a_hash_read_as_a_set (0.00s)
+        --- PASS: TestRedisIntegration_WrongType/redis7/a_hash_read_as_a_scalar (0.00s)
+    --- PASS: TestRedisIntegration_EmptySetReadsAsAbsent/redis6 (1.40s)
+    --- PASS: TestRedisIntegration_EmptySetReadsAsAbsent/redis7 (1.53s)
+    --- PASS: TestRedisIntegration_TTL/redis6 (1.46s)
+    --- PASS: TestRedisIntegration_TTL/redis7 (1.57s)
+    --- PASS: TestRedisIntegration_PipelinedBatchReads/redis6 (1.49s)
+    --- PASS: TestRedisIntegration_PipelinedBatchReads/redis7 (1.58s)
+    --- PASS: TestRedisIntegration_TheHookRefusesWritesAgainstARealServer/redis6 (1.49s)
+    --- PASS: TestRedisIntegration_TheHookRefusesWritesAgainstARealServer/redis7 (1.61s)
+    --- PASS: TestRedisIntegration_ScanMatchesKeysWithPatternMetacharacters/redis7 (1.55s)
+    --- PASS: TestRedisIntegration_ScanMatchesKeysWithPatternMetacharacters/redis6 (1.64s)
+    --- PASS: TestRedisIntegration_ScanIsInterruptibleOnALargeKeyspace/redis7 (1.58s)
+    --- PASS: TestRedisIntegration_ScanIsInterruptibleOnALargeKeyspace/redis6 (1.68s)

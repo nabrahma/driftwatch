@@ -287,22 +287,39 @@ func TestReporting_AnExtrasScanDoesNotClaimTheTargetIsUnreachable(t *testing.T) 
 		"the store is up, so the sweep should have said so")
 	require.InDelta(t, 1, gaugeValue(t, reg, "driftwatch_target_reachable"), 0.001)
 
-	// Two sweep ticks first, drained before the extras tick is allowed to fire.
-	// Advancing straight past both would leave the Run loop's select free to
-	// take them in either order, and a sweep landing last would hide exactly
-	// the overwrite this is about.
-	clk.Advance(15 * time.Second)
-	require.Eventually(t, func() bool {
-		return labelledValue(t, reg, "driftwatch_sweeps_total",
-			"kind", "oracle_to_target") >= 3
-	}, eventuallyFor, eventuallyPoll, "the sweep ticks never ran")
+	// One tick per Advance, each one drained before the next is allowed to
+	// fire, and the arithmetic is written out because getting it wrong is
+	// silent.
+	//
+	// Run's tickers are at t=10,20,30... for sweeps and t=25,50... for extras.
+	// The clock is at t=5. Crossing two boundaries in a single Advance drops
+	// one of the ticks — a fake ticker models time.Ticker, whose channel holds
+	// one tick and discards the rest rather than queueing them — so a test that
+	// jumped straight to t=20 saw one sweep or two depending on how quickly the
+	// Run goroutine got back to its select. That is a flake, and it is the same
+	// mistake this whole file is about: reading a number without checking which
+	// pass produced it.
+	//
+	// It also matters that the extras tick lands last and alone. A sweep
+	// arriving after it would re-measure the target and clear the state under
+	// test, and the assertion would pass whether or not the defect was there.
+	advanceOneTick := func(by time.Duration, metric, kind string, want int) {
+		t.Helper()
+		clk.Advance(by)
+		require.Eventually(t, func() bool {
+			return labelledValue(t, reg, metric, "kind", kind) >= want
+		}, eventuallyFor, eventuallyPoll,
+			"the %s tick never ran; %s reached %d, wanted %d",
+			kind, metric, labelledValue(t, reg, metric, "kind", kind), want)
+	}
 
-	// Now the extras tick, alone.
-	clk.Advance(5 * time.Second)
-	require.Eventually(t, func() bool {
-		return labelledValue(t, reg, "driftwatch_sweeps_total",
-			"kind", "target_to_oracle") > 0
-	}, eventuallyFor, eventuallyPoll, "the extras scan never ran")
+	// t=5 -> t=10, the first sweep tick. Two sweeps now: this and SweepNow.
+	advanceOneTick(5*time.Second, "driftwatch_sweeps_total", "oracle_to_target", 2)
+	// t=10 -> t=20, the second.
+	advanceOneTick(10*time.Second, "driftwatch_sweeps_total", "oracle_to_target", 3)
+
+	// t=20 -> t=25, the extras tick, alone.
+	advanceOneTick(5*time.Second, "driftwatch_sweeps_total", "target_to_oracle", 1)
 
 	assert.True(t, c.Status().TargetReachable,
 		"the extras scan does not measure reachability, so it must not report "+

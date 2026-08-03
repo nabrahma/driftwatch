@@ -261,3 +261,34 @@ documented, fault matrix complete), the dashboard check, and the fault matrix.
 The heavy levels are separate and each needs something: Docker for integration
 and soak, envtest binaries for the controller suite, Kind for e2e, and
 python3-zmq for interop.
+
+### Which of them CI actually runs
+
+A test level that exists and is never run is worth what an unrun test is worth,
+so this is the honest mapping rather than the aspirational one.
+
+| Level | Workflow | Job |
+|---|---|---|
+| Unit, property, race, coverage floors | `ci.yaml` | `unit` |
+| Fault matrix | `ci.yaml` | `faults` |
+| Fuzz, 60s | `ci.yaml` | `fuzz` |
+| Controller, envtest | `ci.yaml` | `controller` |
+| Benchmarks and the §16.8 gates | `ci.yaml` | `bench` |
+| Integration, real Redis 6 and 7 | `e2e.yaml` | `integration` |
+| End to end, Kind | `e2e.yaml` | `e2e` |
+| Interop, real libzmq | `e2e.yaml` | `interop` |
+| Soak, 60 minutes | not run in CI | by hand, `make soak` |
+
+The soak is deliberate: an hour of runner time on every push buys less than
+running it before a release does. It is the one level whose evidence can go
+stale without CI noticing, so `docs/evidence/S2-soak-*` carries the date it was
+captured and should be re-run when the pipeline changes.
+
+The `bench` job enforces §16.8 in two parts. `hack/verify-benchmarks.sh` asserts
+the absolute targets, which hold on any machine and back the numbers in the
+README. `hack/verify-bench-regression.sh` runs benchstat against the committed
+baseline and fails on any allocation increase, or on a time regression past 20%
+that benchstat finds significant across six repetitions. Allocations are
+enforced strictly because allocs/op is counted rather than timed and does not
+move under load; times are read through a confidence interval because on a
+shared runner they very much do.

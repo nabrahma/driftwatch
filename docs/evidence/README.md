@@ -39,6 +39,7 @@ Each of these is the captured output for one entry in
 | `D-027-workload-forbade-the-assertion.txt` | E3 asserted on a divergence its own idempotent workload made impossible to produce | `test/e2e` |
 | `D-028-ticker-pacing-loses-rate.txt` | A per-event ticker published at 24% of its requested rate on a loaded two-core node | `test/e2e` |
 | `D-029-extras-scan-reports-health-it-never-measured.txt` | A healthy check went Degraded every extraScanInterval, because the extras pass published the zero value of a health struct it never filled in | `pkg/check` |
+| `D-030-materializer-died-on-publisher-restart.txt` | E7 asserted the store stayed correct while its own materializer exited on the publisher restart the scenario performs | `test/e2e` |
 
 Seven discoveries, D-017 through D-023, carry their reproduction inline in
 [DISCOVERIES.md](../DISCOVERIES.md) rather than as a separate capture, because
@@ -89,6 +90,8 @@ ring-buffer fill from an actual leak.
 | `fault-matrix-60-rows.txt` | Every row of the §15 fault matrix has a passing named test | `make test-fault` |
 | `fault-matrix-20-runs-no-flake.txt` | All 60 rows, 20 consecutive runs, zero flakes | `make test-fault-repeat` |
 | `interop-libzmq-both-directions.txt` | driftwatch's pure-Go ZMQ is wire-compatible with real libzmq, both directions | `make test-interop` |
+| `integration-redis-6-and-7.txt` | Every target case against real Redis 6 and 7, not miniredis | `make test-integration` |
+| `S-E2E-five-consecutive-clean-runs.txt` | Five consecutive clean `make e2e` runs on an unchanged tree, with the cache check | `make e2e` x5 |
 | `phase7-controller-suite.txt` | The controller suite against envtest | `make test-controller` |
 | `phase7-crd-validation.txt` | The CRD rejects the invalid specs it is supposed to reject | `make test-controller` |
 | `phase7-kubectl-explain.txt` | Every field's documentation reaches the CRD, so `kubectl explain` works | `make manifests` |

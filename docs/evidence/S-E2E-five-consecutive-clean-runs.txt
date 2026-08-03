@@ -1,0 +1,45 @@
+S-E2E: five consecutive clean runs of make e2e (PRD §22)
+
+Captured 2026-08-03. AMD Ryzen 7 6800HS, 16 cores, Docker Desktop on
+Windows 11, Kind v0.26.0, Go 1.25.
+
+Each run creates its own cluster, builds and loads both images, installs
+the CRD, deploys the manager, runs all eight scenarios and tears the
+cluster down. Nothing in the tree changed between them: that is what the
+criterion measures, so the script that drove it cannot edit anything.
+
+--------------------------------------------------------------------------
+Result
+--------------------------------------------------------------------------
+
+run 1: exit=0 wall=557s | Ran 34 of 34 Specs in 551.562 seconds | no summary line
+run 2: exit=0 wall=565s | Ran 34 of 34 Specs in 557.744 seconds | no summary line
+run 3: exit=0 wall=596s | Ran 34 of 34 Specs in 589.665 seconds | no summary line
+run 4: exit=0 wall=590s | Ran 34 of 34 Specs in 585.321 seconds | no summary line
+run 5: exit=0 wall=564s | Ran 34 of 34 Specs in 558.234 seconds | no summary line
+
+consec-run1  34 Passed | 0 Failed | 0 Pending | 0 Skipped
+consec-run2  34 Passed | 0 Failed | 0 Pending | 0 Skipped
+consec-run3  34 Passed | 0 Failed | 0 Pending | 0 Skipped
+consec-run4  34 Passed | 0 Failed | 0 Pending | 0 Skipped
+consec-run5  34 Passed | 0 Failed | 0 Pending | 0 Skipped
+
+Wall clock 557-596 seconds, mean 574. Suite time 551-590 seconds.
+
+--------------------------------------------------------------------------
+The cache check
+--------------------------------------------------------------------------
+
+Go replays a cached test result when the inputs have not changed, which
+for a suite that stands up a cluster means the second invocation asserts
+nothing and exits zero. An earlier attempt at this criterion produced one
+real run of 542 seconds and four replays of 55, each reporting the first
+one's duration back verbatim.
+
+Every e2e, integration, interop and soak target now passes -count=1, and
+the five runs above were checked for cache hits:
+
+  $ grep -l "(cached)" consec-run*.log
+  (no matches)
+
+Five distinct durations is the other half of that evidence.

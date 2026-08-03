@@ -1,0 +1,108 @@
+D-030: the e2e materializer exited on a publisher restart, so E7's premise
+       was false and the store really did stop being written
+
+Captured from the e2e run of 2026-08-03, run 1 of an attempted five
+consecutive clean runs. E7 was the only failure: 33 passed, 1 failed.
+
+--------------------------------------------------------------------------
+1. The failure
+--------------------------------------------------------------------------
+
+E7 PublisherRestart [It] converges back to zero divergence
+test/e2e/explain_test.go:116
+
+  [FAILED] Failed after 8.762s.
+  divergence reappeared after the restart converged
+  last status: phase=Watching drift=122 suspect=1 tracked=2654 settled=2054
+               coverage=0.2962 targetKeys=1615 applied=2304
+
+tracked 2,654 against targetKeys 1,615. driftwatch expected a thousand more
+keys than the store held.
+
+--------------------------------------------------------------------------
+2. What the pod list said, from 13-pods.txt in the failure dump
+--------------------------------------------------------------------------
+
+NAME                             READY  STATUS   RESTARTS       AGE
+materializer-667f485b76-x59zn    1/1    Running  1 (19s ago)    36s
+publisher-78f8bbd64d-5htt8       1/1    Running  0              19s
+redis-5cfb6964bf-gjphs           1/1    Running  0              36s
+
+The materializer restarted 19 seconds before the dump. The replacement
+publisher is 19 seconds old. They are the same event.
+
+--------------------------------------------------------------------------
+3. Why
+--------------------------------------------------------------------------
+
+test/e2e/cmd/e2eharness/main.go, materialize(), before the fix:
+
+        msg, err := sock.Recv()
+        if err != nil {
+                if ctx.Err() != nil {
+                        return nil
+                }
+                return fmt.Errorf("receiving: %w", err)
+        }
+
+E7 deletes the publisher pod. The connection drops, Recv returns an error,
+materialize returns it, run() prints it and exits non-zero, and the kubelet
+restarts the pod.
+
+For that whole window the store is not being written. driftwatch stays
+connected and keeps applying events, so every key first written during the
+gap exists in the oracle and not in Redis. The divergence is real and
+driftwatch is right to report it.
+
+E7's own comment states the opposite as its premise:
+
+        // The store was written correctly throughout — the materializer never
+        // stopped — so once driftwatch has caught up there is nothing to
+        // report.
+
+--------------------------------------------------------------------------
+4. Why it had never failed before
+--------------------------------------------------------------------------
+
+The scenario ran at 1,200 keys and 800 events/sec until this commit: a
+1.5-second cycle, so the keyspace was written out several times over before
+the restart.
+
+Under the keysetOwnership workload every event is `add` of the same member to
+the same key, which is idempotent. An event missed during the gap changes
+nothing observable unless it is a key's *first* touch, and after several
+complete cycles there are no first touches left to miss.
+
+Resizing E7 to 4,000 keys at 200/sec — a 20-second cycle, chosen so the cycle
+clears the settlement window — leaves most of the keyspace untouched at the
+moment of the restart. The bug became visible the first time the scenario was
+capable of seeing it.
+
+This is the same shape as D-027: a workload idempotent enough to make a real
+fault invisible.
+
+--------------------------------------------------------------------------
+5. The second half: DNS
+--------------------------------------------------------------------------
+
+Reconnecting is not enough on its own. The endpoint is a Service name:
+
+        connect := fs.String("connect", "tcp://publisher:5557", ...)
+
+The replacement pod comes back on a different address (10.244.0.10 above). A
+socket that resolved once at startup and reconnects internally goes back to an
+IP with nothing listening on it, forever.
+
+That is D-011, which driftwatch hit in pkg/source and fixed there. The harness
+had the same bug and nothing had exercised it, because E7 is the only scenario
+that reschedules a publisher.
+
+The fix builds a new socket per attempt, which is what re-resolves the name.
+
+--------------------------------------------------------------------------
+6. After the fix
+--------------------------------------------------------------------------
+
+$ make e2e-focus FOCUS='E7 PublisherRestart'
+Ran 5 of 34 Specs in 115.308 seconds
+SUCCESS! -- 5 Passed | 0 Failed | 0 Pending | 29 Skipped

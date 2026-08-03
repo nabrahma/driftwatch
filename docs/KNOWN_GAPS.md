@@ -143,72 +143,140 @@ limitation is in the test rather than hidden by it.
 
 ---
 
-## G-003, The e2e suite is green once, not the five consecutive runs §22 asks for
+## G-003, The e2e suite meets §22, at nine minutes against an eight-minute budget
 
-**Status at the v0.1.0 cut:** `make e2e` passes. **34 of 34 specs, 0 failed, 0
-skipped, in 9m14s**, on 2026-08-03. That is the first fully green run the suite
-has had, up from 20/5 at the start of Phase 9.
-
-What it is not is five of them.
+**Status at the v0.1.0 cut:** `make e2e` passes, five consecutive times, on an
+unchanged tree.
 
 ```text
-Ran 34 of 34 Specs in 553.842 seconds
-SUCCESS! -- 34 Passed | 0 Failed | 0 Pending | 0 Skipped
+run 1: exit=0 wall=557s | 34 Passed | 0 Failed | 0 Pending | 0 Skipped
+run 2: exit=0 wall=565s | 34 Passed | 0 Failed | 0 Pending | 0 Skipped
+run 3: exit=0 wall=596s | 34 Passed | 0 Failed | 0 Pending | 0 Skipped
+run 4: exit=0 wall=590s | 34 Passed | 0 Failed | 0 Pending | 0 Skipped
+run 5: exit=0 wall=564s | 34 Passed | 0 Failed | 0 Pending | 0 Skipped
 ```
 
-### What is still open
-
-§22 asks for “8 e2e scenarios pass; suite under 8 minutes; 5 consecutive clean
-runs”. One of those three is met.
+Full capture, including the cache check that makes it evidence rather than five
+identical assertions:
+[`S-E2E-five-consecutive-clean-runs.txt`](evidence/S-E2E-five-consecutive-clean-runs.txt).
 
 | §22 criterion | State |
 |---|---|
 | 8 scenarios pass | Met. All eight, all 34 specs |
-| 5 consecutive clean runs | **1 of 5.** No run has yet been repeated without a change in between |
-| Suite under 8 minutes | **9m14s.** Over by 74 seconds |
+| 5 consecutive clean runs | Met |
+| Suite under 8 minutes | **Not met. 9m17s to 9m56s** |
 
-The suite is also only measured on a 16-core developer machine and a 2-core
-GitHub runner, which have produced materially different failures from the same
-commit — see [D-028](DISCOVERIES.md). A green run on one says less about the
-other than it looks like it does.
+### The eight minutes
 
-### Why the last four scenarios took so long
+The budget is not met and will not be, and it is worth saying why rather than
+quietly moving it.
 
-Every one of the six failures resolved in the final pass was a scenario
-measuring something other than what it claimed to, and they fell into three
-kinds worth naming, because the same mistakes are easy to repeat.
+§14.5's eight minutes was written before the scenarios were sized. Sizing them
+established three constraints nobody had stated: a key cycle has to be longer
+than the settlement window or nothing settles; the oracle has to fill before
+coverage means anything, which costs a full cycle; and a fault has to stay
+observable for longer than detection takes. Those forced roughly 20-second
+cycles, and the cycles are not negotiable in the way the budget is — shortening
+them puts the scenarios back to proving nothing.
 
-**A workload that forbade the assertion.** E3 asserts that driftwatch marks
-keys suspect when its own subscription is cut. Its publisher only ever emitted
-`add` of the same member to the same key, so every event after a key’s first
-was a no-op on the store and on the oracle alike. A missed event could not
-change anything, so the divergence the scenario asserts on was impossible to
-produce. It had been failing for a reason that had nothing to do with the code
-under test. See [D-027](DISCOVERIES.md).
+The runner is not the reason. These are 16-core numbers; a 2-core GitHub runner
+was at 9m04s before the cycles were lengthened at all. Cluster creation, two
+image builds and eight fixture bring-ups dominate the total and none of them get
+faster with cores. That is also where the time should come from: reusing one
+Redis across scenarios that do not destroy it, or overlapping fixture bring-up
+with the image build. Neither is done.
 
-**Sizing that depended on luck.** Four scenarios ran with a key cycle shorter
-than their settlement window — 1.5 to 1.9 seconds against 3 — and passed because
-a uniform random key draw leaves about a fifth of the keyspace quiet at any
-instant by chance. Walking the keyspace in order, so the `keys/rate` arithmetic
-every sizing comment already assumed was actually true, removed the luck and
-left the arithmetic, which had always said nothing could settle.
+### What five runs cost, and why the number is five
 
-**A gate that gated nothing.** E3 waited on `trackedKeys` before cutting the
-subscription, to guarantee the partition landed on keys the oracle knew.
-Bootstrap is `Adopt`, so a check created against a store the publisher has
-already filled reads the whole keyspace out of Redis in seconds and satisfies
-that without a single event. Whether it did depended on how long the fixture
-took to come up — which is why the scenario passed alone and failed in a full
-suite. Both E1 and E3 now wait on `eventsApplied`.
+Six attempts. Each of the first five died on a different real defect, none of
+which a single green run would have surfaced:
 
-None of the three fails cleanly. All three read as a defect in whatever the
-assertion happened to be about.
+| What failed | What it was |
+|---|---|
+| The materializer exited when E7 rescheduled the publisher | [D-030](DISCOVERIES.md) — D-011's DNS bug, in the harness |
+| Four of five "clean runs" | Go test-cache replays; `-count=1` was missing from every target that stands up infrastructure |
+| E7's convergence assertion | Treated the first observed zero as permanent; convergence is a limit |
+| The fixture's deployment wait | The one setup step never retried, in a file whose header says all setup may be |
+| Pausing a check | Discarded the oracle. A real product bug — see below |
+| The image build | Could not survive a DNS failure resolving the base image manifest |
 
-### What it did find
+The pause one was not a test problem. `policy.paused` was read once at
+construction, so the only way to apply it was to replace the runner — and
+replacing a runner discards its oracle, which is the single thing pause exists
+to keep. `Adopt` bootstrap hid it: the rebuilt check re-read the whole keyspace
+from Redis and `trackedKeys` came straight back, so the scenario asserting
+"pauses without discarding the oracle" passed over an oracle that had been
+discarded and re-adopted from the very store it audits. It is now applied to the
+live check, and the scenario checks `eventsApplied`, which adoption cannot fake.
 
-The run that closed this gap also produced [D-029](DISCOVERIES.md), which is a
-real product defect and not a test one: a healthy check publishes
-`TargetAvailable=False` and goes `Degraded` every `extraScanInterval` — five
-minutes under the shipped default — because the extras pass reports target
-health it never measured.
+Three of the six are the same shape: **a scenario asserting something its own
+fixture could not deliver, passing anyway.** A green run says nothing about
+faults the workload cannot express, and neither the test nor the fixture says
+which those are.
+
+---
+
+## G-004, One §16.8 benchmark target is not met: batch reads allocate 7 per key against a target of 5
+
+**Status at the v0.1.0 cut:** nine of §16.8's ten targets are met and enforced by
+`hack/verify-benchmarks.sh` in CI. This is the tenth.
+
+| | |
+|---|---|
+| Target | fewer than 5 allocations per key |
+| Measured | **7.04** per key, against a real Redis |
+| Where | `BenchmarkGetMany500Real`, `pkg/sweeper`, integration tag |
+
+### The number that was there before was worse and meant less
+
+`BenchmarkGetMany500` runs against miniredis, which is a Redis server written in
+Go running in the same process. Its RESP parsing and reply construction are
+counted alongside the client's, so it reports about **19 allocations per key** —
+a figure that is mostly not driftwatch's and that no amount of work on
+driftwatch would move.
+
+§16.8 describes this benchmark as "dominated by network", which is the tell: the
+target was written about a real server, where the server's allocations happen in
+another process entirely. `BenchmarkGetMany500Real` measures it there.
+
+### Where the seven go
+
+Roughly six of them are inside go-redis, per command in the pipeline: a
+`StringCmd`, its argument slice, and the reply string. The seventh is
+driftwatch's, converting that reply string into the `[]byte` an `event.Value`
+holds.
+
+Getting under five means not using go-redis's command layer — issuing raw
+commands against a preallocated argument buffer and decoding replies directly.
+That is a rewrite against a library boundary rather than a tuning exercise, and
+it trades away the reconnect, cluster and sentinel handling that comes with the
+client.
+
+### What was done instead
+
+The read path no longer copies every result twice. `readChunk` used to allocate
+its own slice per batch which was then appended into the caller's, copying every
+`Read` — a struct carrying a byte slice and a member map — a second time. Each
+chunk now fills its own window of the final slice directly.
+
+Measured on the same benchmark, 500 keys per batch:
+
+```text
+before   1996492 ns/op   3993 ns/key   222106 B/op   3522 allocs/op
+after    1818762 ns/op   3638 ns/key   189281 B/op   3521 allocs/op
+```
+
+**15% less memory and 9% less time per key**, in the path S6 measures. It does
+not move the per-key allocation count, because what it removed was per batch
+rather than per key.
+
+### Why this is recorded rather than asserted
+
+`hack/verify-benchmarks.sh` deliberately does not assert this target. Asserting
+the miniredis number would look like enforcement while measuring the wrong
+thing, and relaxing the target to fit would be moving the goalposts quietly.
+
+Regressions are still caught: the benchstat gate fails on **any** increase in
+allocations against the committed baseline, so 7.04 cannot drift to 8 unnoticed.
+What it will not do is tell anyone this reached 5.
 

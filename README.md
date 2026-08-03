@@ -200,9 +200,14 @@ against your ring depth. ([G-001](docs/KNOWN_GAPS.md))
 
 **Redis only.** Sentinel and cluster are routed but untested.
 
-**`make e2e` is green once, not five times.** All 34 specs pass, in 9m14s. §22
-asks for five consecutive clean runs under eight minutes, and one run is one
-run. ([G-003](docs/KNOWN_GAPS.md))
+**`make e2e` takes nine minutes, against a budget of eight.** All 34 specs
+pass, five consecutive times. The budget was written before the scenarios were
+sized, and the sizing is the part that cannot move.
+([G-003](docs/KNOWN_GAPS.md))
+
+**One performance target is missed.** Batch reads allocate 7 per key against a
+target of 5. Six of the seven are inside the Redis client.
+([G-004](docs/KNOWN_GAPS.md))
 
 ---
 
@@ -215,7 +220,7 @@ scenarios**, run 20 consecutive times without a flake. A **60-minute soak**. A
 `go test ./...` finishes in under three minutes. Everything heavier sits behind a
 build tag, because a slow test command stops being run.
 
-**29 findings** are written up in [DISCOVERIES.md](docs/DISCOVERIES.md), each
+**30 findings** are written up in [DISCOVERIES.md](docs/DISCOVERIES.md), each
 with a reproduction, an evidence file and a regression test. A sequence number
 above 2^53 silently corrupted by any float64 decoder. Discarding timed-out probes
 shrinking the settlement window 12x, during an outage, exactly when it needs to
@@ -232,7 +237,7 @@ That file is the most useful thing in this repository.
 |---|---|
 | [Correctness](docs/CORRECTNESS.md) | Why the comparison is sound, and what stays undetectable |
 | [Architecture](docs/ARCHITECTURE.md) | Package boundaries, concurrency, failure policy |
-| [Discoveries](docs/DISCOVERIES.md) | 29 things that did not work the way anyone expected |
+| [Discoveries](docs/DISCOVERIES.md) | 30 things that did not work the way anyone expected |
 | [Known gaps](docs/KNOWN_GAPS.md) | The honest list |
 | [Metrics](docs/METRICS.md) | All 48, and which 8 to alert on |
 | [Operations](docs/OPERATIONS.md) | Runbook |
