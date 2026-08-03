@@ -118,6 +118,28 @@ var _ = Describe("E6 OperatorLifecycle", Ordered, func() {
 			"pausing discarded the oracle; it should stop sweeping and keep "+
 				"ingesting: %s", status.Summary())
 
+		// The same oracle, not a replacement that happens to be the same size.
+		//
+		// trackedKeys alone could not tell those apart, and for a long time it
+		// did not: pausing changed the spec, the controller replaces a runner
+		// on any spec change, and the rebuilt check re-read the whole keyspace
+		// out of Redis at bootstrap. The count came straight back and this
+		// assertion passed over an oracle that had been discarded and adopted
+		// again from the very store it is meant to be auditing. Adopted keys
+		// are skipped by the sweep until an event refreshes them, so coverage
+		// collapsed for a full key cycle — the exact cost this scenario exists
+		// to prove is not paid.
+		//
+		// eventsApplied is the number that cannot be faked by adoption. It only
+		// ever counts events this check folded in, so it resets to nearly zero
+		// when a check is replaced and keeps climbing when one is not.
+		Expect(status.EventsApplied).To(BeNumerically(">=", before.EventsApplied),
+			"eventsApplied went backwards across the pause, so this is a new "+
+				"check with a new oracle rather than the one that was paused. "+
+				"Whatever trackedKeys says was adopted from the store, not "+
+				"carried over: before=%d after=%d",
+			before.EventsApplied, status.EventsApplied)
+
 		// Paused is a working state, not a broken one. Reporting otherwise
 		// would light up every dashboard that gates on readiness the moment
 		// somebody silenced one check.

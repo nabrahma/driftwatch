@@ -43,9 +43,14 @@ const (
 const (
 	clusterCreateTimeout = 5 * time.Minute
 	imageBuildTimeout    = 10 * time.Minute
-	imageLoadTimeout     = 5 * time.Minute
-	deployTimeout        = 3 * time.Minute
-	kubectlTimeout       = 2 * time.Minute
+	// imageBuildAttempts and imageBuildRetryGap apply only to a build that
+	// failed reaching a registry. Three is enough for a DNS blip and short
+	// enough that a registry genuinely down still fails inside a minute.
+	imageBuildAttempts = 3
+	imageBuildRetryGap = 10 * time.Second
+	imageLoadTimeout   = 5 * time.Minute
+	deployTimeout      = 3 * time.Minute
+	kubectlTimeout     = 2 * time.Minute
 )
 
 // Env reads the suite's environment switches.
@@ -474,11 +479,7 @@ func buildAndLoadImages(ctx context.Context) error {
 	for _, img := range images {
 		fmt.Printf("e2e: building %s\n", img.tag)
 
-		// The build is not retried. A build failure is a compile error or a bad
-		// Dockerfile, and retrying it spends ten minutes arriving at the same
-		// message.
-		if _, err := MustRun(ctx, imageBuildTimeout,
-			"docker", "build", "-t", img.tag, "-f", img.dockerfile, root); err != nil {
+		if err := buildImage(ctx, img.tag, img.dockerfile, root); err != nil {
 			return err
 		}
 
@@ -497,6 +498,88 @@ func buildAndLoadImages(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// buildImage builds one image, retrying the registry and nothing else.
+//
+// The original reasoning for never retrying was sound and incomplete: a build
+// failure is usually a compile error or a bad Dockerfile, and retrying one of
+// those spends ten minutes arriving at the same message. What it missed is that
+// the first thing `docker build` does is resolve the base image manifest, and
+// that is a network call on every build whether or not the layers are cached.
+//
+// The fifth of five consecutive runs died there, sixty seconds in, having run
+// no specs:
+//
+//	failed to resolve source metadata for gcr.io/distroless/static-debian12:
+//	dial tcp: lookup gcr.io: no such host
+//
+// Four clean runs and then DNS blinked. That is not the suite being unstable
+// and it must not be recorded as though it were, but neither is throwing away
+// a fifty-minute streak the right answer to a name lookup.
+//
+// So the two are told apart rather than treated alike. A registry failure is
+// retried; anything else fails on the first attempt, exactly as before, because
+// the reason not to retry a compile error has not changed.
+func buildImage(ctx context.Context, tag, dockerfile, root string) error {
+	var last error
+
+	for attempt := 1; attempt <= imageBuildAttempts; attempt++ {
+		out, err := MustRun(ctx, imageBuildTimeout,
+			"docker", "build", "-t", tag, "-f", dockerfile, root)
+		if err == nil {
+			return nil
+		}
+		last = err
+
+		if !looksLikeRegistryFailure(out) {
+			return err
+		}
+		if attempt == imageBuildAttempts {
+			break
+		}
+
+		fmt.Printf("e2e: building %s could not reach the registry "+
+			"(attempt %d/%d), retrying in %s\n",
+			tag, attempt, imageBuildAttempts, imageBuildRetryGap)
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(imageBuildRetryGap):
+		}
+	}
+
+	return fmt.Errorf("building %s: the registry was unreachable on %d attempts: %w",
+		tag, imageBuildAttempts, last)
+}
+
+// looksLikeRegistryFailure reports whether a build failed reaching a registry
+// rather than compiling.
+//
+// Matched on the message because Docker offers nothing better: the exit status
+// is 1 for a DNS failure and for a syntax error alike. The list is the failures
+// actually seen or documented, not every string containing "network" — a
+// classifier that is too eager turns a real build break into three of them.
+func looksLikeRegistryFailure(output string) bool {
+	lower := strings.ToLower(output)
+	for _, phrase := range []string{
+		"no such host",
+		"failed to resolve source metadata",
+		"failed to do request",
+		"connection refused",
+		"i/o timeout",
+		"tls handshake timeout",
+		"temporary failure in name resolution",
+		"toomanyrequests",
+		"503 service unavailable",
+		"502 bad gateway",
+	} {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 // ---------------------------------------------------------------------------

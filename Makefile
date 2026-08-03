@@ -98,7 +98,7 @@ vet: ## Run go vet
 
 .PHONY: test
 test: ## Run the unit suite with the race detector and coverage
-	CGO_ENABLED=1 go test $(RACE) -covermode=atomic -coverprofile=cover.out ./...
+	CGO_ENABLED=1 go test -count=1 $(RACE) -covermode=atomic -coverprofile=cover.out ./...
 
 .PHONY: cover
 cover: ## Report coverage per package, excluding generated code
@@ -137,7 +137,7 @@ test-integration: ## Run the integration suite against real Redis 6 and 7 (needs
 	@docker version --format '{{.Server.Version}}' >/dev/null 2>&1 || \
 		{ echo "Docker is not reachable; the integration suite needs a running daemon"; exit 1; }
 	@echo "Docker $$(docker version --format '{{.Server.Version}}')"
-	CGO_ENABLED=1 go test -tags=integration $(RACE) -timeout=25m ./pkg/target/...
+	CGO_ENABLED=1 go test -count=1 -tags=integration $(RACE) -timeout=25m ./pkg/target/...
 
 .PHONY: test-controller
 test-controller: envtest ## Run the CRD and controller suites against envtest
@@ -233,7 +233,24 @@ E2E_TIMEOUT ?= 25m
 e2e: ## Kind up, build, load, run all 8 scenarios, tear down
 	@docker version --format '{{.Server.Version}}' >/dev/null 2>&1 || \
 		{ echo "Docker is not reachable; make e2e needs a running daemon"; exit 1; }
-	go test -tags=e2e -timeout=$(E2E_TIMEOUT) -v ./test/e2e/...
+	@# -count=1 defeats the test cache, and it is not optional here.
+	@#
+	@# Go caches a successful test result and replays it when the inputs are
+	@# unchanged. For an in-process package that is exactly right. For a suite
+	@# whose entire purpose is to stand up a Kubernetes cluster and exercise the
+	@# real environment, it means the second invocation asserts nothing about
+	@# the environment, prints `ok (cached)`, and exits zero.
+	@#
+	@# §22 asks for five consecutive clean runs, which is the one place this is
+	@# not merely wasteful but wrong: the first attempt at that criterion
+	@# produced one real run in 542 seconds and four cache replays of 55, and
+	@# each of the four reported the first one's duration back verbatim. It
+	@# would have been recorded as five clean runs.
+	@#
+	@# Every target below that touches Docker, Kind, a real Redis or libzmq now
+	@# carries it, and the ones that did already were the in-process ones — the
+	@# opposite of where it matters.
+	go test -count=1 -tags=e2e -timeout=$(E2E_TIMEOUT) -v ./test/e2e/...
 
 # ./test/e2e rather than ./test/e2e/..., because -args is passed to every
 # package the pattern matches and the harness's own test binary does not know
@@ -244,7 +261,7 @@ e2e-focus: ## Run one scenario: make e2e-focus FOCUS='E3 SelfLoss'
 	@test -n "$(FOCUS)" || { echo "set FOCUS, e.g. make e2e-focus FOCUS='E3 SelfLoss'"; exit 1; }
 	@docker version --format '{{.Server.Version}}' >/dev/null 2>&1 || \
 		{ echo "Docker is not reachable; make e2e needs a running daemon"; exit 1; }
-	go test -tags=e2e -timeout=$(E2E_TIMEOUT) -v ./test/e2e \
+	go test -count=1 -tags=e2e -timeout=$(E2E_TIMEOUT) -v ./test/e2e \
 		-args -ginkgo.focus='$(FOCUS)'
 
 .PHONY: e2e-keep
@@ -258,7 +275,7 @@ e2e-reuse: ## Reuse an existing cluster, for fast local iteration
 .PHONY: e2e-break
 e2e-break: ## Fail one scenario on purpose, to inspect the diagnostics dump
 	DRIFTWATCH_E2E_REUSE_CLUSTER=1 DRIFTWATCH_E2E_BREAK=1 \
-		go test -tags=e2e -timeout=$(E2E_TIMEOUT) -v \
+		go test -count=1 -tags=e2e -timeout=$(E2E_TIMEOUT) -v \
 		--ginkgo.focus='E1 HappyPath' ./test/e2e/... || true
 	@echo ''
 	@echo 'The dump is under test/e2e/_artifacts/. That failure was deliberate.'
@@ -267,7 +284,7 @@ e2e-break: ## Fail one scenario on purpose, to inspect the diagnostics dump
 test-interop: ## Prove wire compatibility with real libzmq (needs python3 + pyzmq)
 	@python3 -c 'import zmq' 2>/dev/null || python -c 'import zmq' 2>/dev/null || { \
 		echo 'pyzmq not found — install it with: python -m pip install pyzmq'; exit 1; }
-	go test -tags=interop -timeout=5m -v ./test/interop/
+	go test -count=1 -tags=interop -timeout=5m -v ./test/interop/
 
 .PHONY: demo
 demo: ## Bring up the whole stack: redis, publisher, materializer, driftwatch, prometheus, grafana
@@ -302,7 +319,7 @@ soak: ## Run the soak test (DURATION=60m by default)
 	@docker version --format '{{.Server.Version}}' >/dev/null 2>&1 || \
 		{ echo "Docker is not reachable; the soak needs a running daemon"; exit 1; }
 	DRIFTWATCH_SOAK_DURATION=$(or $(DURATION),60m) \
-		go test -tags=soak -timeout=$(or $(SOAK_TIMEOUT),120m) -v -run TestSoak ./test/soak/
+		go test -count=1 -tags=soak -timeout=$(or $(SOAK_TIMEOUT),120m) -v -run TestSoak ./test/soak/
 
 .PHONY: bench
 bench: ## Run every in-process benchmark and write docs/benchmarks/current.txt
@@ -318,12 +335,17 @@ bench: ## Run every in-process benchmark and write docs/benchmarks/current.txt
 		>>docs/benchmarks/current.txt
 	@echo "Captured: $$(date -u +%Y-%m-%d)" >>docs/benchmarks/current.txt
 	@echo '' >>docs/benchmarks/current.txt
+	@# BENCHCOUNT repetitions per benchmark. One is right for a quick local
+	@# look; the CI gate runs six, because benchstat needs repetitions to tell a
+	@# real regression from a shared runner having a bad minute. Answering that
+	@# noise with a looser threshold instead would be the wrong trade: it makes
+	@# the gate quiet rather than correct.
 	@for pkg in $$(go list ./pkg/... | grep -v '/test'); do \
 		if go test -run='^$$' -bench=. -benchmem -timeout=30m $$pkg 2>/dev/null | \
 			grep -qE '^Benchmark'; then \
 			echo "--- $$pkg ---" >>docs/benchmarks/current.txt; \
-			go test -run='^$$' -bench=. -benchmem -timeout=30m $$pkg \
-				>>docs/benchmarks/current.txt; \
+			go test -run='^$$' -bench=. -benchmem -count=$(or $(BENCHCOUNT),1) \
+				-timeout=30m $$pkg >>docs/benchmarks/current.txt; \
 			echo '' >>docs/benchmarks/current.txt; \
 		fi; \
 	done

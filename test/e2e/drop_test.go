@@ -46,9 +46,30 @@ var _ = Describe("E2 DroppedEventDetected", Ordered, func() {
 	// The margin is the point. A skipped key has to stay wrong for longer than
 	// a settlement window plus a sweep plus a confirmation, on the slowest
 	// machine this runs on, or the scenario measures the runner.
+	// The range starts late enough that driftwatch is certainly subscribed
+	// before it goes past, which 500 was not.
+	//
+	// The ordering below is the scenario, and it was being hoped for rather
+	// than established. At 150/sec, sequence 500 arrives 3.3 seconds after the
+	// publisher's first event — and the publisher starts emitting as soon as
+	// its container does, well before the fixture reports every deployment
+	// Available and the check is even applied. The manager then has to notice
+	// the new DriftCheck, start a runner, dial ZMQ and subscribe, all inside
+	// those 3.3 seconds.
+	//
+	// When it lost that race driftwatch never saw the skipped events either,
+	// so its oracle never learned those keys, so there was nothing to disagree
+	// about and the scenario failed reporting drift 0 — which reads as the
+	// detection being broken rather than as the fault never having been
+	// injected. That is what run 4 of 5 hit: tracked 9,580 against 9,198 in the
+	// store, the 382 keys sitting right there in the difference, and driftwatch
+	// correctly silent about keys it had never been told existed.
+	//
+	// 3,000 is twenty seconds in. The precondition is asserted below rather
+	// than assumed, so a scenario that still loses the race says so.
 	const (
-		skipFrom = 500
-		skipTo   = 900
+		skipFrom = 3000
+		skipTo   = 3400
 	)
 
 	BeforeAll(func() {
@@ -68,6 +89,29 @@ var _ = Describe("E2 DroppedEventDetected", Ordered, func() {
 		var err error
 		check, err = s.CreateCheck(suiteCtx, &CheckOptions{})
 		Expect(err).NotTo(HaveOccurred())
+
+		// Subscribed, established rather than assumed. Applied events are the
+		// only proof from outside that the socket is connected and the pipeline
+		// is running; the phase reaching Watching says the sweeper started,
+		// which can happen off an adopted keyspace with no subscription at all.
+		s.waitForCheck(check, converge,
+			"the check never began ingesting, so it was never watching the "+
+				"stream the materializer is about to drop events from",
+			func(st *CheckStatus) bool { return st.EventsApplied > 0 })
+
+		// And subscribed *in time*. If the publisher is already past the
+		// skipped range then driftwatch missed those events too, its oracle
+		// never learns those keys, and the scenario would go on to assert on a
+		// fault that was never injected — failing as though detection were
+		// broken. Better to fail here, saying what actually went wrong.
+		emitted, err := s.PublisherEmitted(suiteCtx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(emitted).To(BeNumerically("<", skipFrom),
+			"the publisher reached sequence %d before driftwatch subscribed, so "+
+				"the events the materializer is told to skip (%d-%d) were never "+
+				"seen by driftwatch either. Nothing would diverge and the "+
+				"scenario would prove nothing",
+			emitted, skipFrom, skipTo)
 
 		// Now let the stream run past the skipped range.
 		s.waitForPublisher(skipTo + 1000)

@@ -159,10 +159,32 @@ func NewFixture(ctx context.Context, name string, opts *FixtureOptions) (*Fixtur
 		deployments = append(deployments, "toxiproxy")
 	}
 
+	// Retried, like the two setup steps above it and unlike how this was
+	// written. §14.5 permits retrying setup and this file says so at the top,
+	// and this was the one step that did not — which is the step that failed,
+	// on the second of five consecutive runs, with Redis not reaching Available
+	// inside 120 seconds on a machine that had just built two images and torn
+	// down a cluster.
+	//
+	// Nothing was wrong with Redis. `kubectl wait` timing out means the
+	// deployment is not ready yet, which on a loaded node is a statement about
+	// the node. Giving up on the first one turned a slow minute into a failed
+	// run, and a criterion asking for five consecutive clean runs will meet a
+	// slow minute.
+	//
+	// The describe on final failure is the other half. "timed out waiting for
+	// the condition" does not distinguish a slow image pull from
+	// ImagePullBackOff, from a pod that cannot be scheduled, from a container
+	// crash-looping — and those want completely different responses.
 	for _, d := range deployments {
-		if _, err := KubectlOut(ctx, "-n", namespace, "wait",
-			"--for=condition=Available", "deployment/"+d, "--timeout=120s"); err != nil {
-			return f, fmt.Errorf("waiting for %s in %s: %w", d, namespace, err)
+		err := retry(ctx, 2, 5*time.Second, "wait for "+d+" in "+namespace, func() error {
+			_, err := KubectlOut(ctx, "-n", namespace, "wait",
+				"--for=condition=Available", "deployment/"+d, "--timeout=120s")
+			return err
+		})
+		if err != nil {
+			return f, fmt.Errorf("waiting for %s in %s: %w\n%s",
+				d, namespace, err, f.describeFailure(ctx, d))
 		}
 	}
 
@@ -172,6 +194,42 @@ func NewFixture(ctx context.Context, name string, opts *FixtureOptions) (*Fixtur
 		}
 	}
 	return f, nil
+}
+
+// describeFailure gathers why a deployment never became Available.
+//
+// Best effort throughout, and it returns a string rather than an error on
+// purpose: this runs on a path that has already failed, and a diagnostic that
+// can itself fail replaces the real error with its own. Every command that does
+// not answer contributes a line saying so, which is still more than the caller
+// had.
+func (f *Fixture) describeFailure(ctx context.Context, deployment string) string {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	var b strings.Builder
+	b.WriteString("--- why " + deployment + " is not available ---\n")
+
+	for _, probe := range []struct {
+		what string
+		args []string
+	}{
+		{"pods", []string{"-n", f.Namespace, "get", "pods", "-o", "wide"}},
+		{"events", []string{
+			"-n", f.Namespace, "get", "events",
+			"--sort-by=.lastTimestamp",
+		}},
+		{"deployment", []string{"-n", f.Namespace, "describe", "deployment/" + deployment}},
+	} {
+		out, err := KubectlOut(ctx, probe.args...)
+		if err != nil {
+			fmt.Fprintf(&b, "%s: could not be collected: %v\n", probe.what, err)
+			continue
+		}
+		fmt.Fprintf(&b, "%s:\n%s\n", probe.what, strings.TrimSpace(out))
+	}
+
+	return b.String()
 }
 
 // generateNamespace derives a legal, unique namespace name.

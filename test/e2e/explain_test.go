@@ -107,14 +107,29 @@ var _ = Describe("E7 PublisherRestart", Ordered, func() {
 	})
 
 	It("converges back to zero divergence", func() {
-		// The store was written correctly throughout — the materializer never
-		// stopped — so once driftwatch has caught up there is nothing to report.
-		status := s.waitForCheck(check, resolve,
-			"the check never returned to zero divergence after the restart",
-			func(st *CheckStatus) bool { return st.DivergentKeys == 0 })
-
-		s.holdsForCheck(check, 20*time.Second,
-			"divergence reappeared after the restart converged",
+		// Convergence is a limit, not an instant, and this scenario is the one
+		// place in the suite where the difference is load-bearing.
+		//
+		// The materializer no longer dies when the publisher is rescheduled
+		// (D-030), but it is still a separate SUB socket reconnecting on its
+		// own schedule, and so is driftwatch. Two subscribers reconnecting to a
+		// replaced publisher do not miss the same events, and PUB/SUB has no
+		// replay to reconcile them with. So the store is genuinely behind for
+		// the few keys that landed in the gap, and stays behind until the
+		// publisher's next pass rewrites them — one key cycle, twenty seconds.
+		//
+		// That is driftwatch being right. The store really is missing those
+		// keys, it really did receive fewer events than driftwatch did, and a
+		// tool that reported zero throughout would be the broken one.
+		//
+		// Asserting a single zero and then holding it read the first zero as
+		// the answer, and the first zero is usually the sweep not having
+		// reached those keys yet. It failed on drift=14 against 3,148 tracked
+		// keys that healed seconds afterwards. Requiring zero to hold for
+		// longer than a cycle asserts what the spec name says.
+		status := s.settlesForCheck(check, resolve, 25*time.Second,
+			"divergence never settled at zero after the restart — the store is "+
+				"missing keys the publisher should have rewritten by now",
 			func(st *CheckStatus) bool { return st.DivergentKeys == 0 })
 
 		Expect(status.Phase).NotTo(Equal("Failed"),

@@ -215,6 +215,77 @@ func (s *scenario) holdsForCheck(
 		})
 }
 
+// settlesForCheck waits until a predicate has held continuously for `stable`,
+// giving up after `timeout`.
+//
+// The difference from waitForCheck followed by holdsForCheck is the whole
+// point. That pair asserts "the first moment the predicate is true is the
+// moment it becomes permanently true", which is a claim about when the
+// scenario happened to look rather than about the system, and it is wrong
+// whenever the property under test is a limit rather than an instant.
+//
+// E7 is the case that produced this. It restarts the publisher and asserts
+// divergence converges back to zero. Both driftwatch and the fixture's
+// materializer are independent SUB sockets, and when the publisher is replaced
+// they reconnect on their own schedules — so they do not miss the same events,
+// and PUB/SUB has no replay to fix that with. The store ends up genuinely
+// behind for the handful of keys that landed in the gap, and stays behind for
+// one key cycle until the publisher rewrites them.
+//
+// Reaching zero before those keys have been swept is not convergence, it is
+// the sweep not having got there yet. The old pair read that first zero as the
+// answer, started its hold, and failed when the real state arrived: 33 passed,
+// one failed, on `drift=14` against 3,148 tracked keys that healed seconds
+// later.
+//
+// Requiring the zero to hold for a stretch longer than a key cycle keeps the
+// assertion strong — a divergence that never resolves still fails — while
+// letting convergence be what the word means.
+func (s *scenario) settlesForCheck(
+	name string, timeout, stable time.Duration, description string, want func(*CheckStatus) bool,
+) *CheckStatus {
+	GinkgoHelper()
+
+	var last *CheckStatus
+	var since time.Time
+	var longest time.Duration
+
+	Eventually(func() bool {
+		status, err := s.Status(suiteCtx, name)
+		if err != nil {
+			return false
+		}
+		last = status
+
+		if !want(status) {
+			// Broken, so the clock restarts. longest is kept only so the
+			// failure message can say how close it came, which is the
+			// difference between "never converged" and "converged and would
+			// not stay".
+			since = time.Time{}
+			return false
+		}
+
+		if since.IsZero() {
+			since = time.Now()
+		}
+		if held := time.Since(since); held > longest {
+			longest = held
+		}
+		return time.Since(since) >= stable
+	}).WithTimeout(timeout).WithPolling(poll).Should(BeTrue(),
+		func() string {
+			if last == nil {
+				return fmt.Sprintf("%s: the check's status was never readable", description)
+			}
+			return fmt.Sprintf(
+				"%s\nheld for at most %s of the %s required\nlast status: %s",
+				description, longest.Round(time.Second), stable, last.Summary())
+		})
+
+	return last
+}
+
 // waitForPublisher blocks until the publisher has emitted at least n events.
 //
 // Every scenario begins with this. A scenario that started asserting against a

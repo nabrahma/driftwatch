@@ -331,32 +331,90 @@ func materialize(ctx context.Context, args []string) error {
 		return err
 	}
 
-	sock := zmq4.NewSub(ctx)
-	defer sock.Close() //nolint:errcheck // process is exiting
-
-	// Subscribe before connecting. The other order is the slow-joiner race:
-	// a SUB socket with no subscription installed discards everything that
-	// arrives before the subscription reaches the publisher, and on a PUB
-	// socket there is no way to ask for it again. See docs/DISCOVERIES.md.
-	if err := sock.SetOption(zmq4.OptionSubscribe, *topic); err != nil {
-		return fmt.Errorf("subscribing to %q: %w", *topic, err)
-	}
-	if err := sock.Dial(*connect); err != nil {
-		return fmt.Errorf("connecting to %s: %w", *connect, err)
-	}
-
-	var applied, skipped, failed atomic.Uint64
+	var applied, skipped, failed, reconnects atomic.Uint64
 	serveStatus(*statusAddr, func() map[string]any {
 		return map[string]any{
-			"mode":    "materialize",
-			"applied": applied.Load(),
-			"skipped": skipped.Load(),
-			"failed":  failed.Load(),
+			"mode":       "materialize",
+			"applied":    applied.Load(),
+			"skipped":    skipped.Load(),
+			"failed":     failed.Load(),
+			"reconnects": reconnects.Load(),
 		}
 	})
 
 	fmt.Printf("materializing %s topic %q into %s (skip %d-%d)\n",
 		*connect, *topic, *redisAddr, *skipFrom, *skipTo)
+
+	// Reconnect rather than exit, and build a fresh socket each time.
+	//
+	// This used to return the receive error, which ended the process, which
+	// Kubernetes answered by restarting the pod. That looks like it works and
+	// it is how E7 failed. Deleting the publisher pod drops the connection, the
+	// materializer exits, and for as long as it takes the kubelet to restart it
+	// the store simply stops being written — while driftwatch, which stays
+	// connected throughout, keeps applying events. Every key written in that
+	// window is missing from Redis, and E7 asserts convergence to zero
+	// divergence on the stated premise that "the store was written correctly
+	// throughout, the materializer never stopped". It had stopped.
+	//
+	// The old workload hid it. Re-adding the same member to the same set is a
+	// no-op, so events missed during the gap changed nothing observable unless
+	// they were a key's first. At 1,200 keys and 800/sec the keyspace was
+	// written out several times over before the restart, so there were no first
+	// touches left to miss. A 20-second cycle over 4,000 keys leaves plenty.
+	//
+	// A fresh socket per attempt is the part that matters rather than a detail:
+	// the endpoint is a Service DNS name, the replacement pod comes back on a
+	// different address, and a socket that resolved once at startup reconnects
+	// to an IP nothing is listening on. That is D-011, in the harness this time,
+	// and re-dialing a new socket is what re-resolves it.
+	for ctx.Err() == nil {
+		err := subscribeAndApply(ctx, *connect, *topic, rdb,
+			&applied, &skipped, &failed, *skipFrom, *skipTo)
+
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err != nil {
+			reconnects.Add(1)
+			fmt.Printf("materializer: %v; reconnecting (%d)\n", err, reconnects.Load())
+		}
+
+		// A short pause so a publisher that is genuinely gone does not turn
+		// into a dial loop hot enough to matter on a two-core node. Not a
+		// synchronization sleep: nothing is being waited for, and §14.5's rule
+		// is about tests, not about a fixture backing off.
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+	return nil
+}
+
+// subscribeAndApply runs one connection's lifetime, returning on the first
+// receive error so the caller can build a new socket.
+func subscribeAndApply(
+	ctx context.Context,
+	connect, topic string,
+	rdb *redis.Client,
+	applied, skipped, failed *atomic.Uint64,
+	skipFrom, skipTo uint64,
+) error {
+	sock := zmq4.NewSub(ctx)
+	defer sock.Close() //nolint:errcheck // a new socket replaces it
+
+	// Subscribe before connecting. The other order is the slow-joiner race:
+	// a SUB socket with no subscription installed discards everything that
+	// arrives before the subscription reaches the publisher, and on a PUB
+	// socket there is no way to ask for it again. See docs/DISCOVERIES.md.
+	if err := sock.SetOption(zmq4.OptionSubscribe, topic); err != nil {
+		return fmt.Errorf("subscribing to %q: %w", topic, err)
+	}
+	if err := sock.Dial(connect); err != nil {
+		return fmt.Errorf("connecting to %s: %w", connect, err)
+	}
 
 	for {
 		if ctx.Err() != nil {
@@ -377,7 +435,7 @@ func materialize(ctx context.Context, args []string) error {
 			continue
 		}
 
-		if *skipFrom > 0 && ev.Seq >= *skipFrom && ev.Seq <= *skipTo {
+		if skipFrom > 0 && ev.Seq >= skipFrom && ev.Seq <= skipTo {
 			// Deliberately not written. driftwatch saw this event; Redis will
 			// not have it, which is exactly the divergence E2 asserts on.
 			skipped.Add(1)
