@@ -2,14 +2,17 @@ package check_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/nabrahma/driftwatch/pkg/check"
 	"github.com/nabrahma/driftwatch/pkg/clock"
+	"github.com/nabrahma/driftwatch/pkg/metrics"
 	"github.com/nabrahma/driftwatch/pkg/target"
 )
 
@@ -208,4 +211,105 @@ func TestReporting_AFailedSweepDoesNotErasePreviousCoverage(t *testing.T) {
 			"fresh — that pairing is what makes keeping it honest")
 	assert.False(t, after.TargetReachable,
 		"the status has to say why the numbers are stale")
+}
+
+// extrasCadenceSpec puts the extras scan on an interval that is not a multiple
+// of the sweep interval, so the clock can be advanced to land an extras report
+// with no sweep behind it. On a shared cadence the sweep that followed would
+// re-measure the target and clear the state under test, and the assertion below
+// would pass whether or not the defect was there.
+const extrasCadenceSpec = `
+name: kvcache-index
+namespace: inference
+source:
+  type: memory
+codec:
+  type: json
+projection:
+  type: keysetOwnership
+  keyTemplate: "block:{{.Key}}"
+target:
+  type: memory
+policy:
+  settlementWindow: {mode: static, static: 2s}
+  sweepInterval: 10s
+  extraScanInterval: 25s
+  bootstrap: Wait
+`
+
+func TestReporting_AnExtrasScanDoesNotClaimTheTargetIsUnreachable(t *testing.T) {
+	// D-020's fourth instance, in the one place the previous three fixes left.
+	//
+	// Both passes come through the same callback, and only the oracle→target
+	// one measures target health. TargetHealth is a struct and the extras scan
+	// never fills it in, so what reached the status and the gauge was the zero
+	// value: Reachable false, from a pass that had not looked.
+	//
+	// The effect is a check that reports TargetAvailable=False and goes
+	// Degraded every extraScanInterval and recovers on the next sweep, forever,
+	// against a store that never stopped answering. Every twenty seconds under
+	// the e2e policy; every five minutes under the shipped default. It reads
+	// exactly like a flapping Redis, which is where the debugging time goes —
+	// e2e E1 spent a run on it before the periodicity gave it away.
+	//
+	// The status half and the metric half are asserted together because fixing
+	// one alone leaves the CRD and the dashboard disagreeing, which is worse
+	// than either being wrong on its own.
+	clk := clock.Fake(epoch())
+	reg := prometheus.NewRegistry()
+
+	parsed, err := check.Load(strings.NewReader(extrasCadenceSpec))
+	require.NoError(t, err)
+
+	c, err := check.New(parsed, check.Deps{
+		Clock:   clk,
+		Metrics: metrics.New(metrics.Options{Registry: reg}),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, c.Close()) })
+
+	stop := running(t, c)
+	defer stop()
+
+	store, ok := c.Target().(*target.MemoryTarget)
+	require.True(t, ok)
+
+	const keys = 4
+	for i := 0; i < keys; i++ {
+		publish(t, c, addEventJSON("replica-0", uint64(i+1), keyIdx(i), "replica-0"))
+		store.SeedSets(map[string][]string{"block:" + keyIdx(i): {"replica-0"}})
+	}
+	clk.Advance(5 * time.Second)
+
+	_, err = c.SweepNow(context.Background())
+	require.NoError(t, err)
+	require.True(t, c.Status().TargetReachable,
+		"the store is up, so the sweep should have said so")
+	require.InDelta(t, 1, gaugeValue(t, reg, "driftwatch_target_reachable"), 0.001)
+
+	// Two sweep ticks first, drained before the extras tick is allowed to fire.
+	// Advancing straight past both would leave the Run loop's select free to
+	// take them in either order, and a sweep landing last would hide exactly
+	// the overwrite this is about.
+	clk.Advance(15 * time.Second)
+	require.Eventually(t, func() bool {
+		return labelledValue(t, reg, "driftwatch_sweeps_total",
+			"kind", "oracle_to_target") >= 3
+	}, eventuallyFor, eventuallyPoll, "the sweep ticks never ran")
+
+	// Now the extras tick, alone.
+	clk.Advance(5 * time.Second)
+	require.Eventually(t, func() bool {
+		return labelledValue(t, reg, "driftwatch_sweeps_total",
+			"kind", "target_to_oracle") > 0
+	}, eventuallyFor, eventuallyPoll, "the extras scan never ran")
+
+	assert.True(t, c.Status().TargetReachable,
+		"the extras scan does not measure reachability, so it must not report "+
+			"on it; the store answered every request throughout and the only "+
+			"thing that changed was which pass reported last")
+	assert.InDelta(t, 1, gaugeValue(t, reg, "driftwatch_target_reachable"), 0.001,
+		"and the gauge an alert fires on must not flap on the extras interval")
+	assert.NotEqual(t, check.PhaseDegraded, c.Status().Phase,
+		"a check whose store is up must not go Degraded on a timer")
 }

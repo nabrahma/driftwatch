@@ -143,57 +143,72 @@ limitation is in the test rather than hidden by it.
 
 ---
 
-## G-003, The e2e suite is at 23 of 27 specs; four scenarios have unverified fixes
+## G-003, The e2e suite is green once, not the five consecutive runs §22 asks for
 
-**Status at the v0.1.0 cut:** `make e2e` is not green.
+**Status at the v0.1.0 cut:** `make e2e` passes. **34 of 34 specs, 0 failed, 0
+skipped, in 9m14s**, on 2026-08-03. That is the first fully green run the suite
+has had, up from 20/5 at the start of Phase 9.
 
-The last measured run was **23 specs passing, 4 failing** across the eight
-scenarios, up from 20/5 at the start of Phase 9. E4, E5, E6 and E8 pass
-outright.
+What it is not is five of them.
 
-The four remaining failures all have diagnosed causes and committed fixes; what
-they do not have is a run confirming those fixes, because each cycle is eleven
-minutes and the fixes were made after the last one.
+```text
+Ran 34 of 34 Specs in 553.842 seconds
+SUCCESS! -- 34 Passed | 0 Failed | 0 Pending | 0 Skipped
+```
 
-| Scenario | Last measured | Cause | Fix, unverified |
-|---|---|---|---|
-| E1 HappyPath | coverage 0.8982 against a 0.90 bar | Coverage is measured against tracked keys, which grows until the whole keyspace has been touched once, so the oracle must *fill* as well as settle before the assertion runs | 40,000 keys at 800/sec, a 50s cycle, populated 50s in |
-| E2 DroppedEventDetected | drift 0 | Not re-measured since the keyspace changed | 20,000 keys, a 50s cycle, so a skipped key stays wrong long enough to confirm |
-| E3 SelfLossReportsSuspect | suspect 0 | §5.2 suspicion decays per key on the next event; at 2,000 keys and 600/sec the keyspace healed every 3.3s, faster than a sweep could look | 20,000 keys, a 33s cycle |
-| E7 PublisherRestart | restarts_total 0 | **Not fully diagnosed.** See below |
+### What is still open
 
-E1, E2 and E3 are all the same mistake made three times independently: **a
-scenario whose workload heals faster than the mechanism under test can observe
-proves nothing, and fails in a way that reads as the mechanism being broken.**
-The arithmetic is now written at each parameter rather than left implicit.
+§22 asks for “8 e2e scenarios pass; suite under 8 minutes; 5 consecutive clean
+runs”. One of those three is met.
 
-### E7 is the one that is genuinely open
+| §22 criterion | State |
+|---|---|
+| 8 scenarios pass | Met. All eight, all 34 specs |
+| 5 consecutive clean runs | **1 of 5.** No run has yet been repeated without a change in between |
+| Suite under 8 minutes | **9m14s.** Over by 74 seconds |
 
-The scenario deletes the publisher pod. The replacement comes up correctly, and
-driftwatch never receives from it, `lastSeenSeconds` climbing past 92 while the
-new pod emits 800 events/sec.
+The suite is also only measured on a 16-core developer machine and a 2-core
+GitHub runner, which have produced materially different failures from the same
+commit — see [D-028](DISCOVERIES.md). A green run on one says less about the
+other than it looks like it does.
 
-That much is [D-025](DISCOVERIES.md), and D-025's fix, an idle deadline on the
-receive loop, is implemented, unit-tested against a stub socket that goes
-silent, and confirmed to reach the socket from the spec through all four hops
-(`TestCheck_TheIdleTimeoutReachesTheSource`). The effective-config dump from the
-failing run shows `idleTimeout: 1m0s`, and the CRD carries the field.
+### Why the last four scenarios took so long
 
-**It nonetheless did not visibly fire in the cluster.** After 92 seconds of
-silence against a 60-second deadline there is exactly one reconnect in the
-manager log, the one at startup. Either the deadline is not firing, or the
-session ends and the reconnect finds nothing to receive from, and the diagnostics
-captured so far do not distinguish those.
+Every one of the six failures resolved in the final pass was a scenario
+measuring something other than what it claimed to, and they fell into three
+kinds worth naming, because the same mistakes are easy to repeat.
 
-So D-025 is a real bug with a fix that is right in principle and not yet proven
-in situ. That is a weaker claim than the discovery entry implies on its own, and
-this is where it is recorded.
+**A workload that forbade the assertion.** E3 asserts that driftwatch marks
+keys suspect when its own subscription is cut. Its publisher only ever emitted
+`add` of the same member to the same key, so every event after a key’s first
+was a no-op on the store and on the oracle alike. A missed event could not
+change anything, so the divergence the scenario asserts on was impossible to
+produce. It had been failing for a reason that had nothing to do with the code
+under test. See [D-027](DISCOVERIES.md).
 
-### What this blocks
+**Sizing that depended on luck.** Four scenarios ran with a key cycle shorter
+than their settlement window — 1.5 to 1.9 seconds against 3 — and passed because
+a uniform random key draw leaves about a fifth of the keyspace quiet at any
+instant by chance. Walking the keyspace in order, so the `keys/rate` arithmetic
+every sizing comment already assumed was actually true, removed the luck and
+left the arithmetic, which had always said nothing could settle.
 
-§22's "8 e2e scenarios pass; suite under 8 minutes; 5 consecutive clean runs" is
-not satisfied and is not close: the suite currently takes about eleven minutes,
-and no consecutive clean runs have been achieved.
+**A gate that gated nothing.** E3 waited on `trackedKeys` before cutting the
+subscription, to guarantee the partition landed on keys the oracle knew.
+Bootstrap is `Adopt`, so a check created against a store the publisher has
+already filled reads the whole keyspace out of Redis in seconds and satisfies
+that without a single event. Whether it did depended on how long the fixture
+took to come up — which is why the scenario passed alone and failed in a full
+suite. Both E1 and E3 now wait on `eventsApplied`.
 
-The suite is also sized for the 16-core machine it was developed on rather than
-the 2-core runner §14.5 specifies, which is a separate piece of work.
+None of the three fails cleanly. All three read as a defect in whatever the
+assertion happened to be about.
+
+### What it did find
+
+The run that closed this gap also produced [D-029](DISCOVERIES.md), which is a
+real product defect and not a test one: a healthy check publishes
+`TargetAvailable=False` and goes `Degraded` every `extraScanInterval` — five
+minutes under the shipped default — because the extras pass reports target
+health it never measured.
+

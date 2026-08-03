@@ -30,6 +30,59 @@ written here in anticipation.
 
 ---
 
+## D-029, The extras scan reports target health it never measured, so a healthy check goes Degraded on a timer forever
+
+**Found:** Phase 9, working out why e2e E1 kept reporting
+`TargetAvailable: False, Reason: Unreachable` against a Redis that was
+answering every request.
+
+**What happened:** The events were periodic, which is what gave it away.
+Unreachable at `:02`, reachable at `:07`, unreachable at `:22`, reachable at
+`:27` — a 20-second period with a 5-second recovery, holding for the whole run.
+The check's policy sets `extraScanInterval: 20s` and `sweepInterval: 5s`. Redis
+reported zero rejected connections, zero failed calls, and 1.06 microseconds
+per `SMEMBERS` across 182,501 of them. The store was not flapping; the two
+passes were taking turns reporting.
+
+§5.5's two passes come through the same `OnReport` callback, and only the
+oracle→target sweep measures target health. `differ.Report.TargetHealth` is a
+struct, the extras pass never fills it in, and the zero value of a `bool` is
+`false`. So every extras scan handed the check a report saying the target was
+unreachable, having never looked at it.
+
+Three consumers took that at face value: the CRD status via `targetUnreachable`,
+and the `driftwatch_target_reachable` and `driftwatch_target_keyspace_size`
+gauges.
+
+**Why it matters:** A check whose store is perfectly healthy publishes
+`TargetAvailable=False` and goes `Degraded` on the extras interval and recovers
+on the next sweep, forever. Every twenty seconds under the e2e policy; every
+five minutes under the shipped default of `extraScanInterval: 5m`.
+
+It reads exactly like an intermittently unreachable store, which is where the
+debugging time goes — an operator would tune Redis timeouts, add pool capacity,
+and check the network, none of which would change anything. The status and the
+gauge flap together, so the CRD and the dashboard corroborate each other while
+both are wrong, and an alert on target availability fires on a timer.
+
+This is D-020's fourth instance. The `lastReport` guard three lines above the
+status half is the third, and this survived that fix because both were written
+as one switch on one report without asking which pass the report came from.
+The metrics half had already been fixed twice in the same function for the same
+reason — `recordSweepMetrics` routes extras reports away from the sweep gauges
+— and then republished health at the end of the path it routed them to.
+
+**Fix:** The status half now guards on `rep.Pass == differ.PassOracleToTarget`.
+The metrics half no longer publishes target health at all: the extras scan owns
+its result and its duration and nothing else, and every gauge it stays silent
+on keeps the value the last real sweep gave it, which is the honest answer.
+
+**Evidence:** `docs/evidence/D-029-extras-scan-reports-health-it-never-measured.txt`
+
+**Regression test:** `pkg/check: TestReporting_AnExtrasScanDoesNotClaimTheTargetIsUnreachable`
+
+---
+
 ## D-028, A per-event ticker publishes at a quarter of its requested rate on a loaded two-core node, and nothing reports it
 
 **Found:** Phase 9, working out why E1's coverage assertion kept landing just

@@ -1299,8 +1299,19 @@ func (c *Check) ConfirmDue(ctx context.Context) int {
 // how much of the expectation was verified — and every gauge it stayed silent
 // on keeps the value the last real sweep gave it, which is the honest answer.
 //
-// What it does own is its own result, its own duration, and the target health
-// it observed on the way past, since it is talking to the same store.
+// What it does own is its own result and its own duration.
+//
+// It used to publish target health too, on the reasoning that it is talking to
+// the same store and may as well say what it saw. It never saw anything: only
+// the oracle→target pass fills TargetHealth in, so what the extras scan
+// published was the zero value of a struct — Reachable false, KeyspaceSize 0 —
+// every extraScanInterval, on a store that was answering fine. Both the gauge
+// and the CRD status flapped, five minutes apart under the shipped default.
+//
+// Publishing a measurement nobody took is worse than publishing nothing.
+// Staying silent leaves each gauge holding what the last real sweep gave it,
+// which is the honest answer and the one the rest of this function already
+// gives for coverage.
 func (c *Check) recordExtrasScanMetrics(rep *differ.Report, err error) {
 	result := metrics.SweepSuccess
 	switch {
@@ -1321,8 +1332,6 @@ func (c *Check) recordExtrasScanMetrics(rep *differ.Report, err error) {
 	}
 
 	c.m.ObserveSweepDuration(metrics.SweepTargetToOracle, rep.Duration())
-	c.m.SetTargetReachable(rep.TargetHealth.Reachable)
-	c.m.SetTargetKeyspaceSize(rep.TargetHealth.KeyspaceSize)
 }
 
 // onReport records a sweep's outcome in the status and the metrics.
@@ -1369,10 +1378,26 @@ func (c *Check) onReport(rep *differ.Report, err error) {
 	// Kept in step with the metric recordSweepMetrics writes. A status that
 	// says the target is reachable while the phase says it is not is worse
 	// than either one alone: it makes the operator distrust both.
+	//
+	// Only the oracle→target pass measures reachability, and the pass check is
+	// load-bearing rather than defensive. TargetHealth is a struct, the extras
+	// pass never fills it in, and the zero value of a bool is false — so every
+	// extras scan handed this a report claiming the target was unreachable,
+	// having never looked. The check went Degraded and published
+	// TargetAvailable=False on the extras interval and recovered on the next
+	// sweep, forever: every twenty seconds under the e2e policy, every five
+	// minutes under the shipped default.
+	//
+	// It reads exactly like a flapping store, which is where the time goes.
+	// Redis was answering every request throughout; the only thing that had
+	// changed was which pass reported last. This is the same mistake as the
+	// lastReport guard three lines above, in the sibling statement, and it
+	// survived that fix because they were written as one switch on one report
+	// without asking which of them the report was about.
 	switch {
 	case errors.Is(err, sweeper.ErrTargetUnavailable):
 		c.targetUnreachable.Store(true)
-	case rep != nil:
+	case rep != nil && rep.Pass == differ.PassOracleToTarget:
 		c.targetUnreachable.Store(!rep.TargetHealth.Reachable)
 	}
 

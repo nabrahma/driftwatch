@@ -38,6 +38,7 @@ Each of these is the captured output for one entry in
 | `D-026-stale-manager-image.txt` | `make e2e-reuse` applied an unchanged manifest and kept a 17-hour-old manager running | `test/e2e` |
 | `D-027-workload-forbade-the-assertion.txt` | E3 asserted on a divergence its own idempotent workload made impossible to produce | `test/e2e` |
 | `D-028-ticker-pacing-loses-rate.txt` | A per-event ticker published at 24% of its requested rate on a loaded two-core node | `test/e2e` |
+| `D-029-extras-scan-reports-health-it-never-measured.txt` | A healthy check went Degraded every extraScanInterval, because the extras pass published the zero value of a health struct it never filled in | `pkg/check` |
 
 Seven discoveries, D-017 through D-023, carry their reproduction inline in
 [DISCOVERIES.md](../DISCOVERIES.md) rather than as a separate capture, because

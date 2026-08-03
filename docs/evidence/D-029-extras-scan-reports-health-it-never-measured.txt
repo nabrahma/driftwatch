@@ -1,0 +1,108 @@
+D-029: the extras scan publishes target health it never measured
+
+Captured from the e2e E1 diagnostics bundle, run of 2026-08-02, and from the
+regression test that reproduces it.
+
+--------------------------------------------------------------------------
+1. The symptom, from 03-manager.log in
+   E1-HappyPath-reports-the-conditions-an-operator-gates-on
+--------------------------------------------------------------------------
+
+Every line below is the same check, against a Redis that answered every
+request for the whole run. Only the DEBUG event lines are shown.
+
+19:20:47.678  target reachable again; comparison resumed        TargetAvailable
+19:21:02.734  target unreachable: nothing is being compared     TargetUnavailable
+19:21:07.711  target reachable again; comparison resumed        TargetAvailable
+19:21:22.769  target unreachable: nothing is being compared     TargetUnavailable
+19:21:27.711  target reachable again; comparison resumed        TargetAvailable
+19:21:42.757  target unreachable: nothing is being compared     TargetUnavailable
+19:21:47.715  target reachable again; comparison resumed        TargetAvailable
+19:22:02.757  target unreachable: nothing is being compared     TargetUnavailable
+19:22:07.756  target reachable again; comparison resumed        TargetAvailable
+19:22:22.756  target unreachable: nothing is being compared     TargetUnavailable
+
+Unreachable at :02, :22, :42, :02, :22 — a 20-second period.
+Reachable again 5 seconds after each one, without exception.
+
+The check's policy:
+
+    sweepInterval:     5s
+    extraScanInterval: 20s
+
+The period is extraScanInterval and the recovery is sweepInterval. The store
+is not flapping; the two passes are taking turns reporting.
+
+--------------------------------------------------------------------------
+2. Redis's own counters for the same window, from 06-redis-info.txt
+--------------------------------------------------------------------------
+
+connected_clients:4
+blocked_clients:0
+rejected_connections:0
+used_memory_human:2.22M
+maxmemory_human:0B
+cmdstat_scan:calls=108,usec=21780,usec_per_call=201.67,rejected_calls=0,failed_calls=0
+cmdstat_smembers:calls=182501,usec=193916,usec_per_call=1.06,rejected_calls=0,failed_calls=0
+
+Zero rejected connections, zero failed calls, 1.06 microseconds per SMEMBERS
+across 182,501 of them. Nothing was ever unreachable.
+
+--------------------------------------------------------------------------
+3. The cause
+--------------------------------------------------------------------------
+
+pkg/sweeper/sweeper.go — TargetHealth is assigned in exactly two places, both
+inside the oracle-to-target sweep:
+
+    379:  rep.TargetHealth = after
+    381:  rep.TargetHealth = health
+
+pkg/sweeper/extras.go builds its own report and sets only the pass:
+
+    62:   rep.Pass = differ.PassTargetToOracle
+
+differ.Report.TargetHealth is a struct, so on an extras report it is the zero
+value, and the zero value of Reachable is false. Both consumers took it at
+face value:
+
+    pkg/check/check.go:1376  c.targetUnreachable.Store(!rep.TargetHealth.Reachable)
+    pkg/check/check.go:1324  c.m.SetTargetReachable(rep.TargetHealth.Reachable)
+    pkg/check/check.go:1325  c.m.SetTargetKeyspaceSize(rep.TargetHealth.KeyspaceSize)
+
+The first drives the CRD status and the phase. The second and third drive the
+gauges an alert fires on. All three were reporting a measurement nobody took.
+
+--------------------------------------------------------------------------
+4. Reproduction, before the fix
+--------------------------------------------------------------------------
+
+$ git stash push pkg/check/check.go
+$ go test ./pkg/check/ -run TestReporting_AnExtrasScanDoesNotClaimTheTargetIsUnreachable -count=1
+
+--- FAIL: TestReporting_AnExtrasScanDoesNotClaimTheTargetIsUnreachable (0.06s)
+    reporting_test.go:307:
+        Error:      Should be true
+        Messages:   the extras scan does not measure reachability, so it must
+                    not report on it; the store answered every request
+                    throughout and the only thing that changed was which pass
+                    reported last
+    reporting_test.go:311:
+        Error:      Max difference between 1 and 0 allowed is 0.001, but
+                    difference was 1
+        Messages:   and the gauge an alert fires on must not flap on the
+                    extras interval
+FAIL
+
+Both halves fail: the status and the metric.
+
+--------------------------------------------------------------------------
+5. After the fix
+--------------------------------------------------------------------------
+
+$ go test ./pkg/check/ -run TestReporting -count=1
+ok      github.com/nabrahma/driftwatch/pkg/check        3.635s
+
+$ make e2e
+Ran 34 of 34 Specs in 553.842 seconds
+SUCCESS! -- 34 Passed | 0 Failed | 0 Pending | 0 Skipped
