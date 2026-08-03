@@ -176,18 +176,56 @@ func TestProp_MemberGeneratorNeverProducesTheEmptyString(t *testing.T) {
 	})
 }
 
-func TestProp_OpGeneratorsReachEveryOperation(t *testing.T) {
-	seenAll := map[event.Op]bool{}
-	seenKey := map[event.Op]bool{}
+func TestOpGeneratorsCoverEveryOperation(t *testing.T) {
+	// Asserted against the generators' declared range rather than by sampling
+	// them, because "can produce every operation" is a fact about a slice and
+	// sampling only ever approximates it.
+	//
+	// It used to collect draws across rapid's hundred runs and assert eight
+	// distinct operations had appeared. That is sound in expectation and fails
+	// on the run where one does not come up — which it did, in CI, missing
+	// snapshot_begin. rapid does not draw uniformly at random on purpose: it
+	// biases towards values it thinks are interesting and shrinks towards the
+	// front of the slice, so the tail of a SampledFrom is genuinely less
+	// likely, and no number of runs makes that guarantee rather than merely
+	// probable.
+	//
+	// A flaky test that guards a real property is worse than either a solid
+	// test or none, because the failure teaches everyone to re-run CI.
+	want := []event.Op{
+		event.OpSet, event.OpDelete, event.OpAdd, event.OpRemove, event.OpIncr,
+		event.OpSnapshotBegin, event.OpSnapshotEnd, event.OpHeartbeat,
+	}
+	assert.ElementsMatch(t, want, testgen.AllOps(),
+		"Op's range must be every wire operation; a missing one is a whole class "+
+			"of event no property test in this repository would ever generate")
+
+	assert.ElementsMatch(t,
+		[]event.Op{event.OpSet, event.OpDelete, event.OpAdd, event.OpRemove, event.OpIncr},
+		testgen.KeyTouchingOps(),
+		"KeyTouchingOp's range must be exactly the operations that affect a key")
+
+	assert.NotContains(t, testgen.AllOps(), event.OpUnknown,
+		"OpUnknown is the zero value, not a wire operation: generating it would "+
+			"produce validation failures that are the generator's fault")
+}
+
+func TestProp_OpGeneratorsStayInsideTheirRange(t *testing.T) {
+	// The half that is genuinely a property. The range is checked above; what
+	// random draws are good for is confirming nothing outside it ever escapes.
+	all := map[event.Op]bool{}
+	for _, op := range testgen.AllOps() {
+		all[op] = true
+	}
+	keyTouching := map[event.Op]bool{}
+	for _, op := range testgen.KeyTouchingOps() {
+		keyTouching[op] = true
+	}
 
 	rapid.Check(t, func(t *rapid.T) {
-		seenAll[testgen.Op(t)] = true
-		seenKey[testgen.KeyTouchingOp(t)] = true
+		assert.Contains(t, all, testgen.Op(t))
+		assert.Contains(t, keyTouching, testgen.KeyTouchingOp(t))
 	})
-
-	assert.Len(t, seenAll, 8, "Op must reach all eight defined operations")
-	assert.Len(t, seenKey, 5, "KeyTouchingOp must reach all five key-touching operations")
-	assert.NotContains(t, seenAll, event.OpUnknown, "OpUnknown is not a wire operation")
 }
 
 func fingerprints(evs []event.Event) []string {

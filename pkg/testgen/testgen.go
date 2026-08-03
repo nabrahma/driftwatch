@@ -92,6 +92,21 @@ var keyTouchingOps = []event.Op{
 var allOps = append(append([]event.Op{}, keyTouchingOps...),
 	event.OpSnapshotBegin, event.OpSnapshotEnd, event.OpHeartbeat)
 
+// AllOps returns the operations Op can produce.
+//
+// Exported so a test can assert the generator's range directly rather than by
+// sampling it. The two are not the same claim: "this generator can produce
+// every operation" is a fact about the slice, and checking it by drawing until
+// all eight have appeared is a probabilistic approximation that fails on the
+// run where one of them happens not to come up.
+//
+// The returned slice is a copy, so a caller cannot narrow what every property
+// test in the repository generates.
+func AllOps() []event.Op { return append([]event.Op(nil), allOps...) }
+
+// KeyTouchingOps returns the operations KeyTouchingOp can produce, as a copy.
+func KeyTouchingOps() []event.Op { return append([]event.Op(nil), keyTouchingOps...) }
+
 // Op generates any operation, including the ones that touch no key.
 func Op(t *rapid.T) event.Op {
 	return rapid.SampledFrom(allOps).Draw(t, "op")
