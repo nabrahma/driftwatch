@@ -344,20 +344,28 @@ func (t *RedisTarget) ReadMany(ctx context.Context, keys []string, shape project
 		return nil, nil
 	}
 
-	out := make([]Read, 0, len(keys))
+	// Allocated once and filled in place, chunk by chunk.
+	//
+	// readChunk used to allocate a slice of its own and the results were
+	// appended here, which copied every Read a second time. A Read carries an
+	// event.Value — a byte slice and a member map — so at a million keys that
+	// was a million redundant struct copies and one extra slice per batch, in
+	// the path S6 measures. Handing each chunk its own window of the final
+	// slice removes both.
+	out := make([]Read, len(keys))
 	for start := 0; start < len(keys); start += t.batch {
 		end := min(start+t.batch, len(keys))
 
-		chunk, err := t.readChunk(ctx, keys[start:end], shape)
-		if err != nil {
+		if err := t.readChunk(ctx, keys[start:end], shape, out[start:end]); err != nil {
 			return nil, err
 		}
-		out = append(out, chunk...)
 	}
 	return out, nil
 }
 
-func (t *RedisTarget) readChunk(ctx context.Context, keys []string, shape projection.Shape) ([]Read, error) {
+func (t *RedisTarget) readChunk(
+	ctx context.Context, keys []string, shape projection.Shape, out []Read,
+) error {
 	pipe := t.client.Pipeline()
 
 	setCmds := make([]*redis.StringSliceCmd, 0, len(keys))
@@ -375,10 +383,9 @@ func (t *RedisTarget) readChunk(ctx context.Context, keys []string, shape projec
 	// WRONGTYPE. Neither is a transport failure, so both are resolved per
 	// command below and only a genuine failure aborts the batch.
 	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) && !isWrongType(err) {
-		return nil, err
+		return err
 	}
 
-	out := make([]Read, len(keys))
 	for i, key := range keys {
 		if shape == projection.ShapeSet {
 			members, err := setCmds[i].Result()
@@ -407,7 +414,7 @@ func (t *RedisTarget) readChunk(ctx context.Context, keys []string, shape projec
 			out[i] = Read{Value: event.Value{Kind: event.ValueScalar, Scalar: []byte(s)}}
 		}
 	}
-	return out, nil
+	return nil
 }
 
 // TTL returns the remaining lifetime of a key.
