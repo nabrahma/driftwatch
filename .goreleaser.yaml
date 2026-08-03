@@ -55,11 +55,26 @@ builds:
       - -X github.com/nabrahma/driftwatch/internal/buildinfo.Date={{.Date}}
     mod_timestamp: "{{ .CommitTimestamp }}"
 
+# One archive per binary, rather than one archive holding both.
+#
+# The two builds do not cover the same platforms and should not: the CLI is a
+# thing somebody runs on a laptop, so it targets Linux, macOS and Windows, while
+# the manager is a Kubernetes operator that only ever runs in a Linux container.
+# Building a macOS manager would be shipping something with no way to be used.
+#
+# A single archive over both then produces a Linux tarball with two binaries in
+# it and a macOS one with a single binary, which goreleaser refuses outright:
+#
+#   invalid archive: archive has different count of binaries for each platform,
+#   which may cause your users confusion
+#
+# It is right to refuse. Two archives say plainly which artifact is which, and
+# each one holds exactly what its name claims on every platform it exists for.
 archives:
-  - id: default
-    ids: [driftwatch, driftwatch-manager]
+  - id: cli
+    ids: [driftwatch]
     name_template: >-
-      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+      driftwatch_{{ .Version }}_{{ .Os }}_{{ .Arch }}
     format_overrides:
       - goos: windows
         formats: [zip]
@@ -68,6 +83,14 @@ archives:
       - LICENSE
       - docs/CORRECTNESS.md
       - docs/KNOWN_GAPS.md
+
+  - id: manager
+    ids: [driftwatch-manager]
+    name_template: >-
+      driftwatch-manager_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - README.md
+      - LICENSE
 
 checksum:
   name_template: checksums.txt
