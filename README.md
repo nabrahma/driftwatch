@@ -3,8 +3,9 @@
 **Your cache is lying to you. This is how you find out.**
 
 [![CI](https://github.com/nabrahma/driftwatch/actions/workflows/ci.yaml/badge.svg)](https://github.com/nabrahma/driftwatch/actions/workflows/ci.yaml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/nabrahma/driftwatch)](https://goreportcard.com/report/github.com/nabrahma/driftwatch)
+[![e2e](https://github.com/nabrahma/driftwatch/actions/workflows/e2e.yaml/badge.svg)](https://github.com/nabrahma/driftwatch/actions/workflows/e2e.yaml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/nabrahma/driftwatch.svg)](https://pkg.go.dev/github.com/nabrahma/driftwatch)
+[![Go](https://img.shields.io/github/go-mod/go-version/nabrahma/driftwatch)](go.mod)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 ---
@@ -144,7 +145,7 @@ keys, a fault injected at the halfway mark and resolved one minute later.
 
 **13 goroutines** at the start. 13 at the end.
 
-**1.03 microseconds** to mark a million keys suspect, because the oracle uses a
+**1.11 microseconds** to mark a million keys suspect, because the oracle uses a
 generation counter instead of touching them.
 
 AMD Ryzen 7 6800HS. [Raw output](docs/benchmarks/) ·
@@ -194,7 +195,7 @@ drops and findings become suspect. But it cannot tell "the store is wrong" from
 "I missed the event that would have made it right." That distinction is the
 entire reason the suspect category exists.
 
-**Memory is bounded by key count, not bytes.** Around 656 MiB per million keys
+**Memory is bounded by key count, not bytes.** Around 640 MiB per million keys
 with one event of history, and roughly 16 KiB per key with a full ring. Size
 against your ring depth. ([G-001](docs/KNOWN_GAPS.md))
 
@@ -213,12 +214,12 @@ target of 5. Six of the seven are inside the Redis client.
 
 ## Built on evidence
 
-**807 unit tests. 49 property tests** at 10,000 cases each. **60 fault
+**779 unit tests. 49 property tests** at 10,000 cases each. **60 fault
 scenarios**, run 20 consecutive times without a flake. A **60-minute soak**. A
 **ZMQ interop test** against real libzmq, both directions.
 
-`go test ./...` finishes in under three minutes. Everything heavier sits behind a
-build tag, because a slow test command stops being run.
+`go test ./...` finishes in under half a minute. Everything heavier sits behind
+a build tag, because a slow test command stops being run.
 
 **30 findings** are written up in [DISCOVERIES.md](docs/DISCOVERIES.md), each
 with a reproduction, an evidence file and a regression test. A sequence number
@@ -239,7 +240,7 @@ That file is the most useful thing in this repository.
 | [Architecture](docs/ARCHITECTURE.md) | Package boundaries, concurrency, failure policy |
 | [Discoveries](docs/DISCOVERIES.md) | 30 things that did not work the way anyone expected |
 | [Known gaps](docs/KNOWN_GAPS.md) | The honest list |
-| [Metrics](docs/METRICS.md) | All 48, and which 8 to alert on |
+| [Metrics](docs/METRICS.md) | All 48, and the 11 the shipped alerts fire on |
 | [Operations](docs/OPERATIONS.md) | Runbook |
 | [Testing](docs/TESTING.md) | Ten levels, and why e2e is the smallest |
 | [Add a source](docs/ADDING_A_SOURCE.md) · [Add a projection](docs/ADDING_A_PROJECTION.md) | Extension guides |

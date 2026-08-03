@@ -20,7 +20,7 @@ prove the wiring is real, not to find logic bugs.
 | Integration | `pkg/target/*_integration_test.go` | < 90s | Docker | `make test-integration` |
 | Fault | `test/faults/` | < 120s | none | `make test-fault` |
 | Controller | `internal/controller/`, `api/` | < 90s | envtest | `make test-controller` |
-| E2E | `test/e2e/` | < 8min | Kind + Docker | `make e2e` |
+| E2E | `test/e2e/` | ~9min | Kind + Docker | `make e2e` |
 | Soak | `test/soak/` | 60min | Docker | `make soak` |
 | Interop | `test/interop/` | < 60s | Python + libzmq | `make test-interop` |
 | Benchmark | `*_bench_test.go` | < 120s | none | `make bench` |
