@@ -30,6 +30,129 @@ written here in anticipation.
 
 ---
 
+## D-028, A per-event ticker publishes at a quarter of its requested rate on a loaded two-core node, and nothing reports it
+
+**Found:** Phase 9, working out why E1's coverage assertion kept landing just
+under its threshold on CI and never locally.
+
+**What happened:** The e2e publisher paced itself with one ticker tick per
+event — a 5ms ticker at 200/sec. `time.Ticker` drops ticks it cannot deliver
+rather than queueing them, which its own documentation says and which
+driftwatch's fake clock models deliberately. On a two-core runner sharing a
+node with Redis, a materializer, the manager and the test process, most of
+those ticks were not delivered, and every one that was not is an event that was
+never sent and never counted anywhere.
+
+Measured directly at `GOMAXPROCS=2` with four busy goroutines alongside,
+requesting 200/sec for ten seconds, three consecutive runs:
+
+```text
+idle node         per-event ticker:   1991 events (199.1/sec,  100%)
+                  elapsed-derived:    2000 events (200.0/sec,  100%)
+contended node    per-event ticker:    482 events ( 48.2/sec,   24%)
+                  elapsed-derived:    2003 events (200.3/sec,  100%)
+```
+
+On sixteen idle cores the two are indistinguishable, which is why this never
+appeared locally.
+
+**Why it matters:** Every scenario in the suite is sized against `keys/rate`.
+E1's comment reasons that "12,000 at 200/sec is the same 60 seconds"; E2's that
+"12,000 keys at 150/s is 80 seconds, against a 60-second detection budget". A
+rate silently 30% low on CI makes every one of those cycles 40% longer than the
+number written beside it.
+
+Nothing fails cleanly when that happens. Scenarios sized with a comfortable
+margin on paper run without one, and the failure surfaces on whichever
+assertion sits closest to its threshold — looking like flakiness, or like a
+defect in whatever that assertion happens to be about. E1's coverage assertion
+was measuring the publisher.
+
+**Fix:** The publisher wakes on a coarse 10ms tick and derives how many events
+*should* have gone out from elapsed time, so a dropped tick is something to
+catch up on rather than something lost. The catch-up is capped at one second's
+worth, which recovers from a stall without handing the ingest buffer a spike no
+real publisher would produce.
+
+**Evidence:** `docs/evidence/D-028-ticker-pacing-loses-rate.txt`
+
+**Regression test:** `test/e2e/cmd/e2eharness: TestOwed`
+
+---
+
+## D-027, E3's workload made the divergence it asserts on impossible to produce
+
+**Found:** Phase 9, on the fourth consecutive CI failure of E3, each with a
+different scenario sizing and each with the same number in the same place.
+
+**What happened:** E3 severs driftwatch's own subscription while the
+materializer keeps writing, and asserts that the keys driftwatch can no longer
+vouch for come back as *suspect* while confirmed drift stays at zero. It timed
+out at `suspect=0` against a populated oracle and a healthy sweep:
+
+```text
+last status: phase=Watching drift=0 suspect=0 tracked=8524 settled=8314
+             coverage=0.9383 targetKeys=8562 applied=14152
+```
+
+The sweep had compared thousands of settled keys and found every one in
+agreement with the store. That was true, and it could not have been otherwise.
+
+The harness publisher emitted `op: add, member: <its own identity>` for every
+event, which the materializer applied as `SADD key member`. `SADD` of a member
+the set already holds is a no-op, so after a key's first event every later
+event for that key changed nothing — not in Redis, and not in the oracle. The
+events driftwatch missed would not have changed anything, so its stale oracle
+agreed with the store exactly:
+
+```text
+oracle for block:N = {replica-0}   (stale, missed 400 events)
+Redis  for block:N = {replica-0}   (current, correct)
+```
+
+A self-loss is undetectable by construction on an idempotent workload. The
+scenario was asking for an outcome its own publisher forbade.
+
+**Why it matters:** E2 passes on the same workload, which is what made this
+hard to see. E2 drops sequence numbers early enough that they are the *first*
+events for their keys, and a first event is not idempotent — it is the
+difference between the key existing and not existing, which is why E2's own
+assertion names `missing_in_target`. E3 has no such route in either direction:
+an event it misses for a known key changes nothing, and one it misses for an
+unknown key leaves it with no expectation to sweep.
+
+More generally, this is the third scenario in the suite found asserting an
+outcome its own fixture could not produce. A scenario that cannot fail for the
+reason it names is worse than a missing scenario, because the green tick is
+counted as evidence.
+
+**Fix:** E3 publishes a scalar workload — `op: set`, value = the sequence
+number — against a scalar DriftCheck. Both halves matter. A missed event leaves
+the oracle holding an older value than the store, which is a real disagreement
+the sweep can see; and the next event for that key overwrites both, so the
+disagreement clears at the same moment the key stops being suspect.
+
+That second property is the one that is easy to get wrong. A workload where
+each event contributes something distinct and permanent — `SADD` of a distinct
+member per event — makes the loss visible but leaves a permanent hole in the
+oracle, and once suspicion decays driftwatch would confirm that hole as drift.
+That is exactly the false positive E3 exists to prove it does not produce. Only
+last-write-wins lets `suspect > 0` and `confirmed == 0` both be true.
+
+The publisher also now walks the keyspace in order rather than drawing from it
+uniformly at random, so `keys/rate` is a real cycle: the keyspace finishes
+filling, every key has a period, and the partition can be placed after
+driftwatch has seen the whole keyspace rather than while it is still learning
+it. Under a random draw a cut early in the run loses mostly *first* events for
+keys, which is a real loss that is completely invisible.
+
+**Evidence:** `docs/evidence/D-027-workload-forbade-the-assertion.txt`
+
+**Regression test:** `test/e2e: E3 SelfLossReportsSuspect`,
+`test/e2e/cmd/e2eharness: TestKeyWalkCoversTheKeyspaceExactlyOncePerCycle`
+
+---
+
 ## D-026, `make e2e-reuse` silently tested a seventeen-hour-old binary
 
 **Found:** Phase 9, three e2e runs into fixing D-025, when a fix that was

@@ -1,0 +1,129 @@
+D-027 — E3's workload made the divergence it asserts on impossible to produce
+
+Captured Phase 9, from the CI run of afa64e2 (GitHub Actions run #11, the e2e
+job). E3 had failed on four consecutive runs, each time with a different
+scenario sizing, and each time with the same number in the same place.
+
+======================================================================
+WHAT THE RUN SHOWED
+======================================================================
+
+  • [FAILED] [92.872 seconds]
+  E3 SelfLossReportsSuspect [It] reports suspect keys and never confirms drift
+  /home/runner/work/driftwatch/driftwatch/test/e2e/chaos_test.go:104
+
+    [FAILED] Timed out after 90.001s.
+    driftwatch's subscription was cut, the store stayed correct, and no key
+    was ever marked suspect — either the loss went unnoticed or the affected
+    keys were never re-swept
+    last status: phase=Watching drift=0 suspect=0 tracked=8524 settled=8314
+                 coverage=0.9383 targetKeys=8562 applied=14152
+
+The preceding spec passed, so the subscription had demonstrably been cut and
+driftwatch had demonstrably noticed:
+
+  ------------------------------
+  S  (E3 "loses events when its subscription is cut" — passed)
+
+tracked=8524 and settled=8314 say the oracle was populated and quiet. The
+sweep was running: coverage=0.9383 is a real sweep over a real keyspace.
+drift=0 and suspect=0 together say the sweep compared thousands of keys and
+found every single one in agreement with the store.
+
+That last part is the finding. It was true, and it could not have been
+otherwise.
+
+======================================================================
+WHY NO KEY COULD DISAGREE
+======================================================================
+
+The harness publisher emitted, for every event (test/e2e/cmd/e2eharness,
+before this change):
+
+    event{
+        Op:     "add",
+        Key:    "block:" + strconv.Itoa(rnd.Intn(keys)),
+        Member: id,          // the publisher's own identity, every time
+    }
+
+and the materializer applied it as:
+
+    case "add":
+        return rdb.SAdd(ctx, ev.Key, ev.Member).Err()
+
+The DriftCheck's projection is keysetOwnership with
+memberTemplate "{{.Member}}", so driftwatch folds the same event into the
+same set.
+
+SADD of a member the set already contains is a no-op. So for every key, the
+first event creates {replica-0} and every subsequent event for that key
+changes nothing — not in Redis, and not in the oracle.
+
+E3 severs driftwatch's own subscription while the materializer keeps writing.
+The claim under test is that the keys driftwatch could not see events for
+come back as *suspect* rather than as confirmed drift. But under this
+workload the events it missed would not have changed anything:
+
+    oracle for block:N   = {replica-0}     (stale, missed 400 events)
+    Redis for block:N    = {replica-0}     (current, correct)
+
+These agree. Exactly. The sweep compares them, finds no difference, and
+produces no finding — so ByTrust[suspect], which counts findings, stays zero
+no matter how long the partition lasts or how many keys are marked.
+
+A self-loss is undetectable by construction on an idempotent workload. The
+scenario was asking for an outcome its own publisher forbade.
+
+======================================================================
+WHY E2 PASSED AND E3 DID NOT
+======================================================================
+
+E2 is the mirror scenario — the loss is on the materializer's side — and it
+passes on the same workload, which is what made this hard to see.
+
+E2 drops sequence numbers 500-900, early enough that those are the *first*
+events for their keys. A first event is not idempotent: it is the difference
+between the key existing and not existing. Redis never gets the key at all,
+and E2's own assertion names the category:
+
+    Expect(status.DivergenceByCategory).To(HaveKey("missing_in_target"))
+
+E3 cannot use that route in either direction. An event driftwatch misses for
+a key it already knows changes nothing; an event it misses for a key it has
+never seen leaves it with no expectation at all, so there is nothing to
+sweep.
+
+======================================================================
+THE FIX, AND WHY LAST-WRITE-WINS SPECIFICALLY
+======================================================================
+
+E3 now publishes a scalar workload — op "set", value = the sequence number —
+against a scalar (last-write-wins) DriftCheck. Both halves matter:
+
+  a missed event leaves the oracle holding an older value than the store,
+  which is a real disagreement the sweep can see;
+
+  and the next event for that key overwrites both, so the disagreement
+  clears at the same moment the key stops being suspect.
+
+The second property is the one that is easy to get wrong. A workload where
+each event contributes something distinct and permanent — SADD of a distinct
+member per event — makes the loss visible but leaves a permanent hole in the
+oracle. Once suspicion decays, driftwatch would confirm that hole as drift,
+which is precisely the false positive E3 exists to prove it does not produce.
+Only a projection where the latest event fully determines the value lets
+suspect > 0 and confirmed == 0 both be true.
+
+======================================================================
+REPRODUCING
+======================================================================
+
+Revert test/e2e/cmd/e2eharness/main.go's shapeEvent to the unconditional
+add/member form, or set E3's FixtureOptions.Projection back to "keyset" while
+leaving CheckOptions.Projection at "scalar" mismatched, then:
+
+    make e2e ARGS='-ginkgo.focus="E3 SelfLoss"'
+
+The scenario reaches "reports suspect keys and never confirms drift" and
+times out at suspect=0 with a populated oracle and a healthy sweep, which is
+the signature above.

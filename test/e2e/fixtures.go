@@ -42,6 +42,15 @@ type FixtureOptions struct {
 	Keys int
 	// Publisher is the identity the publisher declares. Defaults to replica-0.
 	Publisher string
+	// Projection is the workload shape the publisher emits: keyset, which is
+	// the default and what seven of the eight scenarios want, or scalar.
+	//
+	// It has to agree with the DriftCheck's own projection type, and the two
+	// are set separately because they are different statements: this is what
+	// the producer does, CheckOptions.Projection is what driftwatch has been
+	// told to expect. A scenario where they disagree is a scenario about
+	// misconfiguration, and there is a unit test for that.
+	Projection string
 	// SkipFrom and SkipTo make the materializer drop a sequence range, which is
 	// how E2 produces divergence driftwatch can see and the store cannot.
 	SkipFrom int
@@ -64,6 +73,9 @@ func (o *FixtureOptions) applyDefaults() {
 	}
 	if o.Publisher == "" {
 		o.Publisher = "replica-0"
+	}
+	if o.Projection == "" {
+		o.Projection = "keyset"
 	}
 	if o.RedisEvictionPolicy == "" {
 		o.RedisEvictionPolicy = "noeviction"
@@ -293,6 +305,7 @@ spec:
             - --rate=%d
             - --keys=%d
             - --publisher=%s
+            - --projection=%s
             - --status-addr=:8090
           ports:
             - { containerPort: 5557 }
@@ -305,7 +318,7 @@ spec:
             requests: { cpu: 50m, memory: 64Mi }
             limits: { cpu: "1", memory: 256Mi }
 ---
-`, HarnessImage, opts.Rate, opts.Keys, opts.Publisher)
+`, HarnessImage, opts.Rate, opts.Keys, opts.Publisher, opts.Projection)
 }
 
 func renderMaterializer(opts *FixtureOptions) string {

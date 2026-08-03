@@ -26,6 +26,14 @@ var _ = Describe("E1 HappyPath", Ordered, func() {
 	var s *scenario
 	var check string
 
+	// 12,000 keys at 200/sec is a 60-second cycle, against a 3-second
+	// settlement window: 95% of the keyspace is settled at any moment, and the
+	// oracle finishes filling 60 seconds in.
+	const (
+		keys = 12_000
+		rate = 200
+	)
+
 	BeforeAll(func() {
 		// The keyspace has to be large enough that keys can settle, and the
 		// original 3,000 was not. The arithmetic is the whole scenario:
@@ -63,7 +71,17 @@ var _ = Describe("E1 HappyPath", Ordered, func() {
 		// seconds while doing a quarter of the work and sweeping a third of the
 		// keys. 95% settled, populated at 60 seconds, and light enough that the
 		// store stays reachable.
-		s = newScenario("e1-happy-path", &FixtureOptions{Rate: 200, Keys: 12_000})
+		//
+		// All of which was arithmetic about a cycle the publisher did not have.
+		// It drew keys uniformly at random, so the keyspace filled as
+		// 1-e^(-rate*t/keys) and never finished filling: the run that failed
+		// here was at 8,556 tracked keys and still gaining about 57 a second.
+		// Coverage is last-sweep-compared over currently-tracked, so a growing
+		// denominator drags it down on its own — 7,216 over 8,556 is 0.8433, and
+		// the sweep had not skipped anything like 1,340 keys. The publisher now
+		// walks the keyspace in order, which is what every one of these
+		// paragraphs assumed.
+		s = newScenario("e1-happy-path", &FixtureOptions{Rate: rate, Keys: keys})
 		s.waitForPublisher(2000)
 
 		var err error
@@ -72,10 +90,23 @@ var _ = Describe("E1 HappyPath", Ordered, func() {
 	})
 
 	It("reaches a steady state with no divergence", func() {
+		// A full cycle of the stream, measured in events applied rather than in
+		// keys tracked. The coverage assertion below is a ratio against tracked
+		// keys, and running it while the oracle is still filling measures the
+		// filling rather than the sweep.
+		//
+		// Keys tracked is the wrong way to wait for that. Bootstrap is Adopt,
+		// so a check created against a store the publisher has already filled
+		// reports the whole key count within seconds without having seen a
+		// single event — and an adopted key is skipped by the sweep until an
+		// event refreshes it, so coverage stays low for a full cycle after the
+		// gate has already opened. Events applied waits for the thing the
+		// assertion actually depends on.
 		status := s.waitForCheck(check, converge,
-			"the check never reached Watching with a populated oracle",
+			"the check never saw a full cycle of the stream",
 			func(st *CheckStatus) bool {
-				return st.Phase == "Watching" && st.TrackedKeys > 500 && st.SettledKeys > 0
+				return st.Phase == "Watching" &&
+					st.EventsApplied >= keys && st.SettledKeys > 0
 			})
 
 		Expect(status.DivergentKeys).To(BeZero(),

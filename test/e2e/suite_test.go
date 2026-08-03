@@ -241,6 +241,27 @@ func (s *scenario) waitForPublisher(n int) {
 		})
 }
 
+// waitForPublisherEmitted blocks until the publisher has emitted n more events
+// than it had when this was called, and reports the count it started from.
+//
+// E3 needs this because the size of its partition has to be a quantity rather
+// than a race. The scenario cuts driftwatch's subscription and restores it as
+// soon as driftwatch notices, and on a fast runner that whole exchange takes
+// about five seconds — a blind window whose length is set by how quickly a
+// socket reports a closed connection, which is not a property of driftwatch and
+// varies by more than the assertion can absorb. Waiting for a known number of
+// events to go past while the link is down makes the loss the same size on
+// every machine.
+func (s *scenario) waitForPublisherEmitted(n int) int {
+	GinkgoHelper()
+
+	from, err := s.PublisherEmitted(suiteCtx)
+	Expect(err).NotTo(HaveOccurred(), "reading the publisher's position")
+
+	s.waitForPublisher(from + n)
+	return from
+}
+
 // managerGoroutines reads the manager's live goroutine count.
 func managerGoroutines() int {
 	GinkgoHelper()

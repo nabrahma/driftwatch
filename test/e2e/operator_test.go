@@ -29,7 +29,12 @@ var _ = Describe("E6 OperatorLifecycle", Ordered, func() {
 	var baseline int
 
 	BeforeAll(func() {
-		s = newScenario("e6-operator-lifecycle", &FixtureOptions{Rate: 600, Keys: 1000})
+		// A 20-second cycle at 3,000 keys and 150/sec. This scenario patches the
+		// check to a 5-second settlement window part-way through, so the cycle
+		// has to clear that rather than the 3-second default; 1,000 keys at
+		// 600/sec was 1.7 seconds and cleared neither. Nothing settled, so the
+		// resumed check had nothing to sweep and never reported a sweep at all.
+		s = newScenario("e6-operator-lifecycle", &FixtureOptions{Rate: 150, Keys: 3000})
 		s.waitForPublisher(1000)
 	})
 

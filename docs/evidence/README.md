@@ -36,6 +36,8 @@ Each of these is the captured output for one entry in
 | `D-024-namespace-resolution.txt` | A bare service name in a DriftCheck resolves from the manager's namespace | `test/e2e` |
 | `D-025-silent-subscriber.txt` | A SUB socket whose publisher is replaced never reconnects, and driftwatch reports itself healthy while deaf | `pkg/source`, `test/e2e` |
 | `D-026-stale-manager-image.txt` | `make e2e-reuse` applied an unchanged manifest and kept a 17-hour-old manager running | `test/e2e` |
+| `D-027-workload-forbade-the-assertion.txt` | E3 asserted on a divergence its own idempotent workload made impossible to produce | `test/e2e` |
+| `D-028-ticker-pacing-loses-rate.txt` | A per-event ticker published at 24% of its requested rate on a loaded two-core node | `test/e2e` |
 
 Seven discoveries, D-017 through D-023, carry their reproduction inline in
 [DISCOVERIES.md](../DISCOVERIES.md) rather than as a separate capture, because

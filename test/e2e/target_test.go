@@ -26,7 +26,21 @@ var _ = Describe("E4 TargetFlushAndRecover", Ordered, func() {
 	var check string
 
 	BeforeAll(func() {
-		s = newScenario("e4-flush-recover", &FixtureOptions{Rate: 800, Keys: 1500})
+		// 3,000 keys at 150/sec is a 20-second cycle against a 3-second
+		// settlement window, so 85% of the keyspace is settled and available to
+		// compare at any moment.
+		//
+		// 1,500 keys at 800/sec was a 1.9-second cycle, which is *shorter* than
+		// the settlement window: every key is rewritten before it can go quiet
+		// for three seconds, so nothing ever settles and the sweep has nothing
+		// to compare. This scenario flushes the store and asserts driftwatch
+		// notices, and it cannot notice through an empty comparison set.
+		//
+		// It passed for years on a publisher that drew keys at random, where
+		// the exponential tail left about a fifth of the keyspace quiet by
+		// luck at any instant. Walking the keyspace in order removed the luck
+		// and left the arithmetic, which had always been wrong.
+		s = newScenario("e4-flush-recover", &FixtureOptions{Rate: 150, Keys: 3000})
 		s.waitForPublisher(2000)
 
 		var err error

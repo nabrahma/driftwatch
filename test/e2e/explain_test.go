@@ -30,7 +30,10 @@ var _ = Describe("E7 PublisherRestart", Ordered, func() {
 	var epochBefore int64
 
 	BeforeAll(func() {
-		s = newScenario("e7-publisher-restart", &FixtureOptions{Rate: 800, Keys: 1200})
+		// 4,000 keys at 200/sec: a 20-second cycle, clear of the 3-second
+		// settlement window, and 3,000 events reached in fifteen seconds so the
+		// sequence position before the restart is still high.
+		s = newScenario("e7-publisher-restart", &FixtureOptions{Rate: 200, Keys: 4000})
 		s.waitForPublisher(3000)
 
 		var err error
@@ -135,7 +138,11 @@ var _ = Describe("E8 MultiCheck", Ordered, func() {
 	var owned, foreign string
 
 	BeforeAll(func() {
-		s = newScenario("e8-multi-check", &FixtureOptions{Rate: 800, Keys: 1500})
+		// 3,000 keys at 150/sec, a 20-second cycle. The owned check has to have
+		// settled keys to notice its keyspace being flushed, and at 1,500 keys
+		// and 800/sec the cycle was shorter than the settlement window, so it
+		// had none.
+		s = newScenario("e8-multi-check", &FixtureOptions{Rate: 150, Keys: 3000})
 		s.waitForPublisher(2000)
 
 		var err error

@@ -235,6 +235,18 @@ e2e: ## Kind up, build, load, run all 8 scenarios, tear down
 		{ echo "Docker is not reachable; make e2e needs a running daemon"; exit 1; }
 	go test -tags=e2e -timeout=$(E2E_TIMEOUT) -v ./test/e2e/...
 
+# ./test/e2e rather than ./test/e2e/..., because -args is passed to every
+# package the pattern matches and the harness's own test binary does not know
+# what -ginkgo.focus is. Focusing the whole tree fails on that rather than on
+# anything to do with the scenario.
+.PHONY: e2e-focus
+e2e-focus: ## Run one scenario: make e2e-focus FOCUS='E3 SelfLoss'
+	@test -n "$(FOCUS)" || { echo "set FOCUS, e.g. make e2e-focus FOCUS='E3 SelfLoss'"; exit 1; }
+	@docker version --format '{{.Server.Version}}' >/dev/null 2>&1 || \
+		{ echo "Docker is not reachable; make e2e needs a running daemon"; exit 1; }
+	go test -tags=e2e -timeout=$(E2E_TIMEOUT) -v ./test/e2e \
+		-args -ginkgo.focus='$(FOCUS)'
+
 .PHONY: e2e-keep
 e2e-keep: ## Run the suite and leave the cluster standing for debugging
 	DRIFTWATCH_E2E_KEEP=1 $(MAKE) e2e
