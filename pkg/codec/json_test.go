@@ -774,3 +774,136 @@ func TestJSON_IsSafeForConcurrentUse(t *testing.T) {
 		require.NoError(t, <-done)
 	}
 }
+
+// The scanner has to walk fields it does not care about in order to find the
+// ones it does, so every JSON shape has to be traversable even when nothing in
+// it is ever read. These are the shapes that were never exercised: a decoder
+// that mishandles one of them either rejects a valid event or, worse, walks off
+// the end of a field and reads the next one as though it were the value.
+//
+// The fuzzer covers "does not panic". This covers "gets the right answer", which
+// is a different claim and the one that matters for an ignored field: a scanner
+// that stops in the wrong place produces a plausible event rather than an error.
+func TestJSON_IgnoredFieldsOfEveryShapeAreWalkedCorrectly(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload string
+		want    event.Event
+		wantErr error
+	}{
+		{
+			name: "a false literal in an ignored field",
+			payload: `{"publisher":"p","seq":1,"op":"delete","key":"k",` +
+				`"ignored":false,"alsoIgnored":true}`,
+			want: event.Event{Publisher: "p", Seq: 1, Op: event.OpDelete, Key: "k"},
+		},
+		{
+			name: "a null in an ignored field",
+			payload: `{"publisher":"p","seq":1,"op":"delete","key":"k",` +
+				`"ignored":null}`,
+			want: event.Event{Publisher: "p", Seq: 1, Op: event.OpDelete, Key: "k"},
+		},
+		{
+			name: "an exponent with an explicit plus, which is legal JSON",
+			payload: `{"publisher":"p","seq":1,"op":"delete","key":"k",` +
+				`"ignored":1e+5}`,
+			want: event.Event{Publisher: "p", Seq: 1, Op: event.OpDelete, Key: "k"},
+		},
+		{
+			name: "an exponent with a minus and a capital E",
+			payload: `{"publisher":"p","seq":1,"op":"delete","key":"k",` +
+				`"ignored":1.5E-3}`,
+			want: event.Event{Publisher: "p", Seq: 1, Op: event.OpDelete, Key: "k"},
+		},
+		{
+			name: "a nested object several fields deep",
+			payload: `{"publisher":"p","seq":1,"op":"delete","key":"k",` +
+				`"meta":{"a":1,"b":{"c":"d","e":[1,2]},"f":null}}`,
+			want: event.Event{Publisher: "p", Seq: 1, Op: event.OpDelete, Key: "k"},
+		},
+		{
+			name: "an array of mixed shapes",
+			payload: `{"publisher":"p","seq":1,"op":"delete","key":"k",` +
+				`"trace":[1,"two",{"three":3},[4],true,null]}`,
+			want: event.Event{Publisher: "p", Seq: 1, Op: event.OpDelete, Key: "k"},
+		},
+		{
+			name: "an empty nested object and an empty array",
+			payload: `{"publisher":"p","seq":1,"op":"delete","key":"k",` +
+				`"a":{},"b":[]}`,
+			want: event.Event{Publisher: "p", Seq: 1, Op: event.OpDelete, Key: "k"},
+		},
+
+		// The malformed half. Each one stops the scanner somewhere it cannot
+		// recover from, and the decoder has to say so rather than guess.
+		{
+			name: "a nested object whose key is not a string",
+			payload: `{"publisher":"p","seq":1,"op":"delete","key":"k",` +
+				`"meta":{1:"a"}}`,
+			wantErr: codec.ErrMalformed,
+		},
+		{
+			name: "a nested object missing the colon after its key",
+			payload: `{"publisher":"p","seq":1,"op":"delete","key":"k",` +
+				`"meta":{"a" 1}}`,
+			wantErr: codec.ErrMalformed,
+		},
+		{
+			name: "an unterminated nested object",
+			payload: `{"publisher":"p","seq":1,"op":"delete","key":"k",` +
+				`"meta":{"a":1`,
+			wantErr: codec.ErrMalformed,
+		},
+		{
+			name: "an unterminated array",
+			payload: `{"publisher":"p","seq":1,"op":"delete","key":"k",` +
+				`"trace":[1,2`,
+			wantErr: codec.ErrMalformed,
+		},
+		{
+			name: "a nested object with a trailing separator and no value",
+			payload: `{"publisher":"p","seq":1,"op":"delete","key":"k",` +
+				`"meta":{"a":1,}}`,
+			wantErr: codec.ErrMalformed,
+		},
+	}
+
+	c := newJSON(t, nil)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var got event.Event
+			err := c.Decode([]byte(tc.payload), "kv-events", &got)
+
+			if tc.wantErr != nil {
+				require.ErrorIs(t, err, tc.wantErr)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want.Publisher, got.Publisher)
+			assert.Equal(t, tc.want.Seq, got.Seq)
+			assert.Equal(t, tc.want.Op, got.Op)
+			assert.Equal(t, tc.want.Key, got.Key)
+		})
+	}
+}
+
+// A key longer than maxKeyBytes is rejected rather than truncated.
+//
+// Truncating would be worse than rejecting: two distinct keys that share a
+// prefix would fold into one, and driftwatch would compare the wrong pair
+// forever without anything looking wrong.
+func TestJSON_AnOversizedKeyIsRejectedRatherThanTruncated(t *testing.T) {
+	c := newJSON(t, map[string]string{"maxKeyBytes": "16"})
+
+	within := `{"publisher":"p","seq":1,"op":"delete","key":"0123456789abcdef"}`
+	var ok event.Event
+	require.NoError(t, c.Decode([]byte(within), "kv-events", &ok))
+	assert.Equal(t, "0123456789abcdef", ok.Key, "sixteen bytes is the limit, not past it")
+
+	over := `{"publisher":"p","seq":1,"op":"delete","key":"0123456789abcdefg"}`
+	var got event.Event
+	err := c.Decode([]byte(over), "kv-events", &got)
+	require.ErrorIs(t, err, codec.ErrTooLarge)
+	assert.Contains(t, err.Error(), "17 bytes", "the message should say how far over it was")
+}

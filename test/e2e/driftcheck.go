@@ -34,6 +34,25 @@ type CheckOptions struct {
 	SweepInterval time.Duration
 	// ExtraScanInterval defaults to 20s.
 	ExtraScanInterval time.Duration
+	// IdleTimeout defaults to 15s, against a production default of 60s.
+	//
+	// This is the deadline that ends a session which has received nothing, and
+	// it is the only thing that recovers a SUB socket gone quiet without an
+	// error — D-025, and the reason the field exists at all.
+	//
+	// Sixty seconds is right in production, where a reconnect storm is worse
+	// than a minute of silence. It is wrong for a scenario with a ninety-second
+	// budget: E7 deletes the publisher pod and asserts driftwatch records the
+	// restart, so on the runs where the socket goes deaf rather than erroring,
+	// the whole assertion has to fit in the thirty seconds left after the
+	// deadline elapses. It did not, on a slow runner, and the scenario failed
+	// reporting that nothing recorded the restart — which reads as the detection
+	// being broken rather than as the clock running out.
+	//
+	// Same argument as SweepInterval below it. The scenarios test that
+	// driftwatch notices and recovers, not that it waits out a production-sized
+	// deadline first.
+	IdleTimeout time.Duration
 	// Paused starts the check paused.
 	Paused bool
 	// MaxTrackedKeys defaults to 100,000.
@@ -62,6 +81,9 @@ func (o *CheckOptions) applyDefaults() {
 	if o.ExtraScanInterval <= 0 {
 		o.ExtraScanInterval = 20 * time.Second
 	}
+	if o.IdleTimeout <= 0 {
+		o.IdleTimeout = 15 * time.Second
+	}
 	if o.MaxTrackedKeys <= 0 {
 		o.MaxTrackedKeys = 100_000
 	}
@@ -85,6 +107,7 @@ spec:
       endpoints: ["%s"]
       topics: ["kv-events"]
       recvHWM: 100000
+      idleTimeout: %s
     ingestBufferSize: 200000
   codec:
     type: json
@@ -127,7 +150,8 @@ func (f *Fixture) CreateCheck(ctx context.Context, opts *CheckOptions) (string, 
 	}
 
 	manifest := fmt.Sprintf(checkTemplate,
-		opts.Name, f.Namespace, endpoint, opts.Projection, f.RedisAddr(), opts.KeyPattern,
+		opts.Name, f.Namespace, endpoint, opts.IdleTimeout, opts.Projection,
+		f.RedisAddr(), opts.KeyPattern,
 		opts.SettlementWindow, opts.SweepInterval, opts.ExtraScanInterval,
 		opts.MaxTrackedKeys, opts.Paused)
 
