@@ -13,7 +13,7 @@ import (
 // BenchmarkProjectionApply measures the flagship path: one replica claiming
 // ownership of a block, folded into a set that already holds a few members.
 //
-// PRD §16.8 targets more than 2M ops/sec/core. Apply runs once per event on the
+// §16.8 targets more than 2M ops/sec/core. Apply runs once per event on the
 // single applier goroutine, so it sits directly on the ingest throughput
 // ceiling.
 func BenchmarkProjectionApply(b *testing.B) {

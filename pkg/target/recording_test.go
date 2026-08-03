@@ -38,7 +38,7 @@ func TestMain(m *testing.M) {
 		// at package init and never stops them. They are reachable from any
 		// package that links the client, which now includes this one.
 		//
-		// PRD §16.5 anticipates exactly this and permits an ignore for a
+		// §16.5 anticipates exactly this and permits an ignore for a
 		// third-party goroutine with a reason. Neither of these is driftwatch's,
 		// and one of driftwatch's own would be a bug to fix rather than an entry
 		// to add here.
@@ -344,7 +344,7 @@ func TestReadOnlyCommands_IsSortedAndCoversTheInvariantList(t *testing.T) {
 		assert.LessOrEqual(t, got[i-1], got[i], "the allowlist must be sorted")
 	}
 
-	// Exactly the list named in PRD §5.8 I13 must be present.
+	// Exactly the list named in §5.8 I13 must be present.
 	for _, want := range []string{
 		"GET", "SMEMBERS", "SCAN", "TYPE", "TTL", "PTTL",
 		"EXISTS", "HGETALL", "INFO", "STRLEN", "SCARD", "MEMORY",

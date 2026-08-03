@@ -74,7 +74,7 @@ func runExplain(ctx context.Context, env *Env, g *globalFlags, f *explainFlags) 
 
 	if f.fromURL != "" {
 		// Honest rather than silently ignoring the flag. The endpoint it talks
-		// to lands with the operator in Phase 7, and until then saying so beats
+		// to is the operator's job, and saying so beats
 		// starting a second subscriber the user did not ask for.
 		return exitWith(ExitConfigInvalid, errors.New(
 			"--from-running needs the HTTP endpoint served by the operator, which is "+

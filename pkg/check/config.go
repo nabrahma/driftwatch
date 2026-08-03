@@ -953,7 +953,7 @@ func (s *Spec) Validate() error {
 // cannot read. Every key would report a shape mismatch, which reads exactly
 // like the store having been rewritten by something.
 //
-// The webhook in Phase 7 is a thin adapter over this. The rule lives here so it
+// The webhook is a thin adapter over this. The rule lives here so it
 // is enforced by the same code whether the spec arrives through kubectl or
 // through -f, and so it is testable without a cluster (§15 row 59).
 func (s *Spec) ValidateUpdate(previous *Spec) error {

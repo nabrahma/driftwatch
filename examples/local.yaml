@@ -1,4 +1,4 @@
-# Minimal local configuration (PRD §25.2).
+# Minimal local configuration (§25.2).
 #
 # This is the same schema as `DriftCheck.spec`, so the file that runs under
 # `driftwatch watch -f examples/local.yaml` is the file that goes into the

@@ -21,7 +21,7 @@ import (
 	"github.com/nabrahma/driftwatch/pkg/target"
 )
 
-// TestDriftLifecycle_InjectConfirmRepairResolve is the Phase 3 demo.
+// TestDriftLifecycle_InjectConfirmRepairResolve walks a whole drift episode.
 //
 // It runs the whole correctness cycle end to end against a real Redis protocol
 // implementation, in process, with a fake clock: a materializer falls behind

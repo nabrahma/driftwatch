@@ -18,7 +18,7 @@ import (
 
 func TestMain(m *testing.M) { goleak.VerifyTestMain(m) }
 
-// wantMetricNames is the metric set from PRD §12, written out by hand.
+// wantMetricNames is the metric set from §12, written out by hand.
 //
 // Hand-written on purpose. Generating it from the same table the collectors
 // come from would make the test tautological; typed out, it is a second,
@@ -99,7 +99,7 @@ func TestMetrics_RegistryExportsExactlyTheDocumentedNames(t *testing.T) {
 	got := m.RegisteredNames()
 
 	assert.ElementsMatch(t, wantMetricNames, got,
-		"the registry and PRD §12 have drifted apart; every dashboard and alert "+
+		"the registry and §12 have drifted apart; every dashboard and alert "+
 			"is keyed on these names, so a rename is a breaking change")
 }
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fails if any package is below its PRD §16.9 coverage floor.
+# Fails if any package is below its §16.9 coverage floor.
 #
 # §16.9 says "CI fails below target". Until this script existed it did not: the
 # unit job produced cover.out, uploaded it as an artifact, and nothing read the

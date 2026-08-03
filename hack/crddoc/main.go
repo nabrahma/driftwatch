@@ -2,8 +2,8 @@
 //
 // `kubectl explain driftcheck.spec.policy.settlementWindow` renders whatever is
 // in the schema's description, and an empty one means an operator has to read
-// the Go source to configure the field. §20 Phase 7 makes "descriptions for
-// every field" an exit criterion, and a criterion nothing enforces decays: a
+// the Go source to configure the field. A description on every field is a
+// release gate, and a gate nothing enforces decays: a
 // field added in six months would get no comment and nobody would notice until
 // someone ran kubectl explain on it.
 //

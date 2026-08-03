@@ -69,7 +69,7 @@ func TestVerdict_String(t *testing.T) {
 	assert.Equal(t, "Verdict(99)", seqtrack.Verdict(99).String())
 }
 
-// The table below walks every state-transition pair in the PRD §5.2 algorithm.
+// The table below walks every state-transition pair in the §5.2 algorithm.
 // Each case seeds the tracker with a prior history and then observes one more
 // event, which is the shape every transition actually takes in production.
 func TestTracker_ObserveClassifiesEveryStateTransition(t *testing.T) {

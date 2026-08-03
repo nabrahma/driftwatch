@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Asserts the absolute performance targets in PRD §16.8 against the output of
+# Asserts the absolute performance targets in §16.8 against the output of
 # `make bench`.
 #
 # This is the half of §16.8's gate that does not need a baseline. §16.8 states
@@ -15,9 +15,9 @@
 # benchstat gate in CI covers the second; this covers the first, and it is the
 # one that backs the numbers printed in the README.
 #
-# Targets are asserted with the units §16.8 states them in. Where the PRD gives
+# Targets are asserted with the units §16.8 states them in. Where the design
 # a rate per core and the benchmark reports ns/op, the conversion is written out
-# rather than pre-computed, so a reader can check it against the PRD without
+# rather than pre-computed, so a reader can check it against the notes without
 # doing arithmetic.
 #
 # Usage:  hack/verify-benchmarks.sh [docs/benchmarks/current.txt]
@@ -89,7 +89,7 @@ allocsPerOp() {
 
 # require NAME DESCRIPTION ACTUAL LIMIT COMPARISON
 #
-# COMPARISON is "below" or "at-most". Both read as the PRD phrases them, which
+# COMPARISON is "below" or "at-most". Both read as §16.8 phrases them, which
 # is why the target column is quoted verbatim in each call below: a threshold
 # that has drifted from the document it claims to enforce is worse than none.
 require() {
@@ -125,7 +125,7 @@ require() {
 	fi
 }
 
-echo "verify-benchmarks: asserting PRD §16.8 targets against $FILE"
+echo "verify-benchmarks: asserting §16.8 targets against $FILE"
 echo
 
 # --- Throughput targets -----------------------------------------------------

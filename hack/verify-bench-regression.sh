@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# The relative half of PRD §16.8's gate: "fail if any benchmark regresses > 20%
+# The relative half of §16.8's gate: "fail if any benchmark regresses > 20%
 # or allocations increase at all", against the committed baseline.
 #
 # Two rules, enforced differently, because they are two different kinds of

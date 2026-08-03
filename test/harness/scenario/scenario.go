@@ -26,7 +26,7 @@
 // not a stylistic preference. The harness used to wire the pieces up itself,
 // and the duplicate diverged from the real thing in a way that made a whole
 // class of bug invisible to every test in the repository until the composition
-// test in Phase 5 found it (D-013). A fault matrix that tests a replica of the
+// test found it (D-013). A fault matrix that tests a replica of the
 // product proves nothing about the product.
 //
 // Messages are applied synchronously on the test's goroutine rather than

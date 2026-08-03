@@ -1,4 +1,4 @@
-# Release build for the two binaries (PRD §17.4).
+# Release build for the two binaries (§17.4).
 #
 # The container image is NOT built here. It is built by the release workflow
 # from the same Dockerfile CI already tests on every push, so the image that

@@ -13,7 +13,7 @@ intact and in order. It runs in CI under the `interop` build tag.
 The areas most likely to break are subscription-prefix filtering and multipart
 framing conventions. Both must be exercised explicitly.
 
-**Status:** publisher and test land in Phase 7. See PRD §16.6.
+See §16.6.
 
 ## Running it
 

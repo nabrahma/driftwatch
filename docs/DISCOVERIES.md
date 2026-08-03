@@ -2,16 +2,16 @@
 
 Things that turned out not to work the way they were expected to.
 
-This file is a primary deliverable (PRD §1.1.7, §21.3), not a changelog. An
-entry earns its place by being something a competent engineer would have got
-wrong, with the evidence that proves it.
+This file is a deliverable, not a changelog. An entry earns its place by being
+something a competent engineer would have got wrong, with the evidence that
+proves it.
 
 One entry per finding, **newest first**, in this form:
 
 ```markdown
 ## D-000 — One-line statement of the surprising behavior
 
-**Found:** Phase N, while doing X.
+**Found:** while doing X.
 
 **What happened:** What was expected, what actually happened.
 
@@ -32,7 +32,7 @@ written here in anticipation.
 
 ## D-030, The e2e materializer exited when the publisher was rescheduled, so the scenario asserting the store stayed correct was wrong about its own fixture
 
-**Found:** Phase 9, on the first of five attempted consecutive clean e2e runs.
+**Found:** on the first of five attempted consecutive clean e2e runs.
 E7 was the only failure in 34 specs.
 
 **What happened:** E7 deletes the publisher pod and asserts driftwatch
@@ -91,7 +91,7 @@ whether its fixture stayed up can ask instead of assuming.
 
 ## D-029, The extras scan reports target health it never measured, so a healthy check goes Degraded on a timer forever
 
-**Found:** Phase 9, working out why e2e E1 kept reporting
+**Found:** working out why e2e E1 kept reporting
 `TargetAvailable: False, Reason: Unreachable` against a Redis that was
 answering every request.
 
@@ -144,7 +144,7 @@ on keeps the value the last real sweep gave it, which is the honest answer.
 
 ## D-028, A per-event ticker publishes at a quarter of its requested rate on a loaded two-core node, and nothing reports it
 
-**Found:** Phase 9, working out why E1's coverage assertion kept landing just
+**Found:** working out why E1's coverage assertion kept landing just
 under its threshold on CI and never locally.
 
 **What happened:** The e2e publisher paced itself with one ticker tick per
@@ -194,7 +194,7 @@ real publisher would produce.
 
 ## D-027, E3's workload made the divergence it asserts on impossible to produce
 
-**Found:** Phase 9, on the fourth consecutive CI failure of E3, each with a
+**Found:** on the fourth consecutive CI failure of E3, each with a
 different scenario sizing and each with the same number in the same place.
 
 **What happened:** E3 severs driftwatch's own subscription while the
@@ -267,7 +267,7 @@ keys, which is a real loss that is completely invisible.
 
 ## D-026, `make e2e-reuse` silently tested a seventeen-hour-old binary
 
-**Found:** Phase 9, three e2e runs into fixing D-025, when a fix that was
+**Found:** three e2e runs into fixing D-025, when a fix that was
 definitely in the source kept not appearing in the cluster.
 
 **What happened:** The suite's reuse path does this:
@@ -332,7 +332,7 @@ not redundant.
 
 ## D-025, A SUB socket whose publisher is replaced never reconnects, and driftwatch reports itself healthy while deaf
 
-**Found:** Phase 9, running the e2e suite after the coverage work. E7
+**Found:** running the e2e suite after the coverage work. E7
 (PublisherRestart) failed on "the publisher restarted and nothing recorded it",
 and the reason turned out to have nothing to do with restart detection.
 
@@ -429,7 +429,7 @@ relying on this being closed.
 
 ## D-024, A DriftCheck's endpoints resolve from the manager, not from itself
 
-**Found:** Phase 8, the first full run of the e2e suite, all eight scenarios
+**Found:** the first full run of the e2e suite, all eight scenarios
 failing identically.
 
 **What happened:** Every scenario timed out waiting for its check to leave
@@ -496,7 +496,7 @@ service name fails within ninety seconds.
 
 ## D-023, pure-Go zmq4 is wire compatible with libzmq, and the slow joiner is real
 
-**Found:** Phase 8, writing the §16.6 interop test.
+**Found:** writing the §16.6 interop test.
 
 **What happened:** ADR-0001 chose `github.com/go-zeromq/zmq4`, a pure-Go ZMTP
 implementation, over a cgo binding to libzmq. That buys static binaries,
@@ -572,7 +572,7 @@ run by the `interop` job in `.github/workflows/e2e.yaml`.
 
 ## D-022, The oracle's memory does not level off when the key count does
 
-**Found:** Phase 8, the first soak run failing its RSS assertion three times.
+**Found:** the first soak run failing its RSS assertion three times.
 
 **What happened:** §16.7 asserts RSS growth under 5% over the steady-state
 window, allowing for warmup. Every early run failed it, and not marginally: a
@@ -632,7 +632,7 @@ state says so instead of failing the memory assertion.
 
 ## D-021, A soak that "detected nothing" was injecting a fault that changed nothing
 
-**Found:** Phase 8, the first soak run reaching its midpoint.
+**Found:** the first soak run reaching its midpoint.
 
 **What happened:** §16.7 asks for a deliberate 10-event drop at the halfway mark,
 detected and then resolved, to prove the tool still works after half an hour
@@ -683,7 +683,7 @@ existing `require.NotZero(t, detectedAt)`.
 
 ## D-020, The extras scan overwrote the one gauge that stops the dashboard lying
 
-**Found:** Phase 8, watching the demo's own dashboard for thirty seconds.
+**Found:** watching the demo's own dashboard for thirty seconds.
 
 **What happened:** `driftwatch_coverage_ratio` dropped to zero and came back, on
 a period that turned out to be exactly `policy.extraScanInterval`:
@@ -739,7 +739,7 @@ several extras-scan boundaries.
 
 ## D-019, The manager panicked at startup on a registry every test built differently
 
-**Found:** Phase 7, the first time the real image ran in a Kind cluster.
+**Found:** the first time the real image ran in a Kind cluster.
 
 **What happened:** `cmd/driftwatch-manager` puts driftwatch's metrics on
 controller-runtime's registry, so that one scrape of one port returns both the
@@ -769,14 +769,14 @@ metrics, on a deployment whose actual problem has nothing to do with metrics.
 **Fix:** Drop the two registrations. controller-runtime already provides them,
 so the metrics an operator gets are unchanged.
 
-The broader conclusion is about the phase rather than the bug: §20 Phase 7 makes
-`make deploy` against Kind an exit criterion, and this is why. Three other
-defects in this phase were found the same way and nowhere else, the image's
+The broader conclusion is bigger than the bug: `make deploy` against a real Kind
+cluster is a release gate, and this is why. Three other defects were found the
+same way and nowhere else, the image's
 pull policy, the webhook's missing certificate, and the Prometheus operator CRDs
 in the default overlay. All four are startup failures, which is the class of bug
 a test suite is structurally worst at reaching.
 
-**Evidence:** `docs/evidence/phase7-live-check.txt`, the manager running
+**Evidence:** `docs/evidence/live-check-detecting-real-drift.txt`, the manager running
 afterwards, with the status and events it produces.
 
 **Regression test:** None that is honest. A test asserting `buildMetrics` does
@@ -789,7 +789,7 @@ the cheapest thing that would actually have caught it.
 
 ## D-018, Defaults do not reach a field the operator did not mention
 
-**Found:** Phase 7, applying `config/samples/` to Kind and reading it back.
+**Found:** applying `config/samples/` to Kind and reading it back.
 
 **What happened:** Every field in the CRD carries a `+kubebuilder:default`, and
 §10.2 asks that `kubectl get driftcheck -o yaml` show the configuration that is
@@ -816,7 +816,7 @@ defaults mostly do not fire.
 `policy.settlementWindow`. An empty object is enough to make the API server
 descend, and the children default from there.
 
-**Evidence:** `docs/evidence/phase7-live-check.txt`, the effective
+**Evidence:** `docs/evidence/live-check-detecting-real-drift.txt`, the effective
 configuration read back from a cluster with no webhook installed, showing all
 six blocks filled in.
 
@@ -829,7 +829,7 @@ committed one, so the markers cannot be dropped without CI noticing.
 
 ## D-017, Cancelling the leader-elected runnables does not order them
 
-**Found:** Phase 7, running the manager test under `-race`.
+**Found:** running the manager test under `-race`.
 
 **What happened:** §10.3 requires that all runners stop when the manager stops
 leading, and `RunnerStopper` implements it: a leader-elected runnable that waits
@@ -862,7 +862,7 @@ start, or the latch came afterwards, in which case the entry was already in the
 map when `Shutdown` enumerated. `StopAll` alone cannot close that window,
 whatever order the runnables are cancelled in.
 
-**Evidence:** `docs/evidence/phase7-controller-suite.txt`
+**Evidence:** `docs/evidence/controller-suite-envtest.txt`
 
 **Regression test:** `internal/controller: TestRegistry_ShutdownRefusesLateStarts`
 and `TestRegistry_ShutdownRacingWithEnsureLeavesNothingRunning`, the second runs
@@ -873,7 +873,7 @@ that produced it.
 
 ## D-016, Fifty idle checks held 640 MB, essentially all of it an empty channel
 
-**Found:** Phase 6, writing §15 row 60.
+**Found:** writing §15 row 60.
 
 **What happened:** The row requires memory to be linear in the number of checks
 and small enough that a manager can hold a realistic number of them. Fifty
@@ -910,7 +910,7 @@ is the oracle's shards and settlement index, which is real state.
 
 ## D-015, Three metrics were declared, documented, exported and never written
 
-**Found:** Phase 6, writing §15 rows 18, 19, 23, 24 and 36.
+**Found:** writing §15 rows 18, 19, 23, 24 and 36.
 
 **What happened:** `driftwatch_publisher_clock_skew_seconds`,
 `driftwatch_events_dropped_total{reason="unknown_op"}` and
@@ -954,7 +954,7 @@ exports its state gauges more than once.
 
 ## D-014, `Commutative()` was declared by every projection and read by nothing
 
-**Found:** Phase 6, writing §15 row 7.
+**Found:** writing §15 row 7.
 
 **What happened:** §9 M6 defines the method and states the obligation plainly, 
 "If false, the oracle must order by seq before applying". All three projections
@@ -1002,7 +1002,7 @@ events within a sliding window of eight and compares the oracle against
 
 ## D-013, A key template makes the oracle key and the event key different, and the applier used the wrong one
 
-**Found:** Phase 5, on the first run of `TestCheck_EndToEnd_InProcess`.
+**Found:** on the first run of `TestCheck_EndToEnd_InProcess`.
 
 **What happened:** With `keyTemplate: "block:{{.Key}}"` configured, six events, 
 three blocks, each added by two replicas, produced an oracle holding one member
@@ -1043,7 +1043,7 @@ that runs a key template through the whole pipeline, and that is precisely why
 
 ## D-012, §12's default publisher label limit and its cardinality budget cannot both be satisfied
 
-**Found:** Phase 5, writing the cardinality test M12 requires.
+**Found:** writing the cardinality test M12 requires.
 
 **What happened:** The test, 10,000 keys and 500 publishers, asserting the
 registry stays under 500 time series, failed at 629 on its first run, with the
@@ -1090,7 +1090,7 @@ and `TestMetrics_CardinalityStaysBoundedWithEveryMetricExercised`.
 
 ## D-011, Caching the first DNS resolution turns a pod reschedule into permanent silence
 
-**Found:** Phase 4, implementing the ZMQ source's reconnect loop.
+**Found:** implementing the ZMQ source's reconnect loop.
 
 **What happened:** nothing, which is the point. §9 M4 lists this among its edge
 cases and it is worth writing down because the failure it describes is entirely
@@ -1137,7 +1137,7 @@ kind of property that rots silently without one.
 
 ## D-010, The pure-Go ZMQ binding accepts a subscriber high-water mark and ignores it
 
-**Found:** Phase 4, implementing §8.1's ingest-buffer sizing rule.
+**Found:** implementing §8.1's ingest-buffer sizing rule.
 
 **What happened:** §8.1 sets out a specific defence. ZMQ PUB sockets drop for
 slow subscribers silently, so driftwatch should set `ZMQ_RCVHWM` explicitly and
@@ -1170,7 +1170,7 @@ system it is supposed to be observing without touching.
 
 **Why it matters:** the §8.1 mitigation is untestable as written against this
 binding, and worse, it silently appears to work. Setting the option returns no
-error. A reviewer reads the line, matches it against the PRD, and moves on. The
+error. A reviewer reads the line, matches it against the design notes, and moves on. The
 failure only shows up in production, as either unbounded memory or, the part
 that would be genuinely hard to diagnose, a publisher mysteriously slowing down
 whenever the monitoring is running.
@@ -1200,7 +1200,7 @@ layer enforcing it moved.
 
 ## D-009, A confirmed finding is a claim about one oracle version, and nothing was withdrawing it
 
-**Found:** Phase 3, the first run of the I11 property test.
+**Found:** the first run of the I11 property test.
 
 **What happened:** the sweeper confirms a finding, stores it, and clears it when
 a later sweep finds the key agreeing again. That is the resolution path §9 M10
@@ -1265,7 +1265,7 @@ places and missing from the third, which is what a property test is for.
 
 ## D-008, Discarding timed-out probes shrinks the settlement window 12x, and only during an outage
 
-**Found:** Phase 3, implementing the convergence estimator (M11).
+**Found:** implementing the convergence estimator (M11).
 
 **What happened:** the settlement window W is the p99 of measured
 event-to-target convergence, times a safety factor. Probes that never converge
@@ -1348,9 +1348,9 @@ window it has measured to be too small.
 
 ## D-007, The `<5 allocs/key` budget for batched reads is below the client's own floor
 
-**Found:** Phase 2, writing `BenchmarkGetMany500`.
+**Found:** writing `BenchmarkGetMany500`.
 
-**What happened:** PRD §16.8 budgets fewer than five allocations per key for a
+**What happened:** §16.8 budgets fewer than five allocations per key for a
 batched read. driftwatch measured 19. Before optimizing, I measured what the
 mandated client costs on its own: a bare go-redis pipeline of 500 `GET`s, with
 no driftwatch code in the path at all, allocates **16.03 per key**. Adding the
@@ -1386,7 +1386,7 @@ keeps testing driftwatch rather than tracking its dependency.
 
 ## D-006, A `FLUSHDB` mid-`SCAN` does not loop forever; it does something quieter and worse
 
-**Found:** Phase 2, investigating the trap PRD §9 M8 warns about.
+**Found:** investigating the trap §9 M8 warns about.
 
 **What happened:** M8 says a `SCAN` cursor invalidated by a `FLUSHDB`
 mid-iteration causes Redis to restart the cursor at 0, and that the loop must be
@@ -1404,7 +1404,7 @@ of the 10,000 keys: one percent of the keyspace, cursor 0, no error. From the
 caller's side that is indistinguishable from a keyspace that genuinely contains
 a hundred keys.
 
-**Why it matters:** the danger the PRD anticipated is loud, a hung sweep is
+**Why it matters:** the danger anticipated up front is loud, a hung sweep is
 obvious. The danger that is actually there is silent, and it points the wrong
 way. driftwatch scans the target to find `extra_in_target` keys, and a scan
 that silently returns 1% of the keyspace does not manufacture extras; it
@@ -1436,7 +1436,7 @@ person does not go looking for the hang either.
 
 ## D-005, `INFO` with several sections works on Redis 7 and fails on Redis 6
 
-**Found:** Phase 2, writing `Health`.
+**Found:** writing `Health`.
 
 **What happened:** `Health` needs fields from the `stats`, `memory`,
 `replication` and `server` sections, so it asked for them in one call:
@@ -1474,9 +1474,9 @@ in a future version, the other half of the same problem.
 
 ## D-004, A strict read-only allowlist refuses the client library's own handshake
 
-**Found:** Phase 2, wiring the `redis.Hook` that enforces read-only access.
+**Found:** wiring the `redis.Hook` that enforces read-only access.
 
-**What happened:** the allowlist in PRD §5.8 I13 names twelve commands, all of
+**What happened:** the allowlist in §5.8 I13 names twelve commands, all of
 them keyspace reads. Enforcing exactly that list made every single read fail
 with `mutating command attempted on a read-only target`.
 
@@ -1497,7 +1497,7 @@ with the client version.
 maximally misleading error message. driftwatch cannot read anything at all, and
 the message says a *write* was attempted, sending whoever is debugging it to
 look for a mutation in a codebase whose entire design is that it never mutates.
-It would have been found in Phase 7 against a real cluster, after the cause had
+It would have been found later against a real cluster, after the cause had
 been buried under six phases of other work.
 
 **Fix:** two allowlists rather than one. `readOnlyCommands` holds the data-plane
@@ -1520,7 +1520,7 @@ discovered at different times.
 
 ## D-003, Enforcing a global key budget per shard silently loses ~0.3% of the capacity you configured
 
-**Found:** Phase 1, while benchmarking the oracle at a million keys.
+**Found:** while benchmarking the oracle at a million keys.
 
 **What happened:** The oracle bounds memory with `MaxTrackedKeys`, and enforces
 it as a per-shard budget so that eviction stays shard-local and no code path
@@ -1567,7 +1567,7 @@ than as a surprise.
 
 ## D-002, A JSON sequence number above 2^53 is silently corrupted by any decoder that goes through float64
 
-**Found:** Phase 1, while implementing the json codec.
+**Found:** while implementing the json codec.
 
 **What happened:** `encoding/json` is safe here *only* if the destination is a
 typed `uint64` field, then it parses the digits directly and
@@ -1612,7 +1612,7 @@ does.
 
 ## D-001, Go's `time.RFC3339` layout rejects the lowercase `t` and `z` that RFC 3339 permits
 
-**Found:** Phase 1, while writing an allocation-free RFC3339 parser for the json
+**Found:** while writing an allocation-free RFC3339 parser for the json
 codec.
 
 **What happened:** The codec has two timestamp paths: a byte-level fast path for

@@ -109,7 +109,7 @@ spec:
           resources:
             # Sized for the default policy.maxTrackedKeys of 1,000,000 at
             # roughly 700 bytes per key, plus headroom for a sweep's read
-            # batches. §19.1 budgets 512 MiB RSS for that, and §21's known gap
+            # batches. §19.1 budgets 512 MiB RSS for that, and known gap
             # G-001 records that the real figure measured closer to 640 MiB —
             # so the limit is set above the budget rather than at it, because a
             # limit that OOM-kills the manager takes every check down with it.

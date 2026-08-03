@@ -17,7 +17,7 @@ import (
 //
 // miniredis rather than a container: these benchmarks measure driftwatch's
 // pipelining and iteration overhead, and a real network would bury that under
-// round-trip latency. BenchmarkFullSweep1M in Phase 3 is the one that belongs
+// round-trip latency. BenchmarkFullSweep1M is the one that belongs
 // against a real server, because there the network is the subject.
 func benchTarget(b *testing.B) (*target.RedisTarget, *miniredis.Miniredis) {
 	b.Helper()
@@ -33,7 +33,7 @@ func benchTarget(b *testing.B) (*target.RedisTarget, *miniredis.Miniredis) {
 // BenchmarkGetMany500 measures one pipelined batch, which is the unit the
 // sweeper reads in.
 //
-// PRD §16.8 expects this to be dominated by the network and asks for fewer than
+// §16.8 expects this to be dominated by the network and asks for fewer than
 // five allocations per key. Against an in-process server the network is gone,
 // so what is left is the pipeline construction and reply decoding — which is
 // exactly the part driftwatch controls.
@@ -170,7 +170,7 @@ func BenchmarkMemoryGet(b *testing.B) {
 
 // TestGetMany500AllocationBudget pins driftwatch's own allocation cost per key.
 //
-// PRD §16.8 asks for fewer than five allocations per key. That number is not
+// §16.8 asks for fewer than five allocations per key. That number is not
 // reachable and never was: a bare go-redis pipeline of 500 GETs, with no
 // driftwatch code involved at all, allocates about 16 times per key. The budget
 // is below the floor the mandated client imposes (docs/DISCOVERIES.md D-007).

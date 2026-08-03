@@ -8,8 +8,8 @@ import (
 // than a courtesy: controller-gen copies them into the CRD's OpenAPI schema, so
 // they are what `kubectl explain driftcheck.spec.policy.settlementWindow`
 // prints. An undocumented field is one an operator has to read the source to
-// configure, and §20 Phase 7 makes "descriptions for every field" an exit
-// criterion for exactly that reason.
+// configure, so a description on every field is a release gate rather than a
+// convention.
 
 // DriftCheckSpec describes one audit: where the events come from, how to fold
 // them into an expectation, which store to compare that expectation against,

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Fails if time.Sleep appears anywhere outside test/e2e and test/soak.
 #
-# Why this exists: PRD §23 A2. A suite that sleeps is slow, then flaky, then
-# unrun, then rotten. §16.4 requires the injected fake clock instead, and §20
-# Phase 3 makes this check a release gate because the sweeper and the lag
+# Why this exists: §23 A2. A suite that sleeps is slow, then flaky, then
+# unrun, then rotten. §16.4 requires the injected fake clock instead, and this
+# check is a release gate because the sweeper and the lag
 # estimator are the two packages where sleeping would be most tempting and most
 # corrosive — every one of their behaviours is defined in terms of elapsed time.
 #
@@ -60,7 +60,7 @@ if [[ ${#violations[@]} -gt 0 ]]; then
 	echo "verify-no-sleep: time.Sleep is not allowed outside ${EXEMPT_DIRS[*]}"
 	echo
 	echo "Use the injected clock (pkg/clock) and its fake instead. A test that"
-	echo "sleeps is slow, then flaky, then unrun (PRD §16.4, §23 A2)."
+	echo "sleeps is slow, then flaky, then unrun (§16.4, §23 A2)."
 	echo
 	printf '  %s\n' "${violations[@]}"
 	exit 1

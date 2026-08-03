@@ -95,7 +95,7 @@ jobs:
 
   # §16.5, against real Redis 6 and 7. This job existed as a Makefile target and
   # a passing test file that no workflow ever ran, which is the same as not
-  # having it: every finding in Phase 2 was a place where miniredis and a real
+  # having it: every early finding here was a place where miniredis and a real
   # server disagreed, and a suite that only runs locally catches those only when
   # somebody remembers to look.
   #

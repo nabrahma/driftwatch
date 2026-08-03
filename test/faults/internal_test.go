@@ -29,7 +29,7 @@ import (
 //
 // Every row of the matrix in §15 is one test, and the "Expected" column is the
 // assertion: if the implementation does something else, the implementation is
-// wrong. This file holds rows 47 to 54, the ones Phase 3 is responsible for.
+// wrong. This file holds rows 47 to 54.
 //
 // Each test registers its row number so TestFaultMatrix_Coverage can prove the
 // range is actually covered rather than merely claimed.
@@ -207,7 +207,7 @@ func (r *rig) settle() { r.clk.Advance(faultWindow + time.Second) }
 
 func TestFault47_DroppedEventsMakeKeysSuspectRatherThanWrong(t *testing.T) {
 	// The full row — publishing ten times faster than the decoder and watching
-	// events_dropped_total rise — needs pkg/source, which is Phase 4. What is
+	// events_dropped_total rise — needs pkg/source. What is
 	// testable now is the half that matters for correctness: once driftwatch
 	// knows it lost events, it must stop claiming the target is wrong.
 	//
@@ -515,7 +515,7 @@ func TestFaultMatrix_Coverage(t *testing.T) {
 	// followed. A row with no test is a row where the implementation can do
 	// whatever it likes, and the gap is invisible unless it is asserted.
 	//
-	// Phase 3 owned rows 47 to 54 and Phase 6 the rest, so the range is now the
+	// Rows 47 to 54 were written before the rest, so the range is now the
 	// whole matrix. hack/verify-fault-matrix.sh checks the same property from
 	// outside the compiler by reflecting over test names; this table checks it
 	// from inside, where deleting or renaming a test is a build failure rather

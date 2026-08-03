@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Verifies that the generated deepcopy code matches the API types.
 #
-# Until Phase 7 this was a placeholder that failed the moment api/ grew its
+# This was once a placeholder that failed the moment api/ grew its
 # first kubebuilder marker, which is what got it written rather than forgotten.
 #
 # What it guards is not obvious from outside. controller-runtime deep-copies

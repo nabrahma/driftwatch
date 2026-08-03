@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verifies that every row of the fault scenario matrix (PRD §15) has a test.
+# Verifies that every row of the fault scenario matrix (§15) has a test.
 #
 # The matrix is a specification of correctness under failure: sixty rows, each
 # naming a fault and the behaviour driftwatch must exhibit. A row with no test
@@ -9,7 +9,7 @@
 # This makes it self-enforcing. It reflects over the test names in test/faults/
 # and fails if any row from 1 to 60 lacks a TestFault<NN>_<Name>.
 #
-# See PRD §15, §17.1 and docs/DECISIONS.md ADR-0007.
+# See §15, §17.1 and docs/DECISIONS.md ADR-0007.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -23,8 +23,8 @@ if [ ! -d "$DIR" ]; then
   exit 1
 fi
 
-# The row numbers that have a test. The two-digit form is required by §20
-# Phase 6, so that sorting a test list orders it by matrix row.
+# The row numbers that have a test. The two-digit form is required so that
+# sorting a test list orders it by matrix row.
 covered=$(grep -rhoE 'func TestFault[0-9]{2}_' "$DIR" | grep -oE '[0-9]{2}' | sort -u)
 
 missing=()

@@ -185,7 +185,7 @@ type Tracker struct {
 // Observe classifies an event and updates publisher state. It returns the
 // verdict plus any gap that was newly detected.
 //
-// This implements the algorithm in PRD §5.2 exactly.
+// This implements the algorithm in §5.2 exactly.
 func (t *Tracker) Observe(e *event.Event) (Verdict, *Gap) {
 	now := t.cfg.Clock.Now()
 

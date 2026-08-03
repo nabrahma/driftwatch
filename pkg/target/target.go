@@ -176,7 +176,7 @@ type Commander interface {
 	ObserveCommands(fn func(name string))
 }
 
-// readOnlyCommands is the data-plane allowlist from PRD §5.8 I13, matched on
+// readOnlyCommands is the data-plane allowlist from §5.8 I13, matched on
 // the command verb. Everything here reads keyspace data; anything absent from
 // both this and connectionCommands is refused.
 var readOnlyCommands = map[string]struct{}{

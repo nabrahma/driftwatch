@@ -1,7 +1,7 @@
 // Command driftwatch is the driftwatch command-line interface (§11).
 //
-// This file is deliberately almost empty. §1.1.4 forbids reading the wall clock
-// anywhere but main and the clock implementation itself, so main is where the
+// This file is deliberately almost empty. Nothing outside main and the clock
+// implementation itself is allowed to read the wall clock, so main is where the
 // real clock is created and injected, and everything below it is testable
 // against a fake one.
 package main

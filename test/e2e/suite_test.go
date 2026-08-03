@@ -358,10 +358,10 @@ func managerMetric(name string) float64 {
 // breakOnPurpose reports whether the suite was asked to fail a scenario
 // deliberately, so the diagnostics dump can be inspected.
 //
-// §20 Phase 8 makes "verified by deliberately breaking a test and confirming
-// the artifact dump is complete and useful" an exit criterion. Doing that by
-// editing an assertion and remembering to put it back is how a broken
-// assertion gets committed; this makes it a flag.
+// The dump is only worth anything if somebody has broken a test on purpose and
+// confirmed it is complete and useful. Doing that by editing an assertion and
+// remembering to put it back is how a broken assertion gets committed; this
+// makes it a flag.
 func breakOnPurpose() bool {
 	return truthy(os.Getenv("DRIFTWATCH_E2E_BREAK"))
 }

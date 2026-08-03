@@ -1,6 +1,6 @@
 # golangci-lint configuration for driftwatch.
 #
-# The enabled set is fixed by PRD §20 Phase 0. Adding or removing a linter
+# The enabled set is deliberate. Adding or removing a linter
 # requires an ADR in docs/DECISIONS.md.
 #
 # Pinned tool version: v1.64.8 (see hack/install-tools.sh and CI).
@@ -47,7 +47,7 @@ linters-settings:
       - style
     disabled-checks:
       # Early-return rewrites and if-else-to-switch conversions are style
-      # preferences that conflict with the explicit, boring code §1.1.10 asks for.
+      # preferences that conflict with the explicit, boring code this project wants.
       - ifElseChain
       - singleCaseSwitch
 
@@ -60,7 +60,7 @@ linters-settings:
     for-loops: true
 
   revive:
-    # §1.2 requires a doc comment on every exported symbol, beginning with the
+    # Every exported symbol needs a doc comment beginning with the
     # symbol name. The exported rule is what enforces that.
     enable-all-rules: false
     rules:

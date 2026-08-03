@@ -1,7 +1,7 @@
 // Package oracle holds driftwatch's independently computed expectation of
 // target state (M7).
 //
-// The oracle is the "notebook" from PRD §0.2: what the target store should
+// The oracle is the "notebook" from §0.2: what the target store should
 // contain, computed by folding the event stream rather than by reading the
 // store. Everything driftwatch reports is a comparison against this.
 //

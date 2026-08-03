@@ -3,10 +3,10 @@
 One section per alert in `config/prometheus/rules.yaml`. Every `runbook_url` in
 that file anchors here.
 
-These entries are deliberately short. The full treatment PRD §21.5 asks for, 
-ranked causes with a confirmation step for each, lands in Phase 9. What is here
-exists because Phase 7 shipped the alerts, and an alert whose runbook link 404s
-at three in the morning is worse than one with no link at all.
+These entries are deliberately short. The fuller treatment each of them
+deserves — ranked causes with a confirmation step for each — is still to come.
+What is here exists because the alerts shipped, and an alert whose runbook link
+404s at three in the morning is worse than one with no link at all.
 
 ## Two things that change how everything below reads
 

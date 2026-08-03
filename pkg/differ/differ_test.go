@@ -20,7 +20,7 @@ func TestMain(m *testing.M) {
 		// at package init and never stops them. They are reachable from any
 		// package that links the client, which now includes this one.
 		//
-		// PRD §16.5 anticipates exactly this and permits an ignore for a
+		// §16.5 anticipates exactly this and permits an ignore for a
 		// third-party goroutine with a reason. Neither of these is driftwatch's,
 		// and one of driftwatch's own would be a bug to fix rather than an entry
 		// to add here.
@@ -57,7 +57,7 @@ func entry(v event.Value) oracle.Entry {
 
 func ptr[T any](v T) *T { return &v }
 
-// TestCompare is the comparison table from PRD §9 M9: every reachable
+// TestCompare is the comparison table from §9 M9: every reachable
 // combination of oracle kind, target kind, trust and expiry policy, with the
 // category it must produce or nil.
 func TestCompare(t *testing.T) {

@@ -1,10 +1,12 @@
-# driftwatch, Technical Product Requirements Document
+# driftwatch, design notes
 
-**Version:** 1.0
-**Status:** Ready for implementation
-**Target implementer:** Autonomous coding agent (Claude Opus 5 / Claude Code)
-**Language:** Go 1.23+
-**License:** Apache-2.0
+The reasoning behind the implementation. Written before most of the code
+existed and kept in step with it since, which is why comments throughout the
+source cite these sections by number.
+
+It describes what driftwatch does and why it does it that way. What it
+deliberately does not describe is how well it currently does it: that is
+[KNOWN_GAPS.md](KNOWN_GAPS.md), and it is the half worth reading second.
 
 ---
 
@@ -73,64 +75,6 @@ Three reasons, in order of importance to the author:
 1. **It is genuinely useful and doesn't exist.** There is no general-purpose divergence detector for pub/sub-materialized state. People write one-off scripts per system.
 2. **It exercises exactly the skills that distributed-systems maintainers care about**: Go, Kubernetes operators, Kind-based end-to-end testing, Redis, ZeroMQ, Prometheus/Grafana observability, and, most of all, *reasoning correctly about lag, ordering, and partial failure*.
 3. **The hard part is intellectually real.** Naively diffing two stores produces an avalanche of false positives, because the target legitimately lags the event stream. Solving that properly (§5) is the substance of the project and the thing worth talking about in an interview.
-
----
-
-## 1. How the implementing agent should work
-
-This section is a **binding working agreement**. Read it before writing any code.
-
-### 1.1 Core rules
-
-1. **Test-first, always.** For every module, write the test file before the implementation file. A module is not "done" until its tests pass with `-race`.
-2. **No skipped tests. No `t.Skip()` without a linked TODO issue in `docs/KNOWN_GAPS.md`.** A skipped test is a lie.
-3. **Never mock the thing under test.** Mock only the boundaries (network, clock, store).
-4. **The clock is always injected.** No direct `time.Now()` calls anywhere except in `main()` and in the clock implementation itself. This is non-negotiable, the entire test strategy depends on controllable time.
-5. **Commit at every green checkpoint**, with conventional-commit messages (`feat:`, `fix:`, `test:`, `docs:`, `refactor:`, `chore:`). Small commits. One logical change each.
-6. **Never leave a broken `main` branch.** If a phase can't complete, commit the working subset and record the gap.
-7. **Maintain `docs/DISCOVERIES.md` continuously.** Every time something surprises you, a library behaves unexpectedly, a Redis command has a subtlety, a ZMQ socket drops silently, write it down immediately with the reproducing evidence. This file is a primary deliverable, not an afterthought. See §21.3.
-8. **Maintain `docs/evidence/`.** Every significant claim in the README must map to a real captured log or output file in this directory. See §21.4.
-9. **Do not add dependencies not listed in §8.4** without recording the decision in `docs/DECISIONS.md` with rationale and alternatives considered.
-10. **Prefer boring, obvious code.** This project's value is in its correctness reasoning and its test suite, not in clever Go. If a reviewer has to think hard about *how* the code works, rewrite it.
-
-### 1.2 Definition of "done" for any module
-
-A module is done when **all** of the following hold:
-
-- [ ] All exported symbols have doc comments beginning with the symbol name.
-- [ ] Unit tests exist and pass, including table-driven cases for every documented edge case.
-- [ ] Property tests exist where invariants are stated (§16.2).
-- [ ] `go test -race ./...` passes.
-- [ ] `go vet ./...` passes.
-- [ ] `golangci-lint run` passes with the project's `.golangci.yml`.
-- [ ] `goleak` verification is wired into the package's `TestMain`.
-- [ ] Package coverage meets the target in §16.9.
-- [ ] Any surprise encountered is recorded in `docs/DISCOVERIES.md`.
-
-### 1.3 Order of work
-
-Follow the phase plan in §20 **strictly in order**. Each phase has explicit exit criteria. Do not begin phase N+1 until phase N's exit criteria are met and committed. The phases are ordered so that every phase produces something demonstrable, which means if the project is abandoned mid-way it still looks complete rather than half-built.
-
-### 1.4 When blocked
-
-If genuinely blocked (a library doesn't do what's needed, a design in this PRD turns out to be wrong):
-
-1. Write the problem into `docs/DECISIONS.md` under a new heading.
-2. State the two or three options with tradeoffs.
-3. Pick the one that preserves testability, and proceed.
-4. Do **not** silently deviate from the PRD without recording it.
-
-### 1.5 What "resume-ready" means here
-
-The end state is not just working code. It is a repository that a Kubernetes maintainer can open and, within 90 seconds, conclude *"this person understands distributed systems and testing."* Concretely that requires:
-
-- A green CI badge.
-- A README with a real architecture diagram, real measured numbers, and a **Key Discoveries** section.
-- `docs/evidence/` with actual terminal output backing every claim.
-- `make e2e` that works from a clean clone on a machine with Docker.
-- A Grafana dashboard screenshot showing drift being detected and recovering.
-- Zero "TODO" or "FIXME" in the main code path.
-- No unbacked superlatives anywhere. Never write "production-grade," "enterprise," or "institutional." Write the measured number instead.
 
 ---
 
@@ -2928,7 +2872,7 @@ make verify                # everything CI runs, locally
 make clean
 ```
 
-**`make demo` is a required deliverable, not a nicety.** One command that brings up the whole stack with Grafana at localhost:3000 showing the dashboard, plus `make demo-inject-drift` that triggers a fault so a visitor can watch the number go red and then recover. This is how you show the project in 60 seconds, in an interview, in a PR description, in a README GIF. Build it in Phase 8 and make sure it works from a clean clone.
+**`make demo` is a required deliverable, not a nicety.** One command that brings up the whole stack with Grafana at localhost:3000 showing the dashboard, plus `make demo-inject-drift` that triggers a fault so a visitor can watch the number go red and then recover. This is how the project shows itself in sixty seconds. It has to work from a clean clone.
 
 ---
 
@@ -2993,383 +2937,7 @@ Every one of these must have an explicit cap, a metric, and a test proving the c
 | key length | `maxKeyBytes` (default 4096) |
 | log volume per reason | token bucket |
 
-**There must be no unbounded collection anywhere in the codebase.** Add a review checklist item and, in Phase 8, do an explicit audit pass reading every `make(map` and `append` in the codebase to confirm each is bounded or provably short-lived. Record the audit result in `docs/DISCOVERIES.md`.
-
----
-
-## 20. Phased delivery plan
-
-Nine phases. **Do them in order.** Each ends with a commit, green CI, and something demonstrable. The ordering is chosen so that abandoning after any phase still leaves a coherent project.
-
----
-
-### Phase 0, Scaffold (target: 0.5 day)
-
-**Build:** `go mod init`; the full directory tree from §7 (empty files with package declarations are fine); `Makefile` with `help build lint test fmt vet clean`; `.golangci.yml` (enable `errcheck govet staticcheck unused gosimple ineffassign misspell revive gocritic bodyclose contextcheck errorlint nilerr prealloc unconvert`); `.github/workflows/ci.yaml` with lint + unit jobs; `LICENSE` (Apache-2.0); `CONTRIBUTING.md`; skeleton `README.md`; `docs/` skeleton with empty `DISCOVERIES.md`, `DECISIONS.md`, `KNOWN_GAPS.md`; `hack/install-tools.sh`.
-
-**Exit criteria:**
-- [ ] `make lint test` passes on an empty codebase.
-- [ ] CI green on the first push.
-- [ ] `docs/DECISIONS.md` contains the ADRs for §8.1–§8.5 written up properly.
-
----
-
-### Phase 1, Core domain (target: 2 days)
-
-**Build:** `pkg/clock` (M1) → `pkg/event` (M2) → `pkg/codec` (M3, json only) → `pkg/seqtrack` (M5) → `pkg/projection` (M6, all three + reference) → `pkg/oracle` (M7). Plus `pkg/testgen` generators.
-
-This is the intellectual core and it is all pure, in-memory, and fast to test. Do not touch the network in this phase.
-
-**Exit criteria:**
-- [ ] All of M1, M2, M3(json), M5, M6, M7 complete per §9 including every listed edge case.
-- [ ] Property tests I1, I2, I3, I4, I5, I8, I9, I12 passing at 10,000 rapid checks.
-- [ ] `TestKeysetOwnership_LastMemberRemoval_YieldsDelete` passing.
-- [ ] Fuzz test for the json codec running clean for 60s.
-- [ ] Coverage ≥ 95% on `event`, `codec`, `seqtrack`, `projection`; ≥ 90% on `oracle`.
-- [ ] `BenchmarkOracleApply`, `BenchmarkProjectionApply`, `BenchmarkSeqTrackObserve` meeting §16.8 targets; baselines committed.
-- [ ] `-race` clean; goleak in every `TestMain`.
-- [ ] `make test` under 90 seconds.
-
-**Demo at end of phase:** a Go test that feeds 100,000 synthetic events through codec → seqtrack → projection → oracle and prints the resulting state and gap report.
-
----
-
-### Phase 2, Target and differ (target: 1.5 days)
-
-**Build:** `pkg/target` (M8: interface, `memory`, `recording`, `redis`) → `pkg/differ` (M9).
-
-**Exit criteria:**
-- [ ] `memory` and `recording` targets complete; `RecordingTarget` proven to catch an attempted write.
-- [ ] `redis` target complete with miniredis unit tests for every method.
-- [ ] Integration tests (tag `integration`) passing against real Redis 6 and 7 via testcontainers, including `SCAN` over 100k keys, `WRONGTYPE`, TTL, `INFO` parsing on both versions, and cluster mode.
-- [ ] `differ` complete with the full comparison table and property test I6.
-- [ ] The `SCAN`-cursor-reset-on-`FLUSHDB` behaviour investigated, handled, and written up in `DISCOVERIES.md`.
-- [ ] `BenchmarkGetMany500`, `BenchmarkScan1M` committed.
-
-**Demo:** `go test` that seeds miniredis, builds an oracle from events, diffs, and prints a `Report.Text()`.
-
----
-
-### Phase 3, Sweeper: the correctness mechanisms (target: 2.5 days)
-
-**Build:** `pkg/lag` (M11) → `pkg/sweeper` (M10: sweep, confirm, extras).
-
-This phase implements §5.3–§5.5 and is the highest-risk part of the project. Take the time. Write the tests first.
-
-**Exit criteria:**
-- [ ] Settlement window (static and adaptive), two-phase confirmation, version fencing, and the two-pass extras scan all implemented exactly as specified.
-- [ ] Drift resolution implemented and tested, a repaired key **must** leave `Confirmed()` and increment `drift_resolved_total`.
-- [ ] Property tests I7, I11 passing.
-- [ ] Every §15.3 internal-fault row (47–54) tested.
-- [ ] All sweeper tests use `FakeClock` with zero real sleeps.
-- [ ] `hack/verify-no-sleep.sh` in CI and passing.
-
-**Demo:** a fully in-process test that injects drift, confirms it, repairs it, and shows resolution, with zero wall-clock time elapsed.
-
----
-
-### Phase 4, Sources and the fault injector (target: 2 days)
-
-**Build:** `pkg/source` (M4: `memory`, `file`, `zmq`, `nats`) → `test/harness/faultinjector` (§13) → `test/harness/publisher` and `test/harness/materializer` → `test/harness/scenario` DSL.
-
-**Exit criteria:**
-- [ ] All four sources complete, including reconnect with gap signalling and the DNS re-resolution fix.
-- [ ] `zmq` tested against an in-process pure-Go PUB socket: delivery, multipart both conventions, topic filtering, reconnect, HWM drop under a slow consumer.
-- [ ] `TestFaults_Deterministic` passing for every fault.
-- [ ] Scenario DSL working and readable.
-- [ ] The NATS queue-group validation rejects with the specified message.
-
-**Demo:** `driftwatch inject --scenario drop-burst` printing observed drift to stdout.
-
----
-
-### Phase 5, Composition, metrics, CLI (target: 2 days)
-
-**Build:** `pkg/metrics` (M12) → `pkg/check` (M14) → `pkg/explain` (M13) → `internal/cli` (§11) → `cmd/driftwatch`.
-
-**Exit criteria:**
-- [ ] `TestCheck_EndToEnd_InProcess` passing, the flagship composition test.
-- [ ] Metric name test and cardinality test passing; `docs/METRICS.md` generated and CI-verified.
-- [ ] `explain` complete with every diagnosis rule individually tested and golden-file output tests.
-- [ ] All CLI commands working with golden-file tests and correct exit codes.
-- [ ] `driftwatch watch -f examples/local.yaml` works against a local `docker run redis`.
-- [ ] `driftwatch replay` fully hermetic (no network) and deterministic.
-
-**Demo:** the `explain` text output from §M13 reproduced against a real injected fault. **Capture it to `docs/evidence/explain-dropped-event.txt`.**
-
----
-
-### Phase 6, The full fault matrix (target: 2 days)
-
-**Build:** `test/faults/`, every row of §15.1 and §15.2 not already covered.
-
-**Exit criteria:**
-- [ ] All 60 matrix rows have a passing named test.
-- [ ] `hack/verify-fault-matrix.sh` in CI, passing.
-- [ ] `TestFaults_DriftwatchOwnLoss_ReportsSuspectNotConfirmed` passing, the honesty test.
-- [ ] Full fault suite runs in under 120s with no flakes across 20 consecutive runs (**actually run it 20 times and record the result in `docs/evidence/`**).
-
-**Demo:** `make test-fault` output showing 60 green tests, captured to evidence.
-
----
-
-### Phase 7, Kubernetes (target: 2.5 days)
-
-**Build:** `api/v1alpha1` (CRD types, deepcopy, webhooks) → `internal/controller` → `cmd/driftwatch-manager` → `config/` kustomize → `deploy/helm`.
-
-**Exit criteria:**
-- [ ] CRD applies cleanly; `kubectl explain driftcheck.spec` shows descriptions for every field (means every field has a doc comment).
-- [ ] Every §10.2 validation rule implemented with a webhook unit test.
-- [ ] envtest suite covering the full lifecycle, the rapid-update-storm single-runner test, and mid-bootstrap deletion.
-- [ ] RBAC generated, committed, and minimal.
-- [ ] Helm chart lints and templates for dev and prod values.
-- [ ] `make deploy` works against a Kind cluster.
-- [ ] goleak clean after manager teardown.
-
----
-
-### Phase 8, E2E, dashboard, demo (target: 2.5 days)
-
-**Build:** `test/e2e` (§14) → `deploy/grafana/driftwatch-dashboard.json` → `config/prometheus/rules.yaml` → `docs/OPERATIONS.md` runbook → `make demo`.
-
-**Exit criteria:**
-- [ ] All 8 e2e scenarios passing.
-- [ ] Diagnostics collector working, verified by deliberately breaking a test and confirming the artifact dump is complete and useful.
-- [ ] E2E suite under 8 minutes, passing 5 consecutive runs.
-- [ ] `make e2e` works **from a clean clone in a fresh container** with only Docker and Go. Verify this literally.
-- [ ] Grafana dashboard imports and every panel renders with data.
-- [ ] `make demo` + `make demo-inject-drift` works; screenshot captured showing drift rising and resolving.
-- [ ] Runbook section for every alert.
-- [ ] Interop test passing; findings in `DISCOVERIES.md`.
-- [ ] Soak test written and one full 60-minute run passing, with pprof artifacts in `docs/evidence/`.
-
----
-
-### Phase 9, Polish for presentation (target: 1.5 days)
-
-This phase is not optional. It is the phase that converts working code into a repository that gets someone selected.
-
-**Build:**
-- [ ] **README rewrite** per §21.1. Architecture diagram, the plain-English problem statement, real measured numbers, Key Discoveries, quick start that actually works, honest limitations.
-- [ ] **`docs/CORRECTNESS.md`**, §5 rewritten as prose for a human reader. This document is the single strongest artifact in the repo for demonstrating systems thinking. Take it seriously.
-- [ ] **`docs/DISCOVERIES.md`** finalized: at least 8 real findings, each with reproduction and evidence link.
-- [ ] **`docs/evidence/README.md`**, the index table mapping each evidence file to the claim it proves.
-- [ ] **Bounded-resource audit** (§19.2) performed and recorded.
-- [ ] **Benchmark results table** in the README with the machine spec stated.
-- [ ] A short **demo GIF or asciinema** cast of `make demo` → inject drift → `explain`.
-- [ ] `docs/ADDING_A_SOURCE.md` and `docs/ADDING_A_PROJECTION.md`, extension guides, which also prove the abstractions are real.
-- [ ] `docs/KNOWN_GAPS.md`, honest list: no sharded oracle (NG4), no Kafka source, no repair, no OTel tracing, e2e coverage limits.
-- [ ] Grep the entire repo for "production-grade", "enterprise", "institutional", "blazing", "robust" and delete every instance. Replace with a number or nothing.
-- [ ] Grep for `TODO`, `FIXME`, `XXX`, `panic(` in non-test code; resolve or justify each.
-- [ ] Tag `v0.1.0`; release workflow produces binaries, image, SBOM, signatures.
-
-**Total: approximately 19 working days.** Compressible to ~12 by trimming Phase 6 to the highest-value 30 matrix rows and Phase 7's Helm chart, but **do not trim Phases 1, 3, or 9.** Phase 1 is the foundation, Phase 3 is the substance, and Phase 9 is the entire reason the project exists as a signalling artifact.
-
----
-
-## 21. Documentation deliverables
-
-### 21.1 README structure (write it last, in this order)
-
-```markdown
-# driftwatch
-
-> One sentence: what it detects.
-
-[CI badge] [Go report] [license] [release]
-
-## The problem
-(4–6 sentences. The library analogy, compressed. Then one concrete
-software example. No jargon in the first paragraph.)
-
-## What driftwatch does
-(3 bullets: independent oracle, periodic comparison, per-key explanation.)
-
-## Quick start
-(A copy-pasteable block that works. `make demo` and what you'll see.
-Then the 8-line YAML for a real check.)
-
-## Example output
-(The `explain` text block. This is the single most persuasive thing
-in the README — put it high.)
-
-## How it avoids false positives
-(6–8 sentences summarizing §5: settlement window, two-phase confirm,
-version fencing, sequence-gap trust states. Link to docs/CORRECTNESS.md.
-This section is what a maintainer reads to decide whether the author
-actually thought about the problem.)
-
-## Architecture
-(The §6.1 diagram, then the 10-step data flow compressed to 10 lines.)
-
-## Metrics and dashboard
-(Table of the 8 headline metrics. Dashboard screenshot.)
-
-## Configuration
-(The DriftCheck spec, abbreviated, with a link to the full reference.)
-
-## Measured performance
-(Real numbers with the machine spec. No estimates.)
-
-## Key Discoveries
-(6–10 findings from DISCOVERIES.md, one paragraph each, each linking
-to its evidence file. THIS IS THE HIGHEST-VALUE SECTION IN THE README.)
-
-## Testing
-(The §16.1 table. Then: "N unit tests, M property tests at 10k checks
-each, 60 fault scenarios, 8 Kind-based e2e scenarios, 60-minute soak."
-Real numbers only.)
-
-## Limitations
-(Honest. From KNOWN_GAPS.md. A limitations section increases trust;
-its absence decreases it.)
-
-## Contributing / License
-```
-
-### 21.2 `docs/CORRECTNESS.md`
-
-Rewrite §5 as prose for a reader who has not read this PRD. Structure: the naive approach → why it fails (with a worked numeric example showing the false-positive rate) → each mechanism and what it defeats → what remains undetectable and why. End with the invariant table.
-
-This document is worth more than any single code file for the purpose of getting selected. A maintainer reading it learns in five minutes that the author reasons carefully about distributed state. Write it deliberately, not as a dump.
-
-### 21.3 `docs/DISCOVERIES.md`, format
-
-Maintain this from Phase 0 onward. One entry per finding, newest first:
-
-```markdown
-## D-007 — Redis returns an empty array for a set with no members, and deletes the key
-
-**Found:** Phase 2, while implementing the keysetOwnership projection.
-
-**What happened:** The projection emitted an upsert with an empty member set
-when the last member was removed. The target had no key at all, because Redis
-deletes a set key when its final member is removed via SREM. Every key that
-ever emptied produced a permanent false `missing_in_target`.
-
-**Why it matters:** This would have made driftwatch report drift on every
-key that legitimately emptied — the most common transition in a KV-cache
-ownership index. In a 1M-key workload the false-positive rate would have
-been high enough to make the tool unusable.
-
-**Fix:** `Value.Equal` treats an empty member set as equal to absent, and
-the projection emits `ActionDelete` rather than an empty upsert.
-
-**Evidence:** `docs/evidence/D-007-redis-empty-set.txt`
-
-**Regression test:** `pkg/projection: TestKeysetOwnership_LastMemberRemoval_YieldsDelete`
-```
-
-**Target: at least 8 real entries.** Candidates the implementation will almost certainly hit, record whichever actually occur, and do not invent ones that don't:
-
-- Redis empty-set deletion semantics (above).
-- ZMQ slow-joiner: a SUB socket connected after PUB starts misses early messages, with no error. Requires a synchronization handshake in tests.
-- ZMQ PUB drops silently at the HWM; the interaction with driftwatch's own buffer sizing.
-- Multipart vs single-frame ZMQ conventions both existing in the wild.
-- JSON numbers above 2^53 losing precision when decoded as `float64`, a sequence number silently corrupted.
-- Redis `SCAN` cursor semantics: keys may repeat; `FLUSHDB` resets the cursor and can cause an infinite loop.
-- `INFO` output differences between Redis 6 and 7 breaking a naive parser.
-- Discarding timed-out lag probes biasing the p99 estimate downward, shrinking W, causing false positives.
-- Kubernetes DNS re-resolution: caching the first resolved IP breaks reconnection after a pod reschedule.
-- Go's `time.Ticker` coalescing missed ticks, which changes fake-clock test expectations.
-- `MarkSuspect` on 1M keys taking seconds with a naive per-entry write; the generation-counter fix.
-- goleak catching a leaked goroutine in a specific dependency, and why the ignore is safe.
-
-### 21.4 `docs/evidence/` convention
-
-One file per claim, named `<id>-<slug>.<ext>`. `docs/evidence/README.md` is an index table:
-
-| File | Claim it proves | Produced by |
-|---|---|---|
-| `S2-soak-60min-zero-drift.txt` | Zero false positives over 60 min at 5k events/sec | `make soak` |
-| `S6-sweep-1m-keys.txt` | 1M-key sweep in under 10s | `BenchmarkFullSweep1M` |
-| `explain-dropped-event.txt` | `explain` identifies the exact missing seq | e2e E2 |
-| `fault-matrix-60-green.txt` | All 60 fault scenarios pass | `make test-fault` |
-| `fault-matrix-20-runs-no-flake.txt` | No flakes across 20 runs | `hack/repeat-tests.sh 20` |
-| `e2e-8-scenarios.txt` | Full Kind e2e suite green | `make e2e` |
-| `dashboard-drift-detected.png` | Dashboard shows drift rise and resolution | `make demo` |
-| `D-007-redis-empty-set.txt` | Redis empty-set behaviour | manual repro |
-| `interop-pyzmq-10k.txt` | Wire compatibility with libzmq | `make test-interop` |
-| `memory-1m-keys.txt` | Under 512 MiB at 1M keys | `BenchmarkOracleMemory1M` |
-| `pprof-soak-heap.pb.gz` | No heap growth over 60 min | `make soak` |
-| `coverage-summary.txt` | Coverage by package | `make test` |
-
-**Capture these as you go.** Reconstructing evidence at the end is painful and the output will be less convincing.
-
-### 21.5 Other required docs
-
-- `docs/ARCHITECTURE.md`, the diagram, component responsibilities, concurrency model, why the applier is single-threaded.
-- `docs/TESTING.md`, how to run each level, the bounded-resource checklist, how to add a fault scenario.
-- `docs/OPERATIONS.md`, a runbook section per alert: what it means, what to check first, likely causes, how to confirm.
-- `docs/ADDING_A_SOURCE.md`, `docs/ADDING_A_PROJECTION.md`, with a worked example each.
-- `docs/METRICS.md`, generated, CI-verified.
-- `docs/DECISIONS.md`, ADRs.
-- `docs/KNOWN_GAPS.md`, honest limitations.
-- `CONTRIBUTING.md`, how to build, test conventions, commit format, the "no `time.Sleep`" rule.
-
----
-
-## 22. Master definition of done
-
-The project is complete when every box is checked. Do not declare completion early.
-
-**Functionality**
-- [ ] All modules M1–M14 implemented per §9.
-- [ ] `DriftCheck` CRD with defaulting and validating webhooks; every §10.2 rule enforced.
-- [ ] Controller with leader election, finalizers, status patching, events.
-- [ ] All 6 CLI commands working with documented exit codes.
-- [ ] All 3 bootstrap modes, all 3 expiry policies, static and adaptive W.
-- [ ] Sources: memory, file, zmq, nats. Targets: memory, redis (standalone/sentinel/cluster). Codecs: json, msgpack, template. Projections: keysetOwnership, scalar, counter.
-
-**Correctness**
-- [ ] All 14 invariants (§5.8) have passing property tests.
-- [ ] All 60 fault matrix rows (§15) have passing named tests; `verify-fault-matrix.sh` green.
-- [ ] `TestFaults_DriftwatchOwnLoss_ReportsSuspectNotConfirmed` passing.
-- [ ] `TestCheck_EndToEnd_InProcess` passing.
-- [ ] Read-only enforced structurally (`RecordingTarget` + redis hook), with a test proving each.
-
-**Testing**
-- [ ] Coverage meets every §16.9 target; overall ≥ 88%.
-- [ ] `-race` clean across the entire suite.
-- [ ] goleak in every package's `TestMain`, no ignores for own code.
-- [ ] Zero `time.Sleep` outside `test/e2e` and `test/soak`; verified by script in CI.
-- [ ] Fuzz corpus committed; 60s fuzz clean in CI.
-- [ ] Integration tests pass against Redis 6 and 7.
-- [ ] Interop test passes against libzmq.
-- [ ] 8 e2e scenarios pass; suite under 8 minutes; 5 consecutive clean runs.
-- [ ] 60-minute soak passes all assertions.
-- [ ] Fault suite runs 20× with zero flakes; evidence captured.
-- [ ] All benchmarks meet §16.8 targets; baselines committed; benchstat gate in CI.
-
-**Operations**
-- [ ] Grafana dashboard imports; every panel renders.
-- [ ] PrometheusRule with 10 alerts, each with a runbook anchor.
-- [ ] `docs/OPERATIONS.md` runbook complete.
-- [ ] Helm chart lints and installs.
-- [ ] `make demo` works from a clean clone.
-- [ ] `make e2e` works from a clean clone in a fresh container.
-- [ ] Container: distroless, non-root, read-only rootfs, no shell.
-- [ ] Release workflow produces multi-arch binaries, image, SBOM, cosign signature.
-
-**Documentation**
-- [ ] README per §21.1, with real numbers and no superlatives.
-- [ ] `docs/CORRECTNESS.md` written as prose.
-- [ ] `docs/DISCOVERIES.md` with ≥ 8 real findings, each with evidence and a regression test.
-- [ ] `docs/evidence/` with ≥ 12 files and an index table.
-- [ ] `kubectl explain driftcheck.spec` shows descriptions for every field.
-- [ ] `docs/METRICS.md` generated and CI-verified.
-- [ ] `docs/KNOWN_GAPS.md` honest and specific.
-- [ ] Extension guides for sources and projections.
-- [ ] Demo GIF or asciinema cast.
-
-**Hygiene**
-- [ ] `golangci-lint` clean.
-- [ ] `govulncheck` and `trivy` clean at HIGH/CRITICAL.
-- [ ] No `TODO`/`FIXME`/`XXX` in non-test code.
-- [ ] No `panic()` in non-test code except documented programmer-error assertions.
-- [ ] Bounded-resource audit (§19.2) complete and recorded.
-- [ ] Conventional commits throughout; history is readable.
-- [ ] `v0.1.0` tagged.
+**There must be no unbounded collection anywhere in the codebase.** Every `make(map` and `append` in the codebase gets read once and confirmed bounded or provably short-lived. The audit is written up in [BOUNDED_RESOURCES.md](BOUNDED_RESOURCES.md).
 
 ---
 
@@ -3377,9 +2945,9 @@ The project is complete when every box is checked. Do not declare completion ear
 
 Read this before starting and again at the end of each phase.
 
-**A1, Skipping the settlement window and two-phase confirm "for now."** The tool will report thousands of false positives, and every subsequent decision will be made on the basis of noisy output. This is the failure mode that kills the project. Build §5 in Phase 3, before the fault matrix, before Kubernetes.
+**A1, Skipping the settlement window and two-phase confirm "for now."** The tool will report thousands of false positives, and every subsequent decision will be made on the basis of noisy output. This is the failure mode that kills the project. §5 comes before the fault matrix and before Kubernetes.
 
-**A2, Using `time.Sleep` in tests.** The suite becomes slow and flaky, then people stop running it, then it rots. Inject the clock from Phase 1. The `verify-no-sleep.sh` check exists to make this impossible to backslide on.
+**A2, Using `time.Sleep` in tests.** The suite becomes slow and flaky, then people stop running it, then it rots. The clock is injected everywhere instead, and `verify-no-sleep.sh` makes backsliding impossible.
 
 **A3, Labeling metrics with key names.** One `prometheus.Labels{"key": key}` turns driftwatch into a cardinality bomb that takes down the monitoring system it's supposed to inform. The cardinality test in §M12 exists specifically to catch this.
 
@@ -3393,7 +2961,7 @@ Read this before starting and again at the end of each phase.
 
 **A8, Building breadth instead of depth.** Adding Kafka, etcd, PostgreSQL, and a web UI makes the repo look like a survey. The value is in one deep, correct path. Resist. `KNOWN_GAPS.md` is where extensions go to be acknowledged without being built.
 
-**A9, Writing the README last, in a hurry.** The README is what gets read. Budget Phase 9 properly. A brilliant codebase behind a thin README gets skimmed and closed.
+**A9, Writing the README last, in a hurry.** The README is what gets read. A good codebase behind a thin README gets skimmed and closed.
 
 **A10, Superlatives instead of numbers.** "Production-grade, blazing-fast, enterprise-ready" reads as unearned to exactly the audience you're trying to reach. "1M-key sweep in 8.3s on a 4-core M1; zero false positives over a 60-minute 5k events/sec soak" reads as real. Always the second.
 
@@ -3404,52 +2972,6 @@ Read this before starting and again at the end of each phase.
 **A13, Testing implementation instead of behaviour.** Tests that assert internal call sequences break on every refactor and prove nothing. Assert on observable outputs: oracle state, report contents, metric values, exit codes.
 
 **A14, Letting e2e become the primary test level.** E2E is slow and its failures are hard to localize. Every behaviour that *can* be tested in-process with a fake clock *must* be. E2E exists only for integration and packaging.
-
----
-
-## 24. Mapping to the LFX application
-
-This section exists because the project has a specific purpose beyond being good software.
-
-### 24.1 Skill-to-artifact mapping
-
-The Volcano/Kthena "KVCache-aware scheduler E2E test suite" project lists: *Go, Kubernetes, Kind-based E2E testing, Redis, ZMQ, observability/metrics, and distributed-system debugging.* Every one maps to a concrete artifact:
-
-| Listed skill | Artifact in this repo |
-|---|---|
-| Go | ~15k lines of idiomatic Go; property tests; benchmarks with allocation gates |
-| Kubernetes | `DriftCheck` CRD, controller-runtime operator, webhooks, RBAC, Helm chart, envtest suite |
-| Kind-based E2E testing | `test/e2e/`, 8 scenarios, deterministic cleanup, diagnostic artifact collection |
-| Redis | `pkg/target/redis.go`, SCAN semantics, pipelining, cluster/sentinel, INFO parsing, eviction correlation |
-| ZMQ | `pkg/source/zmq.go`, pure-Go SUB, HWM behaviour, multipart conventions, libzmq interop test |
-| Observability / metrics | 40+ Prometheus metrics with a cardinality test, Grafana dashboard, 10 alerts, a runbook |
-| Distributed-system debugging | `explain` with 14 diagnosis rules; `docs/CORRECTNESS.md`; the 60-row fault matrix |
-
-The second project (*inPlace rolling update*: `go/kubernetes/markdown`) is covered by the operator work plus `docs/CORRECTNESS.md` as evidence of design-document writing, and separately by the PDB-blindness KEP discussed earlier.
-
-### 24.2 The sentence to use in the application
-
-Do not say "I built a mini kthena." Say:
-
-> I built driftwatch, a general-purpose divergence detector for pub/sub-materialized caches: an independent oracle folded from a ZeroMQ event stream, compared against Redis with a settlement window and two-phase confirmation to eliminate false positives from materializer lag. It includes a 60-scenario fault-injection matrix, property-based convergence tests, and an 8-scenario Kind e2e suite with diagnostic collection.
->
-> The KVCache-aware suite in issue #1328 is the same problem shape with vLLM block-ownership events. The reusable pieces the issue asks for, cache-state injection, observation, and assertion utilities, are exactly what I built as `test/harness/faultinjector` and the scenario DSL, and I'd bring that structure to `test/e2e/router/`.
-
-That is a contributor describing transferable work, not an applicant who read the issue and cloned it.
-
-### 24.3 Resume bullets
-
-Phrase with their vocabulary, and lead with the number:
-
-- *Built driftwatch (Go): detects silent divergence between ZeroMQ event streams and Redis-materialized indexes. Zero false positives across a 60-minute soak at 5,000 events/sec; 1M-key consistency sweep in under 10s.*
-- *Designed a settlement-window and two-phase-confirmation protocol that eliminates false positives caused by consumer lag; documented the correctness argument and the 14 invariants it rests on.*
-- *Wrote a 60-scenario fault-injection harness (event drop/reorder/duplicate/delay, publisher restart, Redis eviction and failover, network partition) plus property-based convergence tests over generated event orderings.*
-- *Shipped a Kubernetes operator (controller-runtime, CRD, validating webhook, least-privilege RBAC) and an 8-scenario Kind-based E2E suite with deterministic cleanup and automatic diagnostic artifact collection.*
-- *Instrumented 40+ Prometheus metrics with a cardinality-regression test, a Grafana dashboard, and 10 alerts each backed by a runbook section.*
-
-### 24.4 What still matters more than this project
-
-Stated plainly, because it would be dishonest to omit it: **2–3 merged PRs in `volcano-sh/kthena` outweigh this entire repository** in the selection decision. Build driftwatch in the background; spend the foreground time reading kthena's `test/e2e/router/` framework, fixing a flaky test, filling a doc gap, and asking one informed question on issue #1328. The project makes the resume credible. The PRs make the mentor recognize the name.
 
 ---
 
@@ -3503,22 +3025,3 @@ policy:
 ### 25.3 Glossary quick reference
 
 See §4 for full definitions. The five terms that matter most: **oracle** (driftwatch's independent expectation), **settlement window** (grace period for materializer lag), **two-phase confirmation** (re-read before reporting), **trust state** (whether driftwatch's own view is complete), **version fencing** (optimistic read guard against oracle mutation mid-comparison).
-
-### 25.4 Naming note
-
-If `driftwatch` is taken on pkg.go.dev or feels wrong, alternatives that keep the same framing: `skew`, `driftguard`, `reconcile-watch`, `oracled`, `statediff`. Pick one in Phase 0 and never change it, a rename mid-project scatters the git history and breaks every import path.
-
-### 25.5 First commands to run
-
-```bash
-mkdir driftwatch && cd driftwatch
-git init
-go mod init github.com/<you>/driftwatch
-# then Phase 0, §20
-```
-
----
-
-**End of PRD.**
-
-Implementation begins at Phase 0. Read §1 (working agreement), §5 (correctness), and §23 (anti-patterns) before writing any code.

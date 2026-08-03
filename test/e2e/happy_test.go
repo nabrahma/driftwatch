@@ -186,10 +186,10 @@ var _ = Describe("E1 HappyPath", Ordered, func() {
 		Expect(status.EventsDropped).To(BeZero(),
 			"driftwatch dropped %d events on an unbroken stream", status.EventsDropped)
 
-		// The deliberate-failure hook. §20 Phase 8 requires the diagnostics
-		// collector to be verified by breaking a test on purpose, and doing
-		// that by editing an assertion is how a broken assertion gets
-		// committed.
+		// The deliberate-failure hook. The diagnostics collector is only
+		// worth anything if it has been verified by breaking a test on
+		// purpose, and doing that by editing an assertion is how a broken
+		// assertion gets committed.
 		if breakOnPurpose() {
 			Expect(status.DivergentKeys).To(Equal(424242),
 				"DRIFTWATCH_E2E_BREAK is set: this failure is deliberate and "+

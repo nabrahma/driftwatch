@@ -48,9 +48,9 @@ kind of distinction a depth guard gets wrong.
 
 No crash reproducers, because there are no crashes. If the fuzzer ever finds
 one, the Go toolchain writes it into this directory automatically and it becomes
-a permanent regression case (PRD §16.2). A file appearing here that is not in
+a permanent regression case (§16.2). A file appearing here that is not in
 the table above means the fuzzer found something — read it before deleting it.
 
-The adversarial seeds from PRD §25.1 live in `pkg/codec/fuzz_test.go` as `f.Add`
+The adversarial seeds from §25.1 live in `pkg/codec/fuzz_test.go` as `f.Add`
 calls rather than as files here, so that a reader can see what they are and why
 without decoding the corpus format.

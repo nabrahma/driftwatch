@@ -1,5 +1,5 @@
 // Command e2eharness is the publisher and materializer the e2e suite runs in
-// the cluster (PRD §14.2).
+// the cluster (§14.2).
 //
 // It is a separate binary from driftwatch on purpose. §18 requires the release
 // image to be distroless with nothing in it but the two production binaries,

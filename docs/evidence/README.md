@@ -4,8 +4,8 @@ Captured output backing every claim made in the README and in
 [DISCOVERIES.md](../DISCOVERIES.md).
 
 One file per claim, named `<id>-<slug>.<ext>`. Nothing is reconstructed after the
-fact; output is captured when it is produced (PRD §21.4). If a claim in the README
-has no row here, the claim comes out.
+fact; output is captured when it is produced. If a claim in the README has no
+row here, the claim comes out.
 
 Every row below names the command that produced it, so a reader can re-run it
 rather than take the file's word for it.
@@ -49,7 +49,7 @@ captures below.
 
 ## Success criteria
 
-The numbered criteria from PRD §2.
+The numbered criteria from §2.
 
 | File | Claim it proves | Produced by |
 |---|---|---|
@@ -92,17 +92,17 @@ ring-buffer fill from an actual leak.
 | `interop-libzmq-both-directions.txt` | driftwatch's pure-Go ZMQ is wire-compatible with real libzmq, both directions | `make test-interop` |
 | `integration-redis-6-and-7.txt` | Every target case against real Redis 6 and 7, not miniredis | `make test-integration` |
 | `S-E2E-five-consecutive-clean-runs.txt` | Five consecutive clean `make e2e` runs on an unchanged tree, with the cache check | `make e2e` x5 |
-| `phase7-controller-suite.txt` | The controller suite against envtest | `make test-controller` |
-| `phase7-crd-validation.txt` | The CRD rejects the invalid specs it is supposed to reject | `make test-controller` |
-| `phase7-kubectl-explain.txt` | Every field's documentation reaches the CRD, so `kubectl explain` works | `make manifests` |
+| `controller-suite-envtest.txt` | The controller suite against envtest | `make test-controller` |
+| `crd-rejects-invalid-specs.txt` | The CRD rejects the invalid specs it is supposed to reject | `make test-controller` |
+| `kubectl-explain-every-field.txt` | Every field's documentation reaches the CRD, so `kubectl explain` works | `make manifests` |
 
 ## End to end
 
 | File | Claim it proves | Produced by |
 |---|---|---|
 | `explain-dropped-event.txt` | `driftwatch explain` names the event the materializer did not apply | `internal/cli` |
-| `phase5-redis-demo.txt` | `driftwatch watch -f examples/local.yaml` against a real Redis | `internal/cli` |
-| `phase7-live-check.txt` | A DriftCheck reconciled by the real manager, detecting real drift | `internal/controller` |
+| `cli-watch-against-real-redis.txt` | `driftwatch watch -f examples/local.yaml` against a real Redis | `internal/cli` |
+| `live-check-detecting-real-drift.txt` | A DriftCheck reconciled by the real manager, detecting real drift | `internal/controller` |
 | `demo-drift-detected-and-resolved.txt` | `make demo` detects 360 deleted keys in 7s and watches them heal | `make demo` |
 | `dashboard-drift-detected.png` | The dashboard mid-fault: 350 confirmed divergent keys at 100% coverage | `make demo` + `make demo-inject-drift` |
 

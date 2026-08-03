@@ -148,7 +148,7 @@ The whole matrix ran 20 consecutive times with zero flakes:
 
 ### Adding a row
 
-1. Add it to §15's table in the PRD with an ID and expected behaviour.
+1. Add it to §15's table in [DESIGN.md](DESIGN.md) with an ID and expected behaviour.
 2. Write `TestFaultNN_ShortDescription` in the matching file under
    `test/faults/`.
 3. Drive it through a real check with a fake clock, the harness in

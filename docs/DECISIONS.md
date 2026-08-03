@@ -1,7 +1,7 @@
 # Architecture Decision Records
 
-Every technology choice, every deviation from `docs/PRD.md`, and every decision
-taken while blocked (PRD §1.4) is recorded here. Newest last.
+Every technology choice, every deviation from `docs/DESIGN.md`, and every
+decision taken while blocked is recorded here. Newest last.
 
 Each record states the **context** that forced a choice, the **options
 considered** with their real trade-offs, the **decision**, and the
@@ -16,7 +16,7 @@ Status values: `Accepted`, `Superseded by ADR-NNNN`, `Reversed`.
 **Status:** Accepted
 **Date:** 2026-07-30
 **Phase:** 0
-**PRD reference:** §8.1
+**Design reference:** §8.1
 
 ### Context
 
@@ -127,7 +127,7 @@ it reports the target as correct when it has simply stopped looking.
 **Status:** Accepted
 **Date:** 2026-07-30
 **Phase:** 0
-**PRD reference:** §8.2
+**Design reference:** §8.2
 
 ### Context
 
@@ -189,12 +189,12 @@ Usage rules that follow from this and are binding on `pkg/target`:
   is the bottleneck in `BenchmarkFullSweep1M`. That is grounds for a new ADR, 
   with the measurement attached, and with client-side caching explicitly off.
 - `INFO` output differs between Redis 6 and 7. The parser must be tested against
-  both (§20 Phase 2 exit criteria) rather than written against whichever version
-  is on the development machine.
+  both, rather than written against whichever version is on the development
+  machine.
 - `SCAN` gives weak guarantees: keys may be returned more than once, and the
   cursor's meaning is not stable across a `FLUSHDB`. The differ must be
   idempotent over repeated keys, and the extras scan must tolerate a cursor
-  reset without looping forever. This is called out as a Phase 2 investigation
+  reset without looping forever. This is called out as an investigation
   item and belongs in `docs/DISCOVERIES.md` once characterized.
 
 ---
@@ -204,7 +204,7 @@ Usage rules that follow from this and are binding on `pkg/target`:
 **Status:** Accepted
 **Date:** 2026-07-30
 **Phase:** 0
-**PRD reference:** §8.3
+**Design reference:** §8.3
 
 ### Context
 
@@ -239,8 +239,8 @@ The interesting part is §5.
 (Option A). Test controllers with `envtest`; reserve Kind for full e2e only.**
 
 The layout it produces (`api/v1alpha1`, `internal/controller`, `config/`) is the
-layout in PRD §7, and it is the layout a Kubernetes reviewer can navigate
-without being told where anything is, which is an explicit goal (§1.5).
+layout in §7, and it is the layout a Kubernetes reviewer can navigate without
+being told where anything is, which is the point.
 
 The envtest/Kind split matters as much as the framework choice. envtest gives a
 real API server for reconciliation, watch and status semantics in seconds. Kind
@@ -251,7 +251,7 @@ actually applied, and the full ZMQ → materializer → Redis → driftwatch pat
 
 - Generated code (`zz_generated.deepcopy.go`) and generated manifests
   (`config/crd`, `config/rbac`) are committed, so `hack/verify-codegen.sh` must
-  fail CI when they drift from the markers. Until Phase 6 that script skips
+  fail CI when they drift from the markers. Until the matrix exists that script skips
   explicitly (ADR-0007) rather than passing silently.
 - controller-runtime pins compatible `k8s.io/apimachinery` and `k8s.io/client-go`
   versions. Kubernetes minor upgrades become a coordinated bump, not an
@@ -270,7 +270,7 @@ actually applied, and the full ZMQ → materializer → Redis → driftwatch pat
 **Status:** Accepted
 **Date:** 2026-07-30
 **Phase:** 0
-**PRD reference:** §8.4
+**Design reference:** §8.4
 
 ### Context
 
@@ -280,7 +280,7 @@ is what has to be vulnerability-scanned (§17.1 `build` job runs `trivy` and
 `govulncheck`), reviewed and upgraded. Go makes adding a dependency a one-line
 change, which is exactly why the decision to add one needs friction.
 
-There is a second reason specific to this project. PRD §23 A8 identifies
+There is a second reason specific to this project. §23 A8 identifies
 breadth-instead-of-depth as a failure mode: a repository that supports Kafka,
 etcd, PostgreSQL and a web UI reads as a survey rather than as one correct path.
 Most breadth arrives as a dependency. Making the list closed makes that failure
@@ -300,7 +300,7 @@ cost of a large repository diff on every bump, which obscures review.
 
 ### Decision
 
-**Option A.** The dependency list in PRD §8.4 is the complete allowed set. All
+**Option A.** The dependency list in §8.4 is the complete allowed set. All
 versions are pinned in `go.mod`. Adding anything outside that list requires a
 new ADR in this file stating what it does, what it was chosen over, and what it
 pulls in transitively.
@@ -336,7 +336,7 @@ The rejections in §8.4 are adopted as part of this decision:
 **Status:** Accepted
 **Date:** 2026-07-30
 **Phase:** 0
-**PRD reference:** §8.5
+**Design reference:** §8.5
 
 ### Context
 
@@ -403,13 +403,12 @@ does not need.
 
 **Status:** Accepted
 **Date:** 2026-07-30
-**Phase:** 0
-**PRD reference:** §25.4
+**Design reference:** §25.3
 
 ### Context
 
-PRD §25.4 requires the name to be fixed in Phase 0 and never changed, because a
-rename scatters git history and rewrites every import path. The GitHub
+The name has to be fixed before anything is published and never changed, because
+a rename scatters git history and rewrites every import path. The GitHub
 repository was created as `github.com/nabrahma/Driftwatch`, with a capital `D`.
 Go module paths are case-sensitive; the module proxy encodes uppercase letters
 as `!d`, so the module path and the repository path should agree exactly.
@@ -418,7 +417,7 @@ as `!d`, so the module path and the repository path should agree exactly.
 
 **Option A, module path `github.com/nabrahma/driftwatch`, repository renamed to
 lowercase.** Matches Go convention (module paths are lowercase by near-universal
-practice), matches how the PRD spells the name throughout, and produces import
+practice), matches how the design notes spell the name throughout, and produces import
 lines that read naturally. Requires renaming the GitHub repository; GitHub keeps
 a redirect from the old name.
 
@@ -426,8 +425,8 @@ a redirect from the old name.
 repository exactly as it exists today with no action required. Every import line
 in the project then carries a capital letter, and the proxy path is `!driftwatch`.
 
-**Option C, a different name from §25.4's alternatives (`skew`, `driftguard`,
-`statediff`).** Only worth considering if `driftwatch` were taken or wrong.
+**Option C, a different name altogether (`skew`, `driftguard`, `statediff`).**
+Only worth considering if `driftwatch` were taken or wrong.
 It is neither.
 
 ### Decision
@@ -436,104 +435,93 @@ It is neither.
 and the GitHub repository should be renamed to `driftwatch` to match.**
 
 The cost of the rename is one click plus a GitHub-maintained redirect, and it is
-at its lowest right now, Phase 0, before any published import path exists.
-The cost of Option B is a capital letter in every import statement in the
-repository, permanently, read by exactly the audience §1.5 is written for.
+at its lowest right now, before any published import path exists. The cost of
+Option B is a capital letter in every import statement in the repository,
+permanently.
 
 ### Consequences
 
 - The repository must be renamed on GitHub before the first push, or `go get`
   against the canonical lowercase path will not resolve. This is a prerequisite
-  for the Phase 0 exit criterion "CI green on the first push".
-- The name is now fixed. Per §25.4 it does not change again.
+  for CI to be green on the first push.
+- The name is now fixed. It does not change again.
 - Binaries are `driftwatch` and `driftwatch-manager`; the metric prefix is
   `driftwatch_`; the CRD group will follow the same spelling.
 
 ---
 
-## ADR-0007, Phase 0 scaffold: what is stubbed and what is deferred
+## ADR-0007, The scaffold: what gets created empty and what waits
 
 **Status:** Accepted
 **Date:** 2026-07-30
-**Phase:** 0
-**PRD reference:** §7, §17.1, §20 Phase 0
+**Design reference:** §7, §17.1
 
 ### Context
 
-PRD §7 specifies the repository layout exactly and requires deviations to be
-recorded here. Phase 0 creates that tree before there is code to put in it, so
-some files can be created honestly as empty package declarations and some
+§7 specifies the repository layout exactly and requires deviations to be
+recorded here. The tree gets created before there is code to put in it, and
+some files can be created honestly as empty package declarations while some
 cannot: a `Dockerfile` that does not build, a `.goreleaser.yaml` that does not
-release, or a Grafana dashboard JSON that renders nothing are not scaffolding,
-they are files that look finished and are not.
+release, or a Grafana dashboard JSON that renders nothing are not scaffolding.
+They are files that look finished and are not.
 
-The same tension exists in CI. §17.1's lint job runs four `hack/verify-*.sh`
-scripts, three of which check things that do not exist until Phases 4, 5 and 6.
-Phase 0's exit criteria require CI green on the first push.
+The same tension exists in CI. The lint job runs several `hack/verify-*.sh`
+scripts, and some of them check things that will not exist for a while. CI has
+to be green from the first push regardless.
 
 ### Options considered
 
 **Option A, create every file in §7 now, with placeholder content.** The tree
-matches the PRD exactly. It also means a `Dockerfile` that fails to build and a
-dashboard JSON that is a stub, both of which read as broken rather than as
-pending, and neither of which any check would catch.
+matches the design notes exactly. It also means a `Dockerfile` that fails to
+build and a dashboard JSON that is a stub, both of which read as broken rather
+than as pending, and neither of which any check would catch.
 
-**Option B, create only what Phase 0 builds; add the rest in the phase that
-fills it.** Nothing in the tree is misleading. The tree does not match §7 until
-Phase 8, and the difference has to be recorded, which is what this ADR is.
+**Option B, create only what has content; add the rest when it does.** Nothing
+in the tree is misleading. The tree does not match §7 for a while, and the
+difference has to be recorded, which is what this ADR is.
 
 **Option C, create every file, and add a CI check that fails on placeholders.**
-The check is itself work that Phase 0 does not need, and it exists only to guard
-against a problem Option B does not have.
+The check is itself work, and it exists only to guard against a problem Option B
+does not have.
 
 ### Decision
 
 **Option B, with the difference recorded here.**
 
-Created in Phase 0: the full directory tree; every Go file as a package
+Created up front: the full directory tree; every Go file as a package
 declaration with a package doc comment; `go.mod`; `Makefile`; `.golangci.yml`;
 `.github/workflows/ci.yaml`; `LICENSE`; `CONTRIBUTING.md`; a skeleton
 `README.md`; the `docs/` skeleton; `hack/install-tools.sh`,
-`hack/boilerplate.go.txt` and the four `hack/verify-*.sh` scripts.
+`hack/boilerplate.go.txt` and the first `hack/verify-*.sh` scripts.
 
-Deferred to the phase that gives them content, each with its directory already
-present:
+Everything else waits until it has something in it, with its directory already
+present: `Dockerfile`, `.goreleaser.yaml`, the generated `config/` contents, the
+Helm chart, the Grafana dashboard, the e2e manifests, the interop publisher, and
+the `e2e`, `soak` and `release` workflows.
 
-| Path | Lands in |
-|---|---|
-| `Dockerfile` | Phase 8 (packaging) |
-| `.goreleaser.yaml` | Phase 8 (release) |
-| `PROJECT` (kubebuilder metadata) | Phase 6, written by kubebuilder |
-| `config/{crd,rbac,manager,webhook,prometheus,samples}` contents | Phase 6, generated |
-| `deploy/helm/driftwatch/` | Phase 8 |
-| `deploy/grafana/driftwatch-dashboard.json` | Phase 8 |
-| `test/e2e/manifests/*.yaml` | Phase 7 |
-| `test/interop/publisher.py` | Phase 7 |
-| `.github/workflows/{e2e,soak,release}.yaml` | Phases 7, 8 |
-
-The three later-phase workflows are deliberately absent rather than stubbed:
-GitHub Actions runs any workflow file it finds, so a stub is a red X on the
-repository from the first push.
+Those three workflows are deliberately absent rather than stubbed: GitHub
+Actions runs any workflow file it finds, so a stub is a red X on the repository
+from the first push.
 
 **Skip-guarded verify scripts.** `hack/verify-codegen.sh`,
 `hack/verify-metrics-docs.sh` and `hack/verify-fault-matrix.sh` are wired into
-CI now, and each detects whether its subject exists yet. If not, it prints an
-explicit `SKIP... (Phase N)` line and exits 0. If the subject *does* exist and
-the check is still unimplemented, it **fails**. That inversion is the point: the
+CI from the start, and each detects whether its subject exists yet. If not, it
+prints an explicit skip line and exits 0. If the subject *does* exist and the
+check is still unimplemented, it **fails**. That inversion is the point: the
 scripts cannot rot into silent passes, because the moment the thing they guard
 appears, CI goes red until the check is written.
 
-`hack/verify-no-sleep.sh` is implemented for real now, not skip-guarded, because
-§23 A2 wants the `time.Sleep` prohibition enforced from the first test written
-in Phase 1, not retrofitted after the habit forms. It exempts `test/e2e` and
+`hack/verify-no-sleep.sh` is implemented for real rather than skip-guarded,
+because §23 A2 wants the `time.Sleep` prohibition enforced from the first test
+written, not retrofitted after the habit forms. It exempts `test/e2e` and
 `test/soak`, where elapsed time is the subject rather than an accident.
 
-**Coverage thresholds.** §17.1's unit job is specified to enforce the §16.9
+**Coverage thresholds.** The unit job is specified to enforce the §16.9
 per-package minimums. With no code, every package is at "no statements" and any
 threshold script would either fail on everything or be written to pass on
 nothing. The `unit` job runs the race-and-coverage command and uploads
-`cover.out`; threshold enforcement is added in Phase 1 together with the first
-covered package, where it can be tested against real numbers.
+`cover.out`; threshold enforcement arrives with the first covered package, where
+it can be tested against real numbers.
 
 **One addition to §7:** `hack/verify-fault-matrix.sh` is required by §17.1 but
 missing from §7's tree listing. It is created.
@@ -548,13 +536,13 @@ comment.
 
 ### Consequences
 
-- The repository tree does not match §7 exactly until Phase 8. This ADR is the
-  record of the difference, and the table above is the checklist for closing it.
+- The repository tree does not match §7 exactly for a while. This ADR is the
+  record of the difference, and the list above is the checklist for closing it.
 - CI is green from the first push while genuinely running everything that has
   something to check, and the skip lines in the log say plainly what is not yet
   covered rather than implying it is.
-- Each deferred file is now a phase exit criterion. If Phase 8 lands without a
-  `Dockerfile`, the table above is the thing that catches it.
+- Every deferred file has since landed. The checklist is what caught the ones
+  that would otherwise have been forgotten.
 
 ---
 
@@ -563,7 +551,7 @@ comment.
 **Status:** Accepted
 **Date:** 2026-07-31
 **Phase:** 5
-**PRD reference:** §9 M12, §12
+**Design reference:** §9 M12, §12
 
 ### Context
 
@@ -637,7 +625,7 @@ have it deliberately.
 **Status:** Accepted
 **Date:** 2026-07-31
 **Phase:** 5
-**PRD reference:** §9 M6, §9 M14
+**Design reference:** §9 M6, §9 M14
 
 ### Context
 
@@ -670,8 +658,8 @@ expander `Apply` uses.
 
 ### Decision
 
-**C.** The addition is recorded here because §9 M6 specifies the interface and
-§1.1.9 requires deviations to be written down.
+**C.** The addition is recorded here because §9 M6 specifies the interface, and
+a deviation from it that nobody wrote down is one nobody can review.
 
 ### Consequences
 
@@ -684,16 +672,16 @@ expander `Apply` uses.
 
 ---
 
-## ADR-0010, Phase 6 additions: a reorder buffer, an AwaitingSnapshot phase, and one extra test file
+## ADR-0010, A reorder buffer, an AwaitingSnapshot phase, and one extra test file
 
 **Status:** Accepted
 **Date:** 2026-08-01
 **Phase:** 6
-**PRD reference:** §7, §9 M6, §10.1, §15
+**Design reference:** §7, §9 M6, §10.1, §15
 
 ### Context
 
-Writing the sixty rows of §15 turned up four places where the PRD's own
+Writing the sixty rows of §15 turned up four places where the design's own
 statements were not consistent with each other or with the code. Each needed a
 decision rather than a test that quietly asserted less.
 
@@ -735,7 +723,7 @@ is all of them.
 is the more specific requirement and the more useful behaviour: a check that
 reported `Watching` while deliberately asserting nothing would read as a clean
 bill of health. `Status.AwaitingSnapshot` carries the same fact independently of
-the run loop, which is what the CRD condition in Phase 7 will map onto.
+the run loop, which is what the CRD condition maps onto.
 
 **3. §10.2's `Strict` rule now applies only when an `opMapping` is configured.**
 The rule's purpose is "you must be able to recognise a snapshot cycle". With no
@@ -757,7 +745,7 @@ would look. §7's file list predates the matrix having sixty rows.
 - An undecodable frame leaves a hole nothing can fill, so the events behind it
   wait out the window. Bounded, and the price of not treating every reordered
   pair as loss. Tested by §15 rows 15 and 16.
-- Phase 7's CRD status enum gains a value, and its conditions gain
+- The CRD status enum gains a value, and its conditions gain
   `AwaitingSnapshot` and `MultiWriterUnsafe`.
 - `hack/verify-fault-matrix.sh` enforces the sixty rows from outside the
   compiler and `TestFaultMatrix_Coverage` from inside, so neither a renamed test
@@ -765,16 +753,16 @@ would look. §7's file list predates the matrix having sixty rows.
 
 ---
 
-## ADR-0011, Phase 7: the webhook delegates, the schema defaults, and the operator opts in
+## ADR-0011, The webhook delegates, the schema defaults, and the operator opts in
 
 **Status:** Accepted
 **Date:** 2026-08-01
 **Phase:** 7
-**PRD reference:** §10.1, §10.2, §10.3, §18
+**Design reference:** §10.1, §10.2, §10.3, §18
 
 ### Context
 
-Four decisions in Phase 7 went against the obvious reading of the PRD, or
+Four decisions went against the obvious reading of the design notes, or
 against what kubebuilder's scaffolding would have produced. Each is written down
 because the alternative is defensible and somebody will otherwise change it back.
 
@@ -851,13 +839,13 @@ violating it is silent.
 **Status:** Accepted
 **Date:** 2026-08-02
 **Phase:** 9
-**PRD reference:** §8.5, §18
+**Design reference:** §8.5, §18
 **Supersedes:** the Go-version half of ADR-0005
 
 ### Context
 
-Wiring `govulncheck` into CI, a §22 box that had never been ticked, turned up
-four vulnerabilities reachable from code this project actually calls. One of
+Wiring `govulncheck` into CI, which had been on the list and never done, turned
+up four vulnerabilities reachable from code this project actually calls. One of
 them is reachable from the shipped manager binary:
 
 ```text

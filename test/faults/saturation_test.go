@@ -34,7 +34,7 @@ const (
 
 // §15.3 rows 55 to 60 — driftwatch's own lifecycle.
 //
-// Rows 47 to 54 live in internal_test.go, where Phase 3 put them. These six are
+// Rows 47 to 54 live in internal_test.go. These six are
 // about the process rather than the algorithm: what happens when a component
 // dies, when a projection rejects everything, when shutdown races startup, and
 // when fifty checks share one process.
@@ -198,7 +198,7 @@ policy:
 
 func TestFault59_ImmutableFieldsCannotChange(t *testing.T) {
 	// Row 59: the projection and target types are immutable. The webhook that
-	// enforces this in the cluster lands in Phase 7; the rule it calls lives in
+	// enforces this in the cluster is the webhook; the rule it calls lives in
 	// pkg/check, so it is testable here and the webhook is a thin adapter over
 	// it rather than a second implementation.
 	//

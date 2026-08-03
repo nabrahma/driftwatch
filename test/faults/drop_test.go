@@ -143,8 +143,8 @@ func TestFault02_SingleEventDroppedFromDriftwatch(t *testing.T) {
 
 // TestFaults_DriftwatchOwnLoss_ReportsSuspectNotConfirmed is the honesty test.
 //
-// It is named exactly as §20 Phase 6 requires because it is the claim the whole
-// project rests on: driftwatch never blames the store for events driftwatch
+// The name is spelled out in full because it is the claim the whole project
+// rests on: driftwatch never blames the store for events driftwatch
 // itself lost. Rows 2 and 4 both run here against the same events as their
 // materializer-side twins, so the difference in the verdict is attributable to
 // which subscription lost them and nothing else.

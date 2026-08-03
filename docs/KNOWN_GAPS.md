@@ -2,15 +2,15 @@
 
 Limitations driftwatch has, stated plainly.
 
-Two kinds of entry belong here (PRD §3.2, §21.5):
+Two kinds of entry belong here (§3.2):
 
 1. **Deliberate scope boundaries**, things not built on purpose, with the
    reasoning and a sketch of how they would be done.
 2. **Real blind spots**, cases driftwatch genuinely cannot see, and what an
    operator should watch instead.
 
-Every `t.Skip()` in the test suite must be linked to an entry here (§1.1.2).
-A skipped test with no entry is a lie.
+Every `t.Skip()` in the test suite must be linked to an entry here. A skipped
+test with no entry is a lie.
 
 An honest blind spot that is documented is acceptable. An undocumented one is
 not.
@@ -20,7 +20,7 @@ not.
 ## G-001, The oracle uses ~640 MiB per million keys, against a 512 MiB budget
 
 **Kind:** Real limitation. Success criterion S5 (§3.3) budgets 512 MiB for
-tracking 1,000,000 keys. The measured figure at the end of Phase 1 is
+tracking 1,000,000 keys. The measured figure is
 **640.5 MiB**, about 25% over.
 
 **Measured by:** `BenchmarkOracleMemory1M`, on a Ryzen 7 6800HS.
@@ -33,7 +33,7 @@ values at 24 bytes each and five string headers at 16 apiece account for most of
 it. The rest is the entry itself, the key string, and the Go map overhead for
 the shard map and the settlement index.
 
-Phase 1 already removed the two large avoidable costs, which is why the number
+The two large avoidable costs are already gone, which is why the number
 is 640 MiB and not 5.2 GiB: the ring now grows lazily instead of preallocating
 sixteen slots for keys that have only ever seen one event, and the resulting
 value is stored by reference rather than cloned into the ring on every apply.
@@ -48,7 +48,7 @@ exceeding its bound, so the failure mode is partial findings, not a crash.
 member, both timestamps and the verdict, but not the topic, the TTL pointer, the
 value bytes, or the raw payload. That is roughly 150 bytes per key back, which
 brings a single-event-per-key workload inside the budget. It is deferred rather
-than done now because `pkg/explain` (M13, Phase 5) defines which fields are
+than done now because `pkg/explain` (M13) defines which fields are
 actually needed, and compacting against a guess would mean doing it twice.
 
 Reducing the default `RingSize` would also work, and is the wrong fix: it buys
@@ -58,13 +58,13 @@ does not help the workload measured here, where each key sees a single event.
 **Not a gap:** the bound itself holds. Invariant I8 is proven by
 `TestProp_MemoryBounded`, and the oracle never exceeds `MaxTrackedKeys`.
 
-### Update, Phase 8, the 640 MiB figure was measured before the rings filled
+### Update: the 640 MiB figure was measured before the rings filled
 
 The benchmark above writes one event per key, so every history ring holds a
 single entry. That is the best case, and the sentence "it does not help the
 workload measured here, where each key sees a single event" was the clue.
 
-The Phase 8 soak measured the other end. 500,000 keys at 5,000 events/sec, real
+The soak measured the other end. 500,000 keys at 5,000 events/sec, real
 Redis, `ringSize: 16`, `retainRaw: false`:
 
 ```text
@@ -91,7 +91,7 @@ extrapolation from six measurements and not itself measured.
 
 The remedy is the one already named above, a compacted history record instead
 of a full `Event`, and it is now worth considerably more than the 150 bytes per
-key estimated in Phase 1, because it applies to every ring slot rather than to
+key estimated earlier, because it applies to every ring slot rather than to
 one. `pkg/explain` has since defined which fields are actually needed, so the
 work is no longer blocked on a guess.
 
@@ -110,7 +110,7 @@ See `docs/DISCOVERIES.md` D-022. Evidence:
 
 **Kind:** Real blind spot, inherent rather than unimplemented.
 
-The reorder buffer added in Phase 6 (see D-014) restores sequence order within a
+The reorder buffer (see D-014) restores sequence order within a
 bounded window, so an adjacent pair delivered out of order folds into the same
 oracle state a correctly-ordered stream would. It works by knowing which
 sequence number it expects next.
@@ -143,7 +143,7 @@ limitation is in the test rather than hidden by it.
 
 ---
 
-## G-003, The e2e suite meets §22, at nine minutes against an eight-minute budget
+## G-003, The e2e suite is stable, at nine minutes against an eight-minute budget
 
 **Status at the v0.1.0 cut:** `make e2e` passes, five consecutive times, on an
 unchanged tree.
@@ -160,7 +160,7 @@ Full capture, including the cache check that makes it evidence rather than five
 identical assertions:
 [`S-E2E-five-consecutive-clean-runs.txt`](evidence/S-E2E-five-consecutive-clean-runs.txt).
 
-| §22 criterion | State |
+| What was asked for | State |
 |---|---|
 | 8 scenarios pass | Met. All eight, all 34 specs |
 | 5 consecutive clean runs | Met |

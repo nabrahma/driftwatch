@@ -1,4 +1,4 @@
-# PRD §17.4. On a v* tag: multi-arch binaries, checksums, SBOMs, a multi-arch
+# §17.4. On a v* tag: multi-arch binaries, checksums, SBOMs, a multi-arch
 # image on GHCR, cosign signatures for all of it, and the Helm chart published
 # as an OCI artifact.
 #

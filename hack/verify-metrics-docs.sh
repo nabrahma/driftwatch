@@ -10,7 +10,7 @@
 #   hack/verify-metrics-docs.sh            # check, exit 1 on drift
 #   hack/verify-metrics-docs.sh --write    # regenerate the file
 #
-# See docs/DECISIONS.md ADR-0007 and PRD §17.1.
+# See docs/DECISIONS.md ADR-0007 and §17.1.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

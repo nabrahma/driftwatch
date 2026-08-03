@@ -46,7 +46,7 @@ type Config struct {
 	Seed int64
 
 	// OnWindowChange is called whenever W moves. §9 M11 requires every change
-	// to be visible; the logger lands in Phase 5, so this is the seam.
+	// to be visible, and this is the seam a logger hooks into.
 	OnWindowChange func(old, next time.Duration, s Stats)
 }
 

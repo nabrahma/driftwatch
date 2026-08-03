@@ -15,8 +15,8 @@ import (
 )
 
 // These run against a real in-process pure-Go PUB socket over TCP on loopback,
-// which is what §20 Phase 4 asks for: a real ZMTP handshake and a real socket,
-// with only the network hop shortened.
+// so there is a real ZMTP handshake and a real socket, with only the network
+// hop shortened.
 
 // pubRig is a PUB socket bound to a loopback port.
 type pubRig struct {

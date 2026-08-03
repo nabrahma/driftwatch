@@ -2,10 +2,10 @@
 
 | Document | What it covers |
 |---|---|
-| [PRD.md](PRD.md) | The full technical product requirements. The authority for every decision below. |
+| [DESIGN.md](DESIGN.md) | The reasoning behind the implementation. Code comments cite its sections by number. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Components, data flow, and the concurrency model. |
 | [CORRECTNESS.md](CORRECTNESS.md) | Why naive diffing produces false positives, and the six mechanisms that fix it. |
-| [DECISIONS.md](DECISIONS.md) | ADR log. Every technology choice and every deviation from the PRD. |
+| [DECISIONS.md](DECISIONS.md) | ADR log. Every technology choice, and every deviation from the design notes. |
 | [DISCOVERIES.md](DISCOVERIES.md) | Things that did not behave as expected, with evidence. |
 | [KNOWN_GAPS.md](KNOWN_GAPS.md) | Limitations, stated plainly. |
 | [TESTING.md](TESTING.md) | How to run each test level and how to add a fault scenario. |

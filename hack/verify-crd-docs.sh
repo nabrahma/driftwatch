@@ -5,8 +5,8 @@
 # `kubectl explain driftcheck.spec.policy.settlementWindow` renders the schema's
 # description and nothing else. A field with no description is one an operator
 # has to read the Go source to configure, which is not a documented API — and
-# §20 Phase 7 makes descriptions on every field an exit criterion. Enforcing it
-# here is what stops the next field added from quietly arriving undocumented.
+# a description on every field is a release gate. Enforcing it here is what
+# stops the next field added from quietly arriving undocumented.
 #
 # The second half catches the other failure: manifests committed from an older
 # version of the types, so `kubectl apply -f config/crd/` installs a schema that

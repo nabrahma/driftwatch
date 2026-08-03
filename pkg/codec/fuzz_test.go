@@ -18,7 +18,7 @@ import (
 // is misbehaving.
 //
 // Any crash this finds is committed to testdata/fuzz/ by the Go toolchain and
-// becomes a permanent regression case (PRD §16.2).
+// becomes a permanent regression case (§16.2).
 func FuzzDecodeJSON(f *testing.F) {
 	for _, seed := range fuzzSeeds(f) {
 		f.Add([]byte(seed))
@@ -56,7 +56,7 @@ func FuzzDecodeJSON(f *testing.F) {
 	})
 }
 
-// fuzzSeeds returns the adversarial corpus from PRD §25.1 plus the golden
+// fuzzSeeds returns the adversarial corpus from §25.1 plus the golden
 // payloads, so the fuzzer starts from inputs that are already interesting
 // rather than discovering JSON from scratch.
 func fuzzSeeds(f *testing.F) []string {

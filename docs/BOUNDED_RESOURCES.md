@@ -1,6 +1,6 @@
 # Bounded-resource audit
 
-PRD §19.2 requires that every collection in driftwatch has an explicit cap, a
+§19.2 requires that every collection in driftwatch has an explicit cap, a
 metric, and a test proving the cap holds, and states the rule plainly: **there
 must be no unbounded collection anywhere in the codebase.**
 
@@ -10,7 +10,7 @@ This document is the audit. It was performed by reading every `make(map`,
 **Result: no unbounded collection found.** Every long-lived collection is
 bounded by a configured cap; every other allocation is provably short-lived.
 
-Audited at the Phase 9 commit. Reproduce the inventory with:
+Reproduce the inventory with:
 
 ```sh
 grep -rn 'make(map\|make(chan\|make(\[\]\|append(' --include='*.go' \

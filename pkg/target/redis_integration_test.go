@@ -3,7 +3,7 @@
 // Package target's integration tests run against real Redis servers in Docker.
 //
 // They exist because miniredis is a reimplementation, and every interesting
-// finding in Phase 2 was a place where a real server and the fake disagreed:
+// early finding here was a place where a real server and the fake disagreed:
 // which INFO forms are accepted, what a SCAN does when the keyspace is
 // destroyed underneath it, which commands the client sends on connect. A suite
 // that only ran against the fake would have shipped all three bugs.
@@ -249,7 +249,7 @@ func TestRedisIntegration_ScanOver100kKeys(t *testing.T) {
 // TestRedisIntegration_ScanSurvivesAFlushMidIteration is the D-006 regression
 // test.
 //
-// PRD M8 predicts an infinite loop here. It does not happen on either version:
+// §9 M8 predicts an infinite loop here. It does not happen on either version:
 // the scan terminates early and reports success, having seen a fraction of the
 // keyspace. This pins the behavior that actually occurs, so that if a future
 // Redis does start looping the assertion changes rather than the tool hanging.

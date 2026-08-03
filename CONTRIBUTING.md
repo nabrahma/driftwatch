@@ -28,7 +28,7 @@ export CC=x86_64-w64-mingw32-gcc
 
 ## The working agreement
 
-These are not style preferences. They come from PRD §1 and §23, and each one
+These are not style preferences. They come from §1 and §23, and each one
 exists because the alternative has a specific failure mode.
 
 **Test first.** The test file is written before the implementation file. A
@@ -73,13 +73,13 @@ measured number instead, or write nothing.
 
 ## Dependencies
 
-The allowed dependency list is closed (PRD §8.4, ADR-0004). Adding anything
+The allowed dependency list is closed (§8.4, ADR-0004). Adding anything
 outside it requires a new ADR in `docs/DECISIONS.md` stating what it does, what
 it was chosen over, and what it pulls in transitively.
 
-## Deviating from the PRD
+## Deviating from the design notes
 
-If the PRD turns out to be wrong, do not silently work around it. Write the
+If the design notes turn out to be wrong, do not silently work around them. Write the
 problem into `docs/DECISIONS.md` as a new ADR, state the two or three options
 with their trade-offs, pick the one that preserves testability, and proceed.
 
@@ -112,5 +112,5 @@ make test
 ```
 
 `make lint` runs `golangci-lint` with the config in `.golangci.yml` and checks
-formatting with `gofumpt`. The enabled linter set is fixed by the PRD; changing
+formatting with `gofumpt`. The enabled linter set is deliberate; changing
 it requires an ADR.

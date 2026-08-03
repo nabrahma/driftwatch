@@ -12,7 +12,7 @@ import (
 // small set of publishers, which is what a healthy system produces almost all
 // of the time.
 //
-// PRD §16.8 targets more than 5M ops/sec/core with zero allocations. Zero
+// §16.8 targets more than 5M ops/sec/core with zero allocations. Zero
 // allocations matters more than the throughput number: Observe runs once per
 // event on the single applier goroutine, so any allocation here becomes garbage
 // collector pressure proportional to the entire event rate.

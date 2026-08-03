@@ -24,8 +24,8 @@ import (
 //
 // They exist for two claims that a direct call cannot make: that the wiring in
 // SetupWithManager actually delivers events, and that a manager which has run
-// checks and then stopped leaves nothing behind. The second is §20 Phase 7's
-// goleak criterion, and it matters more than a leak check usually does: every
+// checks and then stopped leaves nothing behind. The second matters more than
+// a leak check usually does: every
 // runner owns a goroutine, a target connection pool and a source subscription,
 // so a manager that leaked one per check would hold sockets open against a
 // store it is no longer auditing.

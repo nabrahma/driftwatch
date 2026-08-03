@@ -2,7 +2,7 @@
 //
 // Nothing else in driftwatch calls time.Now, time.NewTimer or time.NewTicker
 // directly. Every elapsed-time decision goes through a Clock, so tests can
-// control time exactly rather than sleeping and hoping (PRD §1.1.4, §16.4).
+// control time exactly rather than sleeping and hoping (§16.4).
 //
 // Fake is the reason this package exists. Its Advance fires due timers and
 // tickers synchronously before returning, and BlockUntil lets a test wait until

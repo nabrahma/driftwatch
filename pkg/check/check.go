@@ -1909,6 +1909,19 @@ func (c *Check) steadyPhase() (phase Phase, message string) {
 	//
 	// Degraded rather than Failed, and not sticky: this clears by itself the
 	// moment a frame arrives.
+	// A source that has *failed* outranks one that is merely not connected, and
+	// the ordering is load-bearing rather than tidy. Both report Degraded, so a
+	// caller waiting for Degraded and then reading the message could see either
+	// — and only one of them names the endpoint that could not be opened. A
+	// check pointed at a file that does not exist would say "the source is not
+	// currently subscribed", which is true, useless, and indistinguishable from
+	// a network blip. The specific diagnosis wins whenever there is one.
+	if c.sourceFailed.Load() {
+		c.mu.RLock()
+		defer c.mu.RUnlock()
+		return PhaseDegraded, c.sourceFailure
+	}
+
 	if !c.sourceConnected() {
 		return PhaseDegraded,
 			"the source is not currently subscribed; no events are arriving, so " +

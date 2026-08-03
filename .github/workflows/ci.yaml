@@ -137,7 +137,7 @@ jobs:
 
   # The fault matrix is the specification of correctness under failure, and it
   # is only worth having if its answers are the same every time. Running it
-  # apart from the unit suite keeps the timing visible: §20 Phase 6 budgets 120
+  # apart from the unit suite keeps the timing visible: the budget is 120
   # seconds for all sixty rows.
   faults:
     runs-on: ubuntu-latest

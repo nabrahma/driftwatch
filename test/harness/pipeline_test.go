@@ -30,7 +30,8 @@ func TestMain(m *testing.M) {
 	)
 }
 
-// TestPipeline_100kEventsEndToEnd is the Phase 1 demo from PRD §20.
+// TestPipeline_100kEventsEndToEnd is the first end-to-end demonstration of the
+// ingest path.
 //
 // It wires the four domain packages together the way the real ingest path does
 // — codec, then sequence tracking, then projection, then oracle — and runs a
@@ -273,7 +274,7 @@ type demoResult struct {
 
 func renderDemo(r *demoResult) string {
 	out := "\n" +
-		"driftwatch Phase 1 pipeline: codec -> seqtrack -> projection -> oracle\n" +
+		"driftwatch ingest pipeline: codec -> seqtrack -> projection -> oracle\n" +
 		"=====================================================================\n\n"
 
 	out += "ingest\n"

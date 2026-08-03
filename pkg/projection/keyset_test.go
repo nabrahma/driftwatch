@@ -49,7 +49,7 @@ func removeEvent(key, member string) *event.Event {
 
 // TestKeysetOwnership_LastMemberRemoval_YieldsDelete is the single most likely
 // bug in the project, written before the implementation and named explicitly by
-// PRD §9 M6.
+// §9 M6.
 //
 // Redis deletes a set key when its final member is removed via SREM. A
 // projection that emits an upsert with an empty member set instead of a delete

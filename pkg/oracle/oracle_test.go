@@ -325,7 +325,7 @@ func TestOracle_SetSettlementWindow(t *testing.T) {
 	})
 
 	t.Run("a zero window settles everything the instant after its event", func(t *testing.T) {
-		// PRD §5.3 defines settled as t - lastEventAt > W, strictly. With W=0
+		// §5.3 defines settled as t - lastEventAt > W, strictly. With W=0
 		// that makes a key settled at any time after its event but not at the
 		// same instant, which is the behavior tests want when they advance the
 		// fake clock by any amount at all.

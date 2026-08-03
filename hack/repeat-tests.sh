@@ -4,8 +4,8 @@
 # A test that fails once in fifty runs is worse than no test: it trains everyone
 # who sees it to re-run CI rather than to read the failure, and by the time it
 # matters nobody believes it. The fault matrix in particular is only worth
-# having if its answers are the same every time, so §20 Phase 6 requires twenty
-# consecutive clean runs and requires the result to be recorded rather than
+# having if its answers are the same every time, so it has to survive twenty
+# consecutive clean runs and the result has to be recorded rather than
 # claimed.
 #
 # Usage:

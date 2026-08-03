@@ -16,7 +16,7 @@ import (
 )
 
 // BenchmarkOracleApply measures the single applier's hot path.
-// PRD §16.8 targets more than 500k ops/sec/core.
+// §16.8 targets more than 500k ops/sec/core.
 func BenchmarkOracleApply(b *testing.B) {
 	o := oracle.New(oracle.Config{Clock: clock.Fake(epoch)})
 
@@ -43,7 +43,7 @@ func BenchmarkOracleApply(b *testing.B) {
 }
 
 // BenchmarkOracleGet measures the concurrent read path.
-// PRD §16.8 targets more than 2M ops/sec/core.
+// §16.8 targets more than 2M ops/sec/core.
 func BenchmarkOracleGet(b *testing.B) {
 	o := oracle.New(oracle.Config{Clock: clock.Fake(epoch)})
 
@@ -120,7 +120,7 @@ func seedMillion(b *testing.B, cfg oracle.Config) *oracle.Oracle {
 }
 
 // BenchmarkSettledKeys1M measures iterating a million settled keys.
-// PRD §16.8 targets under 50ms. A naive full scan of every entry every sweep is
+// §16.8 targets under 50ms. A naive full scan of every entry every sweep is
 // the performance bug this benchmark exists to catch.
 func BenchmarkSettledKeys1M(b *testing.B) {
 	o := seedMillion(b, oracle.Config{SettlementWindow: time.Second})
@@ -147,7 +147,7 @@ func BenchmarkSettledKeys1M(b *testing.B) {
 }
 
 // BenchmarkMarkSuspectAll1M is the benchmark the generation-counter design
-// exists for. PRD §16.8 targets under 1ms at a million keys.
+// exists for. §16.8 targets under 1ms at a million keys.
 //
 // The naive implementation writes every entry under each shard's write lock,
 // which at a million keys takes seconds — and it would take them at exactly the
@@ -165,7 +165,7 @@ func BenchmarkMarkSuspectAll1M(b *testing.B) {
 }
 
 // BenchmarkOracleMemory1M reports the resident cost of tracking a million keys.
-// PRD §16.8 and success criterion S5 budget 512 MiB.
+// §16.8 and success criterion S5 budget 512 MiB.
 func BenchmarkOracleMemory1M(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		runtime.GC()

@@ -20,8 +20,8 @@ import (
 	"github.com/nabrahma/driftwatch/pkg/target"
 )
 
-// TestSweep_OracleAgainstRedis is the Phase 2 demo from PRD §20: seed a Redis,
-// build an oracle from events, diff the two, and print the report.
+// TestSweep_OracleAgainstRedis seeds a Redis, builds an oracle from events,
+// diffs the two, and prints the report.
 //
 // It is the first point in the project where the whole idea is visible. Events
 // go in one side, a real store is read from the other, and what comes out is a
@@ -132,7 +132,7 @@ func TestSweep_OracleAgainstRedis(t *testing.T) {
 
 	// Target to oracle, to find keys the oracle never expected. §5.5 requires
 	// the sweeper to treat these conservatively; here the demo simply reports
-	// them, which is what the Phase 3 sweeper will wrap in a re-read.
+	// them, which is what the sweeper wraps in a re-read.
 	it := rec.Scan(ctx, "*", 100)
 	for it.Next(ctx) {
 		for _, key := range it.Keys() {

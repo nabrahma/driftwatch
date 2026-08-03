@@ -1,6 +1,6 @@
 //go:build interop
 
-// Package interop proves wire compatibility with real libzmq (PRD §16.6).
+// Package interop proves wire compatibility with real libzmq (§16.6).
 //
 // driftwatch subscribes with github.com/go-zeromq/zmq4, a pure-Go ZMTP
 // implementation, rather than a cgo binding to libzmq. ADR-0001 records why:

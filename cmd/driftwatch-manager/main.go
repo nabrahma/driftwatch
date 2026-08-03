@@ -1,8 +1,8 @@
 // Command driftwatch-manager is the Kubernetes operator entrypoint (§10.3).
 //
 // It holds the real clock, the process-wide metric registry and the manager,
-// and nothing else. §1.1.4 forbids reading the wall clock anywhere but main and
-// the clock implementation, so this is where the real one is created and
+// and nothing else. Nothing outside main and the clock implementation is
+// allowed to read the wall clock, so this is where the real one is created and
 // injected; everything below it is testable against a fake.
 package main
 

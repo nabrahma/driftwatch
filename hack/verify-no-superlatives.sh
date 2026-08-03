@@ -17,9 +17,9 @@ cd "$(dirname "$0")/.."
 # instead.
 WORDS='production-grade|enterprise|institutional|blazing|robust|seamless|cutting-edge|world-class|battle-tested|bulletproof'
 
-# docs/PRD.md is the specification this project was built from and is quoted
+# docs/DESIGN.md is the specification this project was built from and is quoted
 # rather than authored; this script itself necessarily contains the list.
-EXCLUDE='docs/PRD\.md|hack/verify-no-superlatives\.sh'
+EXCLUDE='docs/DESIGN\.md|hack/verify-no-superlatives\.sh'
 
 hits=$(
   grep -rinE "$WORDS" \

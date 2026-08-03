@@ -22,7 +22,7 @@ import (
 // Category names the kind of disagreement a Finding records.
 type Category uint8
 
-// The categories, in the order PRD §9 M9 lists them.
+// The categories, in the order §9 M9 lists them.
 const (
 	// CatMissingInTarget means the oracle expects a value the target does not
 	// have.

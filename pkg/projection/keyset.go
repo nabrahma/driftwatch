@@ -23,7 +23,7 @@ const defaultMaxMembersPerKey = 100_000
 // projection emits ActionDelete rather than an upsert with an empty set.
 // Getting this wrong would make every key that ever empties a permanent false
 // missing_in_target, and emptying is the most common transition this index
-// sees. PRD §9 M6 calls it the single most likely bug in the project, which is
+// sees. §9 M6 calls it the single most likely bug in the project, which is
 // why TestKeysetOwnership_LastMemberRemoval_YieldsDelete was written first.
 type keysetOwnership struct {
 	keyTmpl    *expander
